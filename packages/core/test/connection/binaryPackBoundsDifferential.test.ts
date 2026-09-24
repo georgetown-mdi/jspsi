@@ -25,7 +25,7 @@ import type { Packable, Unpackable } from "peerjs-js-binarypack";
 //
 // What this suite holds is the scan's reading of the wire against the real
 // unpacker's: that the two agree on every marker's payload width and child count,
-// that no frame psilink sends is refused, and that the two shapes the rules exist
+// that no frame Alcove sends is refused, and that the two shapes the rules exist
 // for are the shapes the real unpacker really amplifies. What an admitted frame
 // RETAINS is measured, not modelled, in binaryPackRetention.test.ts.
 
@@ -782,7 +782,7 @@ describe("scanFrameStructure on a frame of bin/raw values", () => {
   });
 });
 
-/** Every top-level value psilink hands a PeerJS data connection's `send()`, which is
+/** Every top-level value Alcove hands a PeerJS data connection's `send()`, which is
  * what `pack` puts on the WebRTC wire: the kex handshake frames, the protocol-setup
  * exchange, the PSI engine's binary frames, the association/iteration tables, the
  * payload and receipt messages, and the CLI leg's AEAD envelope. Shapes taken from
@@ -878,7 +878,7 @@ describe("the map-key rule against the real packer", () => {
   // than asserted in prose: the scan itself is the detector, since a non-string key
   // anywhere in a frame refuses it.
 
-  test("admits every value psilink sends on the WebRTC data channel", async () => {
+  test("admits every value Alcove sends on the WebRTC data channel", async () => {
     for (const { label, value } of webrtcSendSiteValues()) {
       const frame = await packBytes(value);
       expect(

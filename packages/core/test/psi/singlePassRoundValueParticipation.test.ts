@@ -24,13 +24,13 @@ import {
 //
 // Driven only under `{localKeepsDuplicates: false, partnerKeepsDuplicates:
 // true}`, the pair that makes the control answer no: under `{true, true}` both
-// sides keep their duplicates, which psiLinkManyToMany.test.ts and
+// sides keep their duplicates, which linkManyToMany.test.ts and
 // strategyDifferentialVectors.test.ts hold instead. A row holding
 // one value twice sits in the corpus defensively, not as a reachable shape
 // (a partner's ragged cell is refused unless its indices strictly ascend,
 // singlePassFanOut.test.ts). The other half -- that the resolved table
 // matches the elided assumption end to end -- is pinned by
-// psiLinkManyToOne.test.ts and singlePassFanOut.test.ts's
+// linkManyToOne.test.ts and singlePassFanOut.test.ts's
 // deduplicating-sender cases.
 
 // One round's cells for one party: each row's candidate value indices, in the order

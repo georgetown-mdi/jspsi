@@ -18,7 +18,7 @@ import {
   MAX_PAYLOAD_ENTRIES,
   safeParseLinkageTerms,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   acceptorColumnsEditorState,
@@ -40,7 +40,7 @@ import { applyDisclosure } from "@psi/metadataEditing";
 
 import { createAppMount } from "./renderApp";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 
 // The confirm-columns step under an invitation whose declared payload set for this
 // party is NON-EMPTY and disagrees with the operator's marks. The empty-declaration

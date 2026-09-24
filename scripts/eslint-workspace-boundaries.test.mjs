@@ -74,7 +74,7 @@ const WEB_OUTSIDE_SRC_FIRST_PARSE = resolve(
 
 // The reaches each guarded tree must refuse. The bare package names are live
 // specifiers, not hypotheticals: npm workspaces symlinks apps/cli and apps/web
-// into the root node_modules as `psilink` and `jspsi`. The bare-directory forms
+// into the root node_modules as `alcove` and `alcove-web`. The bare-directory forms
 // sit alongside their subpath siblings because they exercise a different
 // pattern: matching is gitignore-style, where `dir/**` matches only strictly
 // beneath `dir` and never `dir` itself.
@@ -82,31 +82,31 @@ const REFUSED = [
   ["packages/core/src", CORE_SRC, "../../../apps/cli/src/protocol"],
   ["packages/core/src", CORE_SRC, "../../../apps/web/src/psi/exchange"],
   ["packages/core/src", CORE_SRC, "../../../apps/web"],
-  ["packages/core/src", CORE_SRC, "psilink"],
-  ["packages/core/src", CORE_SRC, "jspsi"],
+  ["packages/core/src", CORE_SRC, "alcove"],
+  ["packages/core/src", CORE_SRC, "alcove-web"],
   ["packages/core/test", CORE_TEST, "../../../apps/cli/src/protocol"],
-  ["packages/core/test", CORE_TEST, "psilink"],
+  ["packages/core/test", CORE_TEST, "alcove"],
   [
     "packages/peerjs-broker/src",
     BROKER_SRC,
     "../../../apps/web/src/psi/exchange",
   ],
-  ["packages/peerjs-broker/src", BROKER_SRC, "jspsi"],
+  ["packages/peerjs-broker/src", BROKER_SRC, "alcove-web"],
   ["apps/cli/src", CLI_SRC, "../../web/src/psi/exchange"],
   ["apps/cli/src", CLI_SRC, "../../web"],
   ["apps/cli/src", CLI_SRC, "../../../apps/web/src/psi/exchange"],
   ["apps/cli/src", CLI_SRC, "../../../apps/web"],
-  ["apps/cli/src", CLI_SRC, "jspsi"],
+  ["apps/cli/src", CLI_SRC, "alcove-web"],
   ["apps/cli/test", CLI_TEST, "../../../web/src/psi/exchange"],
   ["apps/cli/test", CLI_TEST, "../../../web"],
   ["apps/web/src", WEB_SRC, "../../../cli/src/protocol"],
   ["apps/web/src", WEB_SRC, "../../../cli"],
   ["apps/web/src", WEB_SRC, "../../../../apps/cli/src/protocol"],
   ["apps/web/src", WEB_SRC, "../../../../apps/cli"],
-  ["apps/web/src", WEB_SRC, "psilink"],
+  ["apps/web/src", WEB_SRC, "alcove"],
   ["apps/web", WEB_OUTSIDE_SRC, "../cli/src/protocol"],
   ["apps/web", WEB_OUTSIDE_SRC, "../cli"],
-  ["apps/web", WEB_OUTSIDE_SRC, "psilink"],
+  ["apps/web", WEB_OUTSIDE_SRC, "alcove"],
 ];
 
 // Imports each tree must keep accepting: the package channel the apps are meant
@@ -115,12 +115,12 @@ const ACCEPTED = [
   ["packages/core/src", CORE_SRC, "./utils/boundedJson"],
   ["packages/core/test", CORE_TEST, "../src/main"],
   ["packages/peerjs-broker/src", BROKER_SRC, "./contrib/index.ts"],
-  ["apps/cli/src", CLI_SRC, "@psilink/core"],
-  ["apps/cli/src", CLI_SRC, "@psilink/core/testing"],
+  ["apps/cli/src", CLI_SRC, "@alcove/core"],
+  ["apps/cli/src", CLI_SRC, "@alcove/core/testing"],
   ["apps/cli/test", CLI_TEST, "../../src/protocol"],
-  ["apps/web/src", WEB_SRC, "@psilink/core"],
+  ["apps/web/src", WEB_SRC, "@alcove/core"],
   ["apps/web/src", WEB_SRC, "../../src/utils/seo"],
-  ["apps/web", WEB_OUTSIDE_SRC, "@psilink/core"],
+  ["apps/web", WEB_OUTSIDE_SRC, "@alcove/core"],
 ];
 
 // Loading the flat config and the typescript-eslint parser for the first time is

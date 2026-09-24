@@ -9,7 +9,7 @@ import {
   parseSensitiveYaml,
   snakeizeKey,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { stringify as stringifyYaml } from "yaml";
 
@@ -44,10 +44,10 @@ import type {
   SFTPConnectionConfig,
   WebRTCConnectionConfig,
   WebRTCExchangeLocator,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
-// Reading a command-line psilink.yaml back as a configuration-only record: what
+// Reading a command-line alcove.yaml back as a configuration-only record: what
 // the app accepts, what it refuses and in whose words, that an unedited import
 // and re-export is the same document, and that what lands holds no secret and so
 // runs nowhere here.
@@ -85,7 +85,7 @@ function newExchange(
   };
 }
 
-/** The `psilink.yaml` text the app's own command-line export writes for a
+/** The `alcove.yaml` text the app's own command-line export writes for a
  * record: the file an operator brings back. */
 function exportedConfigText(overrides: Partial<NewManagedExchange> = {}) {
   return composeManagedCronExport(
@@ -152,7 +152,7 @@ function refusal(source: string): string {
 }
 
 describe("accepting a command-line configuration", () => {
-  test("the app's own exported psilink.yaml imports back", () => {
+  test("the app's own exported alcove.yaml imports back", () => {
     const record = readManagedCommandLineConfiguration(exportedConfigText());
 
     expect(record.side).toBe("inviter");
@@ -548,7 +548,7 @@ describe("refusing what this app cannot hold", () => {
     );
 
     expect(message).toContain("shared_secret");
-    expect(message).toContain(".psilink.key");
+    expect(message).toContain(".alcove.key");
     expect(message).not.toContain(secret);
   });
 
@@ -882,7 +882,7 @@ describe("a signing block this app cannot run", () => {
   // touch: an `@` in a local path is text here, never a file reference.
   const signing = {
     mode: "certificate",
-    identityFile: "@/run/signing/psilink-signing-identity.json",
+    identityFile: "@/run/signing/alcove-signing-identity.json",
     partnerFingerprint: "0123456789012345678901234567890123456789abA",
     receiptOutput: "~/receipts/@quarterly",
   } as const;

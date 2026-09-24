@@ -13,7 +13,7 @@
  * listens on the rendezvous the fresh secret derives.
  */
 
-import { encodeInvitation, generateSharedSecret } from "@psilink/core";
+import { encodeInvitation, generateSharedSecret } from "@alcove/core";
 
 import { invitationLocation } from "../invitationLocation";
 import { relayForRun } from "../transport/ownRelaySetting";

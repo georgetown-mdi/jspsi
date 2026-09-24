@@ -32,10 +32,10 @@ export const DEFAULT_REALM_KEY = "peerjs";
 
 /** Environment variable holding the bind address, for a supervised service
  * configured from a unit file rather than a command line. */
-export const BIND_HOST_ENV = "PSILINK_BROKER_HOST";
+export const BIND_HOST_ENV = "ALCOVE_BROKER_HOST";
 
 /** Environment variable holding the port. */
-export const BIND_PORT_ENV = "PSILINK_BROKER_PORT";
+export const BIND_PORT_ENV = "ALCOVE_BROKER_PORT";
 
 /** The readiness endpoint's own segment, joined onto the signaling mount. It
  * sits beside the WebSocket endpoint rather than at the root so one route rule

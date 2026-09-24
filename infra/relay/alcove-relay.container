@@ -1,28 +1,28 @@
-# Quadlet unit for the psilink standing relay, used where the host has podman.
-# install.sh puts this at /etc/containers/systemd/psilink-relay.container, where
-# podman's systemd generator turns it into psilink-relay.service at
+# Quadlet unit for the Alcove standing relay, used where the host has podman.
+# install.sh puts this at /etc/containers/systemd/alcove-relay.container, where
+# podman's systemd generator turns it into alcove-relay.service at
 # daemon-reload.
 #
 # systemd is the only supervisor: there is no container daemon under this, and
 # nothing restarts the relay except the unit below.
 #
-# PAIRED WITH psilink-relay-docker.service, which install.sh uses instead on a
+# PAIRED WITH alcove-relay-docker.service, which install.sh uses instead on a
 # host that has docker and no podman -- Amazon Linux 2023 among them. The two
 # carry the same image, the same mounts, and the same container flags; edit them
 # together. That file's header carries the directive-to-flag mapping.
 
 [Unit]
-Description=psilink WebRTC relay (coturn, TURNS on 443/tcp)
-Documentation=https://github.com/georgetown-mdi/jspsi/blob/main/infra/relay/README.md
+Description=alcove WebRTC relay (coturn, TURNS on 443/tcp)
+Documentation=https://github.com/georgetown-mdi/alcove/blob/main/infra/relay/README.md
 After=network-online.target
 Wants=network-online.target
 
 [Container]
-ContainerName=psilink-relay
+ContainerName=alcove-relay
 
 # The tag install.sh builds from this directory's Dockerfile, which is where the
 # base digest is pinned. Nothing here names a registry image or a floating tag.
-Image=localhost/psilink-relay:installed
+Image=localhost/alcove-relay:installed
 
 # TURN's relay port range and its NAT behaviour do not survive bridge networking
 # or published ports: coturn hands out a relayed transport address that the
@@ -36,9 +36,9 @@ Network=host
 # writes and what coturn re-reads on restart. The data directory holds the
 # per-exchange secrets table, which register-exchange.sh and revoke-exchange.sh
 # edit while the relay runs.
-Volume=/etc/psilink-relay/turnserver.conf:/etc/coturn/turnserver.conf:ro
-Volume=/etc/psilink-relay/certs:/etc/coturn/certs:ro
-Volume=/var/lib/psilink-relay:/var/lib/coturn
+Volume=/etc/alcove-relay/turnserver.conf:/etc/coturn/turnserver.conf:ro
+Volume=/etc/alcove-relay/certs:/etc/coturn/certs:ro
+Volume=/var/lib/alcove-relay:/var/lib/coturn
 
 Exec=-c /etc/coturn/turnserver.conf
 
@@ -57,7 +57,7 @@ LogDriver=journald
 # Rendered on every start, not only at install: the instance's public address is
 # not a property of the installation, and a stale external-ip advertises a
 # relayed candidate nobody can reach.
-ExecStartPre=/opt/psilink-relay/render-config.sh
+ExecStartPre=/opt/alcove-relay/render-config.sh
 Restart=always
 RestartSec=5
 

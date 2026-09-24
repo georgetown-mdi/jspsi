@@ -12,14 +12,14 @@ import type { MountFs } from "../../../src/doctor/mount";
 import { overallOf } from "../../../src/doctor/verdict";
 import type { DoctorReport } from "../../../src/doctor/verdict";
 
-const MARKER = "psilink-check.txt";
+const MARKER = "alcove-check.txt";
 const TOKEN = "abc123";
 const INPUT = { marker: MARKER, token: TOKEN };
 
 const created: string[] = [];
 
 function tempDirectory(): string {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-mount-"));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-mount-"));
   created.push(directory);
   return directory;
 }
@@ -35,7 +35,7 @@ function checkById(report: DoctorReport, id: string) {
   return check;
 }
 
-describe("a mounted folder that behaves the way psilink needs", () => {
+describe("a mounted folder that behaves the way Alcove needs", () => {
   test("reports every check ok, in the fixed order", () => {
     const directory = tempDirectory();
     fs.writeFileSync(path.join(directory, MARKER), `${TOKEN}\n`);
@@ -112,7 +112,7 @@ describe("a folder that is not there", () => {
 
 describe("shares whose semantics differ from a local disk", () => {
   test("one that does not refuse a second exclusive create asks for --lockless-rendezvous", () => {
-    // O_EXCL is exactly what psilink's rendezvous uses to decide which side goes
+    // O_EXCL is exactly what Alcove's rendezvous uses to decide which side goes
     // first, so a share that honours it only weakly is the case this catches.
     const permissive: MountFs = {
       ...nodeMountFs,
@@ -195,7 +195,7 @@ describe("the real filesystem implementation", () => {
 });
 
 describe("working names occupied by directories", () => {
-  test.each([".psilink-w.tmp", ".psilink-w2.tmp"])(
+  test.each([".alcove-w.tmp", ".alcove-w2.tmp"])(
     "a directory named %s blocks write_rename with a verdict, not a throw",
     (name) => {
       const directory = tempDirectory();
@@ -213,9 +213,9 @@ describe("working names occupied by directories", () => {
   );
 
   test.each([
-    [".psilink-x.tmp", "exclusive_create"],
-    [".psilink-a.tmp", "rename_onto_existing"],
-    [".psilink-b.tmp", "rename_onto_existing"],
+    [".alcove-x.tmp", "exclusive_create"],
+    [".alcove-a.tmp", "rename_onto_existing"],
+    [".alcove-b.tmp", "rename_onto_existing"],
   ])("a directory named %s blocks only %s", (name, id) => {
     const directory = tempDirectory();
     fs.writeFileSync(path.join(directory, MARKER), `${TOKEN}\n`);
@@ -256,7 +256,7 @@ describe("a matching marker that cannot be removed", () => {
 describe("every skipped record explains itself", () => {
   test("padded and inapplicable skips all have a meaning", () => {
     const reports = [
-      runMountChecks(path.join(os.tmpdir(), "psilink-no-such-dir"), INPUT),
+      runMountChecks(path.join(os.tmpdir(), "alcove-no-such-dir"), INPUT),
       runMountChecks(tempDirectory(), { marker: "", token: "" }),
     ];
     let skips = 0;
@@ -271,7 +271,7 @@ describe("every skipped record explains itself", () => {
 
   test("a check a failure stopped the run before names itself", () => {
     const report = runMountChecks(
-      path.join(os.tmpdir(), "psilink-no-such-dir"),
+      path.join(os.tmpdir(), "alcove-no-such-dir"),
       INPUT,
     );
     const padded = report.checks.filter(

@@ -1,7 +1,7 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import { page } from "vitest/browser";
 
@@ -74,7 +74,7 @@ vi.mock("@psi/managed/managedRunDriver", () => ({
   }) => {
     const store = await import("@psi/managed/managedExchangeStore");
     const lock = await import("@psi/managed/managedExchangeLock");
-    const core = await import("@psilink/core");
+    const core = await import("@alcove/core");
     await lock.withManagedExchangeLock(
       record.id,
       () =>
@@ -126,7 +126,7 @@ const EXPORT_PANEL = "Run this from the command line instead";
 const exportToggle = () => disclosureToggle(EXPORT_PANEL);
 
 const downloadButton = () =>
-  page.getByRole("button", { name: "Download psilink.yaml and .psilink.key" });
+  page.getByRole("button", { name: "Download alcove.yaml and .alcove.key" });
 
 const migrateButton = () =>
   page.getByRole("button", { name: "Move to another device" });

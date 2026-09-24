@@ -5,7 +5,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   clearManagedExchanges,
@@ -18,7 +18,7 @@ import { runResultsFileName } from "@psi/parkedResults";
 import { writeResultsToOutputDirectory } from "@psi/managed/managedOutputDirectory";
 
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 // The platform half of the output-folder grant, exercised against real Chromium:
 // a directory handle held on the record across a fresh read of the store (which

@@ -18,7 +18,7 @@ import {
   StunUrlSchema,
   TurnUrlSchema,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
@@ -28,7 +28,7 @@ import type {
   Metadata,
   PreparedExchange,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   csvDelimiterForRun,
@@ -103,7 +103,7 @@ import {
 } from "../onlineBootstrap";
 
 // The invitation lifetime default and one-year ceiling are shared from
-// @psilink/core (INVITATION_LIFETIME_SECONDS, MAX_INVITATION_LIFETIME_SECONDS) so
+// @alcove/core (INVITATION_LIFETIME_SECONDS, MAX_INVITATION_LIFETIME_SECONDS) so
 // the CLI and the web inviter cannot drift. The default lifetime is distinct from
 // --accept-timeout, which bounds how long the inviter waits at the rendezvous,
 // not how long the token stays valid; --expires-in overrides the default up to
@@ -162,7 +162,7 @@ export function builder(cmd: Argv): Argv {
         "-- a consented disclosure tradeoff, not a free speed-up. Has no " +
         "effect when linkage terms come from an existing configuration file " +
         "(set linkage_strategy there). See " +
-        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "https://github.com/georgetown-mdi/alcove/blob/main/docs/" +
         "EXCHANGE_REFERENCE.md (linkage_terms.linkage_strategy).",
     })
     .option("turn", {
@@ -287,7 +287,7 @@ function plaintextEndpointWarning(remedy: string): string {
     "but not the plaintext (ws://) scheme, which an endpoint has no " +
     "field for; your partner's configuration will be seeded to dial it " +
     "over TLS (wss://). Have them set `secure: false` on the connection " +
-    `block before running 'psilink exchange', or ${remedy}.`
+    `block before running 'alcove exchange', or ${remedy}.`
   );
 }
 
@@ -313,7 +313,7 @@ export function resolveInvitePositionals(
       positionals[1] !== undefined ? String(positionals[1]) : undefined;
     if (input === undefined)
       throw new UsageError(
-        "online invitation requires an input file; usage: psilink invite " +
+        "online invitation requires an input file; usage: alcove invite " +
           "--identity IDENTITY URL INPUT_FILE [OUTPUT_FILE]",
       );
     const output =
@@ -649,7 +649,7 @@ export async function validateInvite(params: {
           "of the exchange that follows. When the configuration is saved, " +
           `--peer-timeout (${options.peerTimeout}s) is recorded in it as ` +
           "connection.options.peer_timeout_ms, the budget a later " +
-          "'psilink exchange' runs on.",
+          "'alcove exchange' runs on.",
       );
 
     // An accept-timeout longer than the token's lifetime would keep waiting at
@@ -706,7 +706,7 @@ export async function validateInvite(params: {
     // The columns this party will transmit for matched records, over that same
     // metadata, so the declared set equals what preparePayload transmits.
     // Included on the token and persisted into the saved config as
-    // disclosedPayloadColumns, so a later recurring `psilink exchange` verifies
+    // disclosedPayloadColumns, so a later recurring `alcove exchange` verifies
     // its current metadata still discloses exactly this set before any data is
     // sent (assertDisclosureMatchesCommitment) -- the send-side commitment the
     // online path would otherwise keep only on the discarded token.
@@ -882,7 +882,7 @@ export async function validateInvite(params: {
       // boundary enforces, rather than on column coverage alone: an invitation
       // whose terms declare a key this input cannot produce -- or one whose own
       // cleaning drops every record -- is refused here, before it is minted,
-      // instead of at a `psilink exchange` the partner has already accepted into.
+      // instead of at an `alcove exchange` the partner has already accepted into.
       //
       // Pass the config's explicit standardization AND metadata so the columns
       // resolve to linkage fields exactly as the eventual exchange does: metadata
@@ -914,7 +914,7 @@ export async function validateInvite(params: {
     // exchange input (which this offline invite never reads), so the transmitted
     // set is unknown at mint and the acceptor reconciles lazily. The same value
     // is persisted into the reused config's disclosed_payload_columns below, so a
-    // later recurring `psilink exchange` (and a re-invite) checks and refreshes
+    // later recurring `alcove exchange` (and a re-invite) checks and refreshes
     // the commitment; undefined here means the field is removed, never left stale.
     const disclosedPayloadColumns = disclosedColumnsFor(configSource.metadata);
 
@@ -969,7 +969,7 @@ export async function validateInvite(params: {
   if (resolved.input === undefined)
     throw new UsageError(
       "generating an invitation requires an input file or a pre-existing " +
-        "configuration file; usage: psilink invite --identity IDENTITY " +
+        "configuration file; usage: alcove invite --identity IDENTITY " +
         "[INPUT_FILE]",
     );
   assertNoProvisionConflicts({
@@ -1007,7 +1007,7 @@ export async function validateInvite(params: {
   // The disclosed-columns subset over that metadata, so the acceptor's consent and
   // commitment derive from what preparePayload will actually transmit. Included
   // on the token and persisted into the written config as disclosedPayloadColumns,
-  // so a later recurring `psilink exchange` verifies its metadata still discloses
+  // so a later recurring `alcove exchange` verifies its metadata still discloses
   // exactly this set before any data is sent (assertDisclosureMatchesCommitment).
   const disclosedPayloadColumns = disclosedColumnsFor(disclosureMetadata);
   const dataSpec: ResolvedDataSpec = {
@@ -1139,7 +1139,7 @@ export async function handler(argv: Arguments): Promise<void> {
           runOnlyPeerTimeoutSeconds: acceptTimeout,
           // The inviter's received-payload set is unknown until the acceptor
           // transmits it, so crystallize the observed set into the saved config
-          // after this first exchange -- a later `psilink exchange` then fails
+          // after this first exchange -- a later `alcove exchange` then fails
           // closed on a divergent payload. (The acceptor learns its set up front
           // from the token, so its online path does not request this.)
           persistObservedReceivedPayload: true,
@@ -1214,7 +1214,7 @@ export async function handler(argv: Arguments): Promise<void> {
           `ensure the connection block in ${redactAndRenderOperatorSuppliedText(
             operatorSuppliedText(ready.configPath),
           )} is filled in ` +
-            `before running 'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
+            `before running 'alcove exchange'. ${CONNECTION_BLOCK_NOTICE}`,
         );
         return;
       }
@@ -1239,7 +1239,7 @@ export async function handler(argv: Arguments): Promise<void> {
       log.info(
         `fill in the connection block in ${redactAndRenderOperatorSuppliedText(
           operatorSuppliedText(configPath),
-        )} before running ` + `'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
+        )} before running ` + `'alcove exchange'. ${CONNECTION_BLOCK_NOTICE}`,
       );
     });
   } finally {
@@ -1279,7 +1279,7 @@ function noteSinglePassSelection(
 }
 
 /**
- * What bounds a later `psilink exchange` run from a configuration recording no
+ * What bounds a later `alcove exchange` run from a configuration recording no
  * `peer_timeout_ms`, phrased for the channel that run will use.
  *
  * Each figure is read from the constant the channel's own transport falls back
@@ -1310,7 +1310,7 @@ function absentPeerBudgetDefaults(
     default:
       return (
         "that channel's own transport defaults (the peer_timeout_ms row of " +
-        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "https://github.com/georgetown-mdi/alcove/blob/main/docs/" +
         "EXCHANGE_REFERENCE.md)"
       );
   }
@@ -1322,7 +1322,7 @@ function absentPeerBudgetDefaults(
  *
  * `--accept-timeout` bounds the invite's own run and is not written: the two
  * timeouts bound different lifetimes -- one operator waiting at a rendezvous,
- * versus every later unattended `psilink exchange` -- so the configuration
+ * versus every later unattended `alcove exchange` -- so the configuration
  * instead records `--peer-timeout` when the operator set one, and nothing
  * otherwise. Absent a recorded value, those runs fall to the channel's own
  * defaults (see {@link absentPeerBudgetDefaults}). Either way, the value is
@@ -1339,13 +1339,13 @@ export function persistedPeerBudgetNotice(
     return (
       "the saved configuration records connection.options.peer_timeout_ms as " +
       `${persistedPeerTimeoutSeconds}s, from --peer-timeout: that is the peer ` +
-      "budget a later 'psilink exchange' runs on. --accept-timeout " +
+      "budget a later 'alcove exchange' runs on. --accept-timeout " +
       `(${acceptTimeoutSeconds}s) bounded this run alone.`
     );
   return (
     "the saved configuration records no connection.options.peer_timeout_ms: " +
     `--accept-timeout (${acceptTimeoutSeconds}s) bounded this run alone, so a ` +
-    `later 'psilink exchange' runs on ${absentPeerBudgetDefaults(channel)}. ` +
+    `later 'alcove exchange' runs on ${absentPeerBudgetDefaults(channel)}. ` +
     "Pass --peer-timeout at invite time, or set " +
     "connection.options.peer_timeout_ms in that configuration, to give those " +
     "runs a budget of your own."
@@ -1371,7 +1371,7 @@ export function onlineWaitInvalidationNotice(
     "This invitation can be accepted only while this command is waiting. If " +
     "you cancel it (Ctrl-C), the connection times out, or the accept-timeout " +
     `(${acceptTimeoutSeconds}s) is reached before your partner accepts, the ` +
-    "invitation can no longer be accepted -- run 'psilink invite' again to " +
+    "invitation can no longer be accepted -- run 'alcove invite' again to " +
     "issue a fresh one."
   );
 }
@@ -1418,7 +1418,7 @@ export function offlineAbandonNotice(keyPath: string): string {
 const INVITATION_PLACEHOLDER = "<INVITATION>";
 
 /** The identity placeholder the accept templates use. Accepting requires the
- * partner's own label -- psilink stands in none -- so the template names the flag
+ * partner's own label -- Alcove stands in none -- so the template names the flag
  * where the partner meets the command, rather than leaving the refusal to teach
  * it. A placeholder for the same reason `<INPUT_FILE>` is: nobody but the partner
  * can choose the name their side is known by. Left unquoted like its siblings, so
@@ -1452,7 +1452,7 @@ function printInvitation(
   console.log(invitation);
   if (online === undefined) {
     log.info(
-      `Your partner accepts with:\n  psilink accept ${IDENTITY_PLACEHOLDER} ` +
+      `Your partner accepts with:\n  alcove accept ${IDENTITY_PLACEHOLDER} ` +
         `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nwhere ` +
         `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
     );
@@ -1460,7 +1460,7 @@ function printInvitation(
   }
   if (online.channel === "webrtc") {
     log.info(
-      `Your partner accepts and runs the exchange with:\n  psilink accept ` +
+      `Your partner accepts and runs the exchange with:\n  alcove accept ` +
         `${IDENTITY_PLACEHOLDER} ${INVITATION_PLACEHOLDER} <INPUT_FILE>\nrun ` +
         `while this command is still waiting, where ` +
         `${INVITATION_PLACEHOLDER} is the invitation printed above.`,
@@ -1470,7 +1470,7 @@ function printInvitation(
   // Strip any credentials embedded in the URL before echoing it: the partner
   // supplies their own, and a password must not reach the terminal or logs.
   log.info(
-    `Your partner accepts and runs the exchange with:\n  psilink accept ` +
+    `Your partner accepts and runs the exchange with:\n  alcove accept ` +
       `${IDENTITY_PLACEHOLDER} ${redactUrlCredentials(online.url)} ` +
       `${INVITATION_PLACEHOLDER} <INPUT_FILE>\nwhere ` +
       `${INVITATION_PLACEHOLDER} is the invitation printed above.`,

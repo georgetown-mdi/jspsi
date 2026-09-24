@@ -1,5 +1,5 @@
 /**
- * What a managed exchange's command-line `psilink.yaml` may hold: the one rule
+ * What a managed exchange's command-line `alcove.yaml` may hold: the one rule
  * both legs of the hand-off apply -- the export that writes the file
  * ({@link ./managedCronExport.ts}) and the import that reads one back
  * ({@link ./managedCommandLineImport.ts}).
@@ -19,7 +19,7 @@
  *
  * An sftp connection is held whole beyond its locator: a record on sftp runs
  * nowhere in this app, so every setting of its connection is only written back
- * to the file psilink runs. A credential in it is held as an `@path` reference
+ * to the file Alcove runs. A credential in it is held as an `@path` reference
  * and refused as a literal value ({@link literalCredentialFields}): the browser
  * does not resolve a reference, and it does not store a secret.
  *
@@ -33,7 +33,7 @@ import {
   connectionFromLocator,
   getDefaultLinkageTerms,
   snakeizeKey,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN,
@@ -47,7 +47,7 @@ import type {
   HttpAuth,
   SFTPConnectionConfig,
   WebRTCExchangeLocator,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { ManagedExchangeFileComposition } from "./managedExchangeRecord";
 
 /** A channel a credential-free locator exists for: every channel the shared
@@ -245,7 +245,7 @@ export function connectionSettingsBeyondLocator(
   ].sort();
 }
 
-/** One value a connection states where psilink reads an `@path` as a file,
+/** One value a connection states where Alcove reads an `@path` as a file,
  * named as the file spells the setting. */
 interface FileReadableValue {
   field: string;
@@ -377,7 +377,7 @@ export function literalCredentialFields(
 /**
  * The settings a connection states as an `@path` reference, named as the file
  * spells them and sorted. This browser never reads the file one names; the
- * exported document keeps each reference as written, and psilink reads that
+ * exported document keeps each reference as written, and Alcove reads that
  * file on the machine that runs it.
  */
 export function fileReferenceFields(
@@ -422,7 +422,7 @@ function composableDocumentFields(): ReadonlySet<string> {
  * compose (above), the `authentication` block holding the max-age policy, and
  * the parts held unchanged on a record that does not run here. Nothing else
  * the shared exchange-file schema can represent belongs in a managed
- * exchange's psilink.yaml.
+ * exchange's alcove.yaml.
  */
 const COMMAND_LINE_DOCUMENT_FIELDS: ReadonlySet<string> = new Set([
   ...composableDocumentFields(),

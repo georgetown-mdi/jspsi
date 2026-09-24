@@ -1,6 +1,6 @@
 ---
 name: architecture-diagram
-description: Create or revise a component-level architecture diagram of psilink -- a hand-laid-out SVG grounded in code, passed through design and fidelity reviews, delivered as the docs image (docs/img/architecture.svg), a shareable page, or a print PNG. Use for requests like "diagram the components", "show how the pieces connect", or "update the architecture diagram".
+description: Create or revise a component-level architecture diagram of Alcove -- a hand-laid-out SVG grounded in code, passed through design and fidelity reviews, delivered as the docs image (docs/img/architecture.svg), a shareable page, or a print PNG. Use for requests like "diagram the components", "show how the pieces connect", or "update the architecture diagram".
 ---
 
 # Architecture Diagram

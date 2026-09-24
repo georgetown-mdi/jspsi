@@ -9,7 +9,7 @@ const HOOK = fileURLToPath(
   new URL("./record-orchestration-ruleset-read.mjs", import.meta.url),
 );
 
-const MARKER_SUBDIR = "psilink-orchestration-reads";
+const MARKER_SUBDIR = "alcove-orchestration-reads";
 const SESSION = "8f2b1c66-0000-4000-8000-0123456789ab";
 const RULESET = "/workspace/.claude/orchestration/ruleset.md";
 

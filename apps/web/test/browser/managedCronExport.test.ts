@@ -5,7 +5,7 @@ import {
   assembleExchangeSpec,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { page } from "vitest/browser";
 
@@ -95,7 +95,7 @@ async function openExportPanel(): Promise<void> {
  * left of the test's own timeout, and `settled()` awaits the capture's reads. */
 async function downloadBothFiles(downloads: DownloadCapture): Promise<void> {
   await page
-    .getByRole("button", { name: "Download psilink.yaml and .psilink.key" })
+    .getByRole("button", { name: "Download alcove.yaml and .alcove.key" })
     .click();
   await expect
     .element(page.getByText("Confirm the hand-off."))
@@ -127,8 +127,8 @@ describe("the command-line export hands over two files", () => {
       await downloadBothFiles(downloads);
 
       expect(downloads.captured.map((file) => file.fileName)).toEqual([
-        "psilink.yaml",
-        ".psilink.key",
+        "alcove.yaml",
+        ".alcove.key",
       ]);
       const [config, key] = downloads.captured;
       expect(config.text).toContain("linkage_terms:");
@@ -164,7 +164,7 @@ describe("the command-line export hands over two files", () => {
     // The ready-to-run invocation and both schedule lines are on the panel.
     await expect
       .element(
-        page.getByText("psilink exchange input.csv results.csv", {
+        page.getByText("alcove exchange input.csv results.csv", {
           exact: true,
         }),
       )
@@ -482,7 +482,7 @@ describe("a record this app could not have composed", () => {
     await expect
       .element(
         page.getByRole("button", {
-          name: "Download psilink.yaml and .psilink.key",
+          name: "Download alcove.yaml and .alcove.key",
         }),
       )
       .not.toBeInTheDocument();

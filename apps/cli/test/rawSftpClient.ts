@@ -1,5 +1,5 @@
 import Ssh2SftpClient from "ssh2-sftp-client";
-import { getLogger, sanitizeErrorForDisplay } from "@psilink/core";
+import { getLogger, sanitizeErrorForDisplay } from "@alcove/core";
 
 /**
  * Constructs a raw {@link Ssh2SftpClient} whose lifecycle diagnostics route

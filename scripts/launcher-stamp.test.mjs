@@ -27,7 +27,7 @@ import { WORKFLOW_DIR, workflowDocument } from "./lib/workflows.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 
-const PLACEHOLDER = "@@PSILINK_IMAGE_DIGEST@@";
+const PLACEHOLDER = "@@ALCOVE_IMAGE_DIGEST@@";
 
 // The fully qualified reference: podman requires the registry prefix and docker
 // accepts it, so both launchers name it in full rather than relying on a
@@ -36,14 +36,14 @@ const IMAGE_REPOSITORY = "ghcr.io/georgetown-mdi/alcove";
 
 const LAUNCHERS = [
   {
-    path: "support/windows-network-filedrop/start-psilink.sh",
-    digestLine: `PSILINK_IMAGE_DIGEST='${PLACEHOLDER}'`,
-    repositoryLine: `PSILINK_IMAGE_REPOSITORY='${IMAGE_REPOSITORY}'`,
+    path: "support/windows-network-filedrop/start-alcove.sh",
+    digestLine: `ALCOVE_IMAGE_DIGEST='${PLACEHOLDER}'`,
+    repositoryLine: `ALCOVE_IMAGE_REPOSITORY='${IMAGE_REPOSITORY}'`,
   },
   {
-    path: "support/windows-network-filedrop/Start-Psilink.ps1",
-    digestLine: `$PsilinkImageDigest = '${PLACEHOLDER}'`,
-    repositoryLine: `$PsilinkImageRepository = '${IMAGE_REPOSITORY}'`,
+    path: "support/windows-network-filedrop/Start-Alcove.ps1",
+    digestLine: `$AlcoveImageDigest = '${PLACEHOLDER}'`,
+    repositoryLine: `$AlcoveImageRepository = '${IMAGE_REPOSITORY}'`,
   },
 ];
 
@@ -120,7 +120,7 @@ describe("the release workflow's stamp step", () => {
   it("fails the release when a placeholder survives the substitution", () => {
     // Read as a second, independent look at the output: the count above is
     // taken before the rewrite, this one after it.
-    expect(stamp).toMatch(/grep[^\n]*\$\{PSILINK_PLACEHOLDER\}/);
+    expect(stamp).toMatch(/grep[^\n]*\$\{ALCOVE_PLACEHOLDER\}/);
   });
 
   it("runs in a job whose write permission is scoped to it", () => {

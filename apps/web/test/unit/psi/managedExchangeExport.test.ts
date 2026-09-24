@@ -2,7 +2,7 @@ import {
   assembleExchangeSpec,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import { describe, expect, test, vi } from "vitest";
 
 import {
@@ -80,7 +80,7 @@ function backupDeps(rec: ManagedExchangeRecord): ManagedExportDeps & {
 describe("managedBackupFileName", () => {
   test("names the file by the export's calendar day", () => {
     expect(managedBackupFileName(new Date("2026-07-14T12:00:00.000Z"))).toBe(
-      "psilink-managed-backup-2026-07-14.json",
+      "alcove-managed-backup-2026-07-14.json",
     );
   });
 });
@@ -440,15 +440,15 @@ describe("dispatchManagedCronExport", () => {
     const dispatch = await dispatchManagedCronExport(rec.id, deps);
 
     expect(deps.downloaded.map((file) => file.fileName)).toEqual([
-      "psilink.yaml",
-      ".psilink.key",
+      "alcove.yaml",
+      ".alcove.key",
     ]);
     expect(deps.readRecord).toHaveBeenCalledWith(rec.id);
     // The spend is operator-attested: not written until confirm() is called.
     expect(deps.spendIfCurrent).not.toHaveBeenCalled();
     expect(dispatch.record).toBe(rec);
     expect(dispatch.composed.command).toBe(
-      "psilink exchange input.csv results.csv",
+      "alcove exchange input.csv results.csv",
     );
   });
 

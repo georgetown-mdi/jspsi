@@ -13,7 +13,7 @@ import {
   encodeInvitation,
   endpointRequiresRetainedFiles,
   generateSharedSecret,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   ACCEPT_UNSUPPORTED_TITLE,
@@ -29,7 +29,7 @@ import type {
   ConnectionEndpoint,
   InvitationToken,
   LinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // The CONSOLE acceptor seat over SFTP: the operator authors the connection to the
 // SFTP server the PARTNER named in the invitation before the console can run the

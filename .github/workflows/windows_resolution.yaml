@@ -36,10 +36,10 @@ on:
   pull_request:
     branches: [main, staging]
     paths:
-      - "support/windows-network-filedrop/Setup-PsilinkFileDrop.ps1"
-      - "support/windows-network-filedrop/Start-Psilink.ps1"
-      - "support/maintainer-notes/Setup-PsilinkFileDrop.Tests.ps1"
-      - "support/maintainer-notes/Start-Psilink.Tests.ps1"
+      - "support/windows-network-filedrop/Setup-AlcoveFileDrop.ps1"
+      - "support/windows-network-filedrop/Start-Alcove.ps1"
+      - "support/maintainer-notes/Setup-AlcoveFileDrop.Tests.ps1"
+      - "support/maintainer-notes/Start-Alcove.Tests.ps1"
       - "support/maintainer-notes/ci-resolution-tests.ps1"
       - ".github/workflows/windows_resolution.yaml"
   workflow_dispatch:

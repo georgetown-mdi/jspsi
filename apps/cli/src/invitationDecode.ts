@@ -4,8 +4,8 @@ import {
   rawDecodeErrorDescription,
   stripInvitationWhitespace,
   UsageError,
-} from "@psilink/core";
-import type { InvitationToken } from "@psilink/core";
+} from "@alcove/core";
+import type { InvitationToken } from "@alcove/core";
 
 import { resolveAtSignRefs } from "./util/atSignRefs";
 

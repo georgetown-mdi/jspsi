@@ -654,7 +654,7 @@ export function renderReport(report) {
 
 const GITHUB_API_ROOT = "https://api.github.com";
 // GitHub rejects API requests without a User-Agent; identify this script.
-const USER_AGENT = "psilink-measure-pr-checks";
+const USER_AGENT = "alcove-measure-pr-checks";
 
 /**
  * Pages of the pull-request run listing one measurement scans, 100 runs each,

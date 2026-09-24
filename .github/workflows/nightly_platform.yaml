@@ -66,7 +66,7 @@ jobs:
           # A manual dispatch instead takes the ref it was dispatched on, so a
           # platform fix can be confirmed on its own branch before it lands.
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || 'staging' }}
-      # Pins Node, installs from the lockfile, and builds @psilink/core so the
+      # Pins Node, installs from the lockfile, and builds @alcove/core so the
       # unit tests run against the compiled fork in dist/.
       - uses: ./.github/actions/setup
       - name: Unit tests (CLI)
@@ -85,7 +85,7 @@ jobs:
         with:
           # See the macOS job's identical step above.
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || 'staging' }}
-      # Pins Node, installs from the lockfile, and builds @psilink/core so the
+      # Pins Node, installs from the lockfile, and builds @alcove/core so the
       # unit tests run against the compiled fork in dist/.
       - uses: ./.github/actions/setup
       - name: Unit tests (CLI)

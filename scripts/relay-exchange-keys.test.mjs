@@ -68,7 +68,7 @@ conn = sqlite3.connect(sys.argv[1])
 rows = sorted(conn.execute("SELECT realm, value FROM turn_secret").fetchall())
 try:
     mapping = conn.execute(
-        "SELECT exchange_id, realm, key, registered_at, max_age_days FROM psilink_exchange ORDER BY exchange_id"
+        "SELECT exchange_id, realm, key, registered_at, max_age_days FROM alcove_exchange ORDER BY exchange_id"
     ).fetchall()
 except sqlite3.OperationalError:
     mapping = []
@@ -120,9 +120,9 @@ conn.commit()`,
   writeFileSync(
     envFile,
     [
-      `PSILINK_RELAY_REALM=${REALM}`,
-      "PSILINK_RELAY_RUNTIME=docker",
-      `PSILINK_RELAY_EXTERNAL_IP_HELPER=${ipHelper}`,
+      `ALCOVE_RELAY_REALM=${REALM}`,
+      "ALCOVE_RELAY_RUNTIME=docker",
+      `ALCOVE_RELAY_EXTERNAL_IP_HELPER=${ipHelper}`,
       "",
     ].join("\n"),
   );
@@ -132,11 +132,11 @@ conn.commit()`,
     ...process.env,
     PATH: `${root}:${process.env.PATH}`,
     PYTHONDONTWRITEBYTECODE: "1",
-    PSILINK_RELAY_ENV_FILE: envFile,
-    PSILINK_RELAY_TURNDB: turndb,
-    PSILINK_RELAY_SECRET_FILE: secretFile,
-    PSILINK_RELAY_CONF: conf,
-    PSILINK_RELAY_REGISTRAR_TOKEN_FILE: join(root, "registrar-token"),
+    ALCOVE_RELAY_ENV_FILE: envFile,
+    ALCOVE_RELAY_TURNDB: turndb,
+    ALCOVE_RELAY_SECRET_FILE: secretFile,
+    ALCOVE_RELAY_CONF: conf,
+    ALCOVE_RELAY_REGISTRAR_TOKEN_FILE: join(root, "registrar-token"),
   };
   const runWith = (extraEnv, script, args, input = "") => {
     const result = spawnSync(BASH, [join(relay, script), ...args], {
@@ -163,8 +163,8 @@ conn.commit()`,
     verify: (extraEnv = {}) =>
       runWith(
         {
-          PSILINK_RELAY_VERIFY_CONNECT: "127.0.0.1",
-          PSILINK_RELAY_VERIFY_WAIT: "0",
+          ALCOVE_RELAY_VERIFY_CONNECT: "127.0.0.1",
+          ALCOVE_RELAY_VERIFY_WAIT: "0",
           ...extraEnv,
         },
         "verify.sh",
@@ -183,7 +183,7 @@ conn.commit()`,
       python(
         `import sqlite3, sys
 conn = sqlite3.connect(sys.argv[1])
-conn.execute("UPDATE psilink_exchange SET registered_at = ? WHERE exchange_id = ?", (int(sys.argv[3]), sys.argv[2]))
+conn.execute("UPDATE alcove_exchange SET registered_at = ? WHERE exchange_id = ?", (int(sys.argv[3]), sys.argv[2]))
 conn.commit()`,
         [turndb, id, String(registeredAt)],
       ),
@@ -338,14 +338,14 @@ describe.skipIf(runningAsRoot)("register-exchange.sh", () => {
 
   it("refuses an id under verify.sh's prefix unless verify.sh registers it", () => {
     const host = fixtureHost();
-    const refused = host.register("psilink-verify-a", KEY_A);
+    const refused = host.register("alcove-verify-a", KEY_A);
     expect(refused.status).toBe(3);
     expect(refused.stderr).toContain(
-      "exchange-id may not start with 'psilink-verify-'",
+      "exchange-id may not start with 'alcove-verify-'",
     );
     expect(host.mapping()).toEqual([]);
-    const verifying = host.register("psilink-verify-a", KEY_A, "none", {
-      PSILINK_RELAY_VERIFY_RUN: "1",
+    const verifying = host.register("alcove-verify-a", KEY_A, "none", {
+      ALCOVE_RELAY_VERIFY_RUN: "1",
     });
     expect(verifying.status, verifying.stderr).toBe(0);
   });
@@ -405,7 +405,7 @@ describe.skipIf(runningAsRoot)("register-exchange.sh", () => {
     const result = host.register("exchange-1", KEY_A);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      "psilink-relay.service creates it at its first start",
+      "alcove-relay.service creates it at its first start",
     );
     expect(existsSync(host.turndb)).toBe(false);
   });
@@ -590,7 +590,7 @@ print(json.dumps([lapsing, forever, relay_table.describe_registration(lapsing)])
     const result = python(
       `${MODULE}
 relay_table.register(conn, "${REALM}", "exchange-1", "${KEY_A}", None, 0)
-conn.execute("CREATE TRIGGER refuse BEFORE INSERT ON psilink_exchange BEGIN SELECT RAISE(ABORT, 'refused'); END")
+conn.execute("CREATE TRIGGER refuse BEFORE INSERT ON alcove_exchange BEGIN SELECT RAISE(ABORT, 'refused'); END")
 try:
     relay_table.register(conn, "${REALM}", "exchange-1", "${KEY_B}", None, 0)
     print(json.dumps("registered"))
@@ -614,14 +614,14 @@ except relay_table.TableError as error:
     const first = spawnSync(
       "python3",
       [join(relay, "relay_table.py"), "import-mapping", mapFile],
-      { encoding: "utf8", env: { ...env, PSILINK_RELAY_REALM: REALM } },
+      { encoding: "utf8", env: { ...env, ALCOVE_RELAY_REALM: REALM } },
     );
     expect(first.status, first.stderr).toBe(0);
     expect(first.stdout).toContain("imported 3 exchange(s)");
     const again = spawnSync(
       "python3",
       [join(relay, "relay_table.py"), "import-mapping", mapFile],
-      { encoding: "utf8", env: { ...env, PSILINK_RELAY_REALM: REALM } },
+      { encoding: "utf8", env: { ...env, ALCOVE_RELAY_REALM: REALM } },
     );
     expect(again.stdout).toContain("imported 0 exchange(s)");
     expect(again.stdout).toContain("3 already registered");
@@ -639,16 +639,16 @@ except relay_table.TableError as error:
   it("skips a legacy row under verify.sh's prefix and reports the count", () => {
     const host = fixtureHost();
     const mapFile = join(host.root, "exchange-keys");
-    writeFileSync(mapFile, `old-1 ${KEY_A}\npsilink-verify-a ${KEY_B}\n`);
+    writeFileSync(mapFile, `old-1 ${KEY_A}\nalcove-verify-a ${KEY_B}\n`);
     const result = spawnSync(
       "python3",
       [join(relay, "relay_table.py"), "import-mapping", mapFile],
-      { encoding: "utf8", env: { ...host.env, PSILINK_RELAY_REALM: REALM } },
+      { encoding: "utf8", env: { ...host.env, ALCOVE_RELAY_REALM: REALM } },
     );
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("imported 1 exchange(s)");
     expect(result.stdout).toMatch(
-      /skipped 1 row\(s\) under verify\.sh's 'psilink-verify-' prefix/,
+      /skipped 1 row\(s\) under verify\.sh's 'alcove-verify-' prefix/,
     );
     expect(host.mapping().map(({ id }) => id)).toEqual(["old-1"]);
     expect(host.rows()).toEqual([listed(KEY_LISTED), listed(KEY_A)].sort());
@@ -661,7 +661,7 @@ except relay_table.TableError as error:
     const result = spawnSync(
       "python3",
       [join(relay, "relay_table.py"), "import-mapping", mapFile],
-      { encoding: "utf8", env: { ...host.env, PSILINK_RELAY_REALM: REALM } },
+      { encoding: "utf8", env: { ...host.env, ALCOVE_RELAY_REALM: REALM } },
     );
     expect(result.status).toBe(3);
     expect(result.stderr).toContain("line 2 of the mapping");
@@ -688,7 +688,7 @@ except relay_table.TableError as error:
     const result = spawnSync(
       "python3",
       [join(relay, "relay_table.py"), "import-mapping", mapFile],
-      { encoding: "utf8", env: { ...host.env, PSILINK_RELAY_REALM: REALM } },
+      { encoding: "utf8", env: { ...host.env, ALCOVE_RELAY_REALM: REALM } },
     );
     expect(result.status).toBe(3);
     expect(result.stderr).toContain("line 2 of the mapping");
@@ -708,7 +708,7 @@ except relay_table.TableError as error:
     const result = spawnSync(
       "python3",
       [join(relay, "relay_table.py"), "import-mapping", mapFile],
-      { encoding: "utf8", env: { ...host.env, PSILINK_RELAY_REALM: REALM } },
+      { encoding: "utf8", env: { ...host.env, ALCOVE_RELAY_REALM: REALM } },
     );
     expect(result.status).toBe(3);
     expect(result.stderr).toContain("line 3 of the mapping");
@@ -724,7 +724,7 @@ except relay_table.TableError as error:
     const result = spawnSync(
       "python3",
       [join(relay, "relay_table.py"), "import-mapping", mapFile],
-      { encoding: "utf8", env: { ...host.env, PSILINK_RELAY_REALM: REALM } },
+      { encoding: "utf8", env: { ...host.env, ALCOVE_RELAY_REALM: REALM } },
     );
     expect(result.status, result.stderr).toBe(0);
     expect(host.mapping()).toMatchObject([
@@ -739,7 +739,7 @@ except relay_table.TableError as error:
     const status = (id, key) =>
       spawnSync("python3", [join(relay, "relay_table.py"), "status", id], {
         encoding: "utf8",
-        env: { ...host.env, PSILINK_RELAY_REALM: REALM },
+        env: { ...host.env, ALCOVE_RELAY_REALM: REALM },
         input: `${key}\n`,
       }).status;
     expect(status("exchange-1", KEY_A)).toBe(0);
@@ -754,7 +754,7 @@ except relay_table.TableError as error:
       [join(relay, "relay_table.py"), "forget-key"],
       {
         encoding: "utf8",
-        env: { ...host.env, PSILINK_RELAY_REALM: REALM },
+        env: { ...host.env, ALCOVE_RELAY_REALM: REALM },
         input: `${KEY_LISTED}\n`,
       },
     );
@@ -810,9 +810,9 @@ const registrarEnv = (host, token = REGISTRAR_TOKEN) => {
   writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
   return {
     ...host.env,
-    PSILINK_RELAY_REALM: REALM,
-    PSILINK_RELAY_REGISTRAR_TOKEN_FILE: tokenFile,
-    PSILINK_RELAY_CERT_DIR: certDir,
+    ALCOVE_RELAY_REALM: REALM,
+    ALCOVE_RELAY_REGISTRAR_TOKEN_FILE: tokenFile,
+    ALCOVE_RELAY_CERT_DIR: certDir,
   };
 };
 
@@ -820,7 +820,7 @@ const registrarEnv = (host, token = REGISTRAR_TOKEN) => {
 const startRegistrar = (host) =>
   new Promise((resolvePort, reject) => {
     const child = spawn("python3", [join(relay, "registrar.py")], {
-      env: { ...registrarEnv(host), PSILINK_RELAY_REGISTRAR_PORT: "0" },
+      env: { ...registrarEnv(host), ALCOVE_RELAY_REGISTRAR_PORT: "0" },
     });
     registrars.push(child);
     const log = { stderr: "" };
@@ -1045,19 +1045,19 @@ describe.skipIf(runningAsRoot)("registrar.py", { timeout: 60000 }, () => {
   it("refuses an id under verify.sh's prefix unless the request is verify.sh's", async () => {
     const host = fixtureHost();
     const { port } = await startRegistrar(host);
-    const refused = await call(port, "PUT", "/exchanges/psilink-verify-x", {
+    const refused = await call(port, "PUT", "/exchanges/alcove-verify-x", {
       token: REGISTRAR_TOKEN,
       body: keyBody(KEY_A),
     });
     expect(refused.status).toBe(400);
     expect(JSON.parse(refused.text).error).toContain(
-      "may not start with 'psilink-verify-'",
+      "may not start with 'alcove-verify-'",
     );
     expect(host.mapping()).toEqual([]);
-    const verifying = await call(port, "PUT", "/exchanges/psilink-verify-x", {
+    const verifying = await call(port, "PUT", "/exchanges/alcove-verify-x", {
       token: REGISTRAR_TOKEN,
       body: keyBody(KEY_A),
-      headers: { "Psilink-Relay-Verify-Run": "1" },
+      headers: { "Alcove-Relay-Verify-Run": "1" },
     });
     expect(verifying.status, verifying.text).toBe(200);
   });
@@ -1379,7 +1379,7 @@ describe.skipIf(runningAsRoot)("registrar.py", { timeout: 60000 }, () => {
     const host = fixtureHost();
     const result = spawnSync("python3", [join(relay, "registrar.py")], {
       encoding: "utf8",
-      env: { ...registrarEnv(host, token), PSILINK_RELAY_REGISTRAR_PORT: "0" },
+      env: { ...registrarEnv(host, token), ALCOVE_RELAY_REGISTRAR_PORT: "0" },
       timeout: 10000,
     });
     expect(result.status).toBe(1);
@@ -1392,9 +1392,9 @@ describe.skipIf(runningAsRoot)("registrar.py", { timeout: 60000 }, () => {
     rmSync(credentials, { recursive: true, force: true });
     spawnSync("cp", ["-r", certDir, credentials]);
     writeFileSync(join(credentials, "registrar-token"), `${REGISTRAR_TOKEN}\n`);
-    const env = { ...registrarEnv(host), PSILINK_RELAY_REGISTRAR_PORT: "0" };
-    delete env.PSILINK_RELAY_REGISTRAR_TOKEN_FILE;
-    delete env.PSILINK_RELAY_CERT_DIR;
+    const env = { ...registrarEnv(host), ALCOVE_RELAY_REGISTRAR_PORT: "0" };
+    delete env.ALCOVE_RELAY_REGISTRAR_TOKEN_FILE;
+    delete env.ALCOVE_RELAY_CERT_DIR;
     env.CREDENTIALS_DIRECTORY = credentials;
     const child = spawn("python3", [join(relay, "registrar.py")], { env });
     registrars.push(child);
@@ -1533,9 +1533,9 @@ describe.skipIf(runningAsRoot)(
         encoding: "utf8",
         env: {
           ...registrarEnv(host),
-          PSILINK_RELAY_REGISTRAR_PORT: String(port),
-          PSILINK_RELAY_VERIFY_CONNECT: "127.0.0.1",
-          PSILINK_RELAY_VERIFY_WAIT: "0",
+          ALCOVE_RELAY_REGISTRAR_PORT: String(port),
+          ALCOVE_RELAY_VERIFY_CONNECT: "127.0.0.1",
+          ALCOVE_RELAY_VERIFY_WAIT: "0",
           CURL_CA_BUNDLE: join(certDir, "fullchain.pem"),
         },
       });
@@ -1569,9 +1569,9 @@ describe.skipIf(runningAsRoot)(
         encoding: "utf8",
         env: {
           ...registrarEnv(host),
-          PSILINK_RELAY_REGISTRAR_PORT: "1",
-          PSILINK_RELAY_VERIFY_CONNECT: "127.0.0.1",
-          PSILINK_RELAY_VERIFY_WAIT: "0",
+          ALCOVE_RELAY_REGISTRAR_PORT: "1",
+          ALCOVE_RELAY_VERIFY_CONNECT: "127.0.0.1",
+          ALCOVE_RELAY_VERIFY_WAIT: "0",
         },
       });
       expect(result.status).toBe(1);
@@ -1595,8 +1595,8 @@ describe.skipIf(runningAsRoot)("verify.sh cleanup", { timeout: 60000 }, () => {
 
   it("replaces a key an earlier run left under its id, then removes it", () => {
     const host = fixtureHost();
-    host.register("psilink-verify-a", KEY_A, "none", {
-      PSILINK_RELAY_VERIFY_RUN: "1",
+    host.register("alcove-verify-a", KEY_A, "none", {
+      ALCOVE_RELAY_VERIFY_RUN: "1",
     });
     const result = host.verify();
     expect(result.stderr).not.toContain("WARNING");
@@ -1606,16 +1606,16 @@ describe.skipIf(runningAsRoot)("verify.sh cleanup", { timeout: 60000 }, () => {
 
   it("warns naming the exchange id, not the key, when the table cannot be written", () => {
     const host = fixtureHost();
-    host.register("psilink-verify-a", KEY_A, "none", {
-      PSILINK_RELAY_VERIFY_RUN: "1",
+    host.register("alcove-verify-a", KEY_A, "none", {
+      ALCOVE_RELAY_VERIFY_RUN: "1",
     });
     host.makeTableReadOnly();
     const result = host.verify();
     expect(result.stdout).toContain(
-      "could not register psilink-verify-a for this run",
+      "could not register alcove-verify-a for this run",
     );
     expect(result.stderr).toContain(
-      "WARNING: could not revoke psilink-verify-a",
+      "WARNING: could not revoke alcove-verify-a",
     );
     for (const stream of [result.stdout, result.stderr]) {
       expect(stream).not.toMatch(HEX64);
@@ -1668,20 +1668,20 @@ describe("the units that run as the relay image's account", () => {
   it("run as the image's uid and gid, which install.sh renders into both", () => {
     const install = readFileSync(join(relay, "install.sh"), "utf8");
     for (const name of [
-      "psilink-relay-registrar.service",
-      "psilink-relay-sweep.service",
+      "alcove-relay-registrar.service",
+      "alcove-relay-sweep.service",
     ]) {
-      expect(unit(name)).toContain("User=__PSILINK_RELAY_IMAGE_UID__\n");
-      expect(unit(name)).toContain("Group=__PSILINK_RELAY_IMAGE_GID__\n");
+      expect(unit(name)).toContain("User=__ALCOVE_RELAY_IMAGE_UID__\n");
+      expect(unit(name)).toContain("Group=__ALCOVE_RELAY_IMAGE_GID__\n");
       expect(install).toContain(name);
     }
-    expect(install).toContain("s/__PSILINK_RELAY_IMAGE_UID__/$IMAGE_UID/g");
-    expect(install).toContain("s/__PSILINK_RELAY_IMAGE_GID__/$IMAGE_GID/g");
+    expect(install).toContain("s/__ALCOVE_RELAY_IMAGE_UID__/$IMAGE_UID/g");
+    expect(install).toContain("s/__ALCOVE_RELAY_IMAGE_GID__/$IMAGE_GID/g");
   });
 
   it("carry the same sandbox, the sweep adding only its lack of a network", () => {
-    const registrar = directives(unit("psilink-relay-registrar.service"));
-    const sweep = directives(unit("psilink-relay-sweep.service"));
+    const registrar = directives(unit("alcove-relay-registrar.service"));
+    const sweep = directives(unit("alcove-relay-sweep.service"));
     expect(sweep.filter((line) => !registrar.includes(line))).toEqual([
       "PrivateNetwork=true",
       "RestrictAddressFamilies=AF_UNIX",
@@ -1692,7 +1692,7 @@ describe("the units that run as the relay image's account", () => {
     for (const line of [
       "NoNewPrivileges=true",
       "ProtectSystem=strict",
-      "ReadWritePaths=/var/lib/psilink-relay",
+      "ReadWritePaths=/var/lib/alcove-relay",
       "ProtectControlGroups=true",
       "CapabilityBoundingSet=",
     ]) {

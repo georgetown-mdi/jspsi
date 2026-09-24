@@ -35,8 +35,8 @@
   },
   "remoteUser": "node",
   "mounts": [
-    "source=psilink-claude-config-${devcontainerId},target=/home/node/.claude,type=volume",
-    "source=psilink-node-modules-${devcontainerId},target=/workspace/node_modules,type=volume"
+    "source=alcove-claude-config-${devcontainerId},target=/home/node/.claude,type=volume",
+    "source=alcove-node-modules-${devcontainerId},target=/workspace/node_modules,type=volume"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",

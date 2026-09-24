@@ -11,7 +11,7 @@ import {
   prepareForExchange,
   sanitizeErrorChainLinks,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   JobApiRequestError,
@@ -235,12 +235,12 @@ export function failureFor(
   )
     return {
       category: "config",
-      title: "Your working folder has no .psilink.key",
+      title: "Your working folder has no .alcove.key",
       message:
         "The console did not start this exchange. It continues the exchange " +
-        "your psilink.yaml set up, under the .psilink.key beside it, and " +
+        "your alcove.yaml set up, under the .alcove.key beside it, and " +
         "there is none in your working folder. Put this exchange's " +
-        ".psilink.key back beside psilink.yaml, then start the run again. If " +
+        ".alcove.key back beside alcove.yaml, then start the run again. If " +
         "you no longer have it, close the configuration and create a new " +
         "invitation for your partner.",
     };
@@ -250,12 +250,12 @@ export function failureFor(
   )
     return {
       category: "config",
-      title: "The .psilink.key in your working folder cannot be read",
+      title: "The .alcove.key in your working folder cannot be read",
       message:
-        "The console did not start this exchange. The .psilink.key beside " +
-        "psilink.yaml in your working folder is not a key file psilink can " +
+        "The console did not start this exchange. The .alcove.key beside " +
+        "alcove.yaml in your working folder is not a key file Alcove can " +
         "read. Check that it is a regular file with read permission, holding " +
-        "the key psilink wrote for this exchange, then start the run again. " +
+        "the key Alcove wrote for this exchange, then start the run again. " +
         "If you no longer have that key, close the configuration and create a " +
         "new invitation for your partner.",
     };
@@ -267,7 +267,7 @@ export function failureFor(
       category: "config",
       title: "This configuration names its own signing paths",
       message:
-        "The console did not start this exchange. Your psilink.yaml names " +
+        "The console did not start this exchange. Your alcove.yaml names " +
         "its own signing identity or receipt file, and the console signs only " +
         "with its own. Convert the configuration on the first step to sign " +
         "with the console's identity, or turn the signed receipt off to run " +

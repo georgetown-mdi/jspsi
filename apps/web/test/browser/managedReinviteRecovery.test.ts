@@ -2,7 +2,7 @@
 /// <reference types="vite/client" />
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   ManagedExchangeLockUnavailableError,
@@ -32,7 +32,7 @@ import { managedRunFailureFromRecord } from "@recurring/managedRunLaunchModel";
 import { reinviteManagedExchange } from "@psi/managed/managedReinviteDriver";
 
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 // The fast re-invite recovery, driven against the real store: a re-invite rotates the
 // stored secret, drops the consumed failure bookkeeping, clears the restore markers,

@@ -34,7 +34,7 @@ against the same user-data.
 
 **On this AMI the relay runs under docker.** AL2023 publishes no `podman` package
 and carries no EPEL, so `install.sh` installs Docker Engine from `dnf` and
-supervises the container with `psilink-relay-docker.service` rather than the
+supervises the container with `alcove-relay-docker.service` rather than the
 Quadlet unit. Nothing else about the install changes; see
 [Supervision and the container runtime](../README.md#supervision-and-the-container-runtime).
 
@@ -78,26 +78,26 @@ set -euo pipefail
 # branch trails staging by hundreds of commits and predates infra/relay, so a
 # clone of it has nothing here to install. This becomes main once the pending
 # staging release lands.
-PSILINK_RELAY_SRC_REF=staging
+ALCOVE_RELAY_SRC_REF=staging
 dnf -y install git
-git clone --depth 1 --branch "$PSILINK_RELAY_SRC_REF" \
-  https://github.com/georgetown-mdi/jspsi /opt/psilink-src
-install -d -m 700 /etc/psilink-relay
-install -m 600 /opt/psilink-src/infra/relay/relay.env.example /etc/psilink-relay/relay.env
-sed -i 's/^PSILINK_RELAY_REALM=.*/PSILINK_RELAY_REALM=relay.example.org/' /etc/psilink-relay/relay.env
+git clone --depth 1 --branch "$ALCOVE_RELAY_SRC_REF" \
+  https://github.com/georgetown-mdi/alcove /opt/alcove-src
+install -d -m 700 /etc/alcove-relay
+install -m 600 /opt/alcove-src/infra/relay/relay.env.example /etc/alcove-relay/relay.env
+sed -i 's/^ALCOVE_RELAY_REALM=.*/ALCOVE_RELAY_REALM=relay.example.org/' /etc/alcove-relay/relay.env
 # The DNS provider credential, from wherever this account keeps secrets. It is
 # not in the repository and not in user-data, which is readable from the
 # instance metadata service by anything running on the box.
-install -m 600 /dev/stdin /etc/psilink-relay/acme.env <<'ACME'
-PSILINK_RELAY_ACME_EMAIL=relay-admin@example.org
-PSILINK_RELAY_ACME_CLIENT=lego
-PSILINK_RELAY_DNS_PROVIDER=cloudflare
+install -m 600 /dev/stdin /etc/alcove-relay/acme.env <<'ACME'
+ALCOVE_RELAY_ACME_EMAIL=relay-admin@example.org
+ALCOVE_RELAY_ACME_CLIENT=lego
+ALCOVE_RELAY_DNS_PROVIDER=cloudflare
 CLOUDFLARE_DNS_API_TOKEN=REPLACE_WITH_YOUR_DNS_TOKEN
 ACME
-/opt/psilink-src/infra/relay/install.sh
+/opt/alcove-src/infra/relay/install.sh
 ```
 
-**`PSILINK_RELAY_SRC_REF` is not optional.** A clone with no `--branch` takes the
+**`ALCOVE_RELAY_SRC_REF` is not optional.** A clone with no `--branch` takes the
 repository's default branch, which trails `staging` by hundreds of commits and
 does not carry `infra/relay` at all -- the install fails at the
 `relay.env.example` copy two lines later, before anything has been installed, and
@@ -122,7 +122,7 @@ box, behind a self-signed certificate. Once this instance is serving:
 - Stop and remove that user-space coturn build and its unit or launch script.
 - Delete its self-signed certificate and key. Nothing should be able to start a
   second TURN server on that box by accident, and a self-signed certificate is
-  one a psilink party refuses to gather a relay candidate against anyway.
+  one an Alcove party refuses to gather a relay candidate against anyway.
 - Close 443/tcp, 3478, and the old relay range in that box's security group. Its
   remaining duty is the demo SFTP server.
 - Leave the box itself: it keeps its demo duty, and

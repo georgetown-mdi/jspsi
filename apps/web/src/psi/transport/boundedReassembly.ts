@@ -2,7 +2,7 @@
 // (docs/spec/CHANNEL_SECURITY.md): it wraps this connection class's reassembly
 // and unpack internals to enforce the bounds at the points PeerJS leaves
 // unbounded. The transport-agnostic half -- the fixed bound constants and the
-// BinaryPack structural pre-scan they parameterize -- lives in `@psilink/core`
+// BinaryPack structural pre-scan they parameterize -- lives in `@alcove/core`
 // (connection/binaryPackBounds.ts), so every WebRTC transport enforces one
 // implementation of them.
 
@@ -16,7 +16,7 @@ import {
   MIN_CHUNK_RESIDENT_BYTES,
   describeFrameStructureRefusal,
   scanFrameStructure,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { DataConnection } from "peerjs";
 

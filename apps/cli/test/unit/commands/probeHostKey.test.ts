@@ -6,8 +6,8 @@ import {
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   UsageError,
-} from "@psilink/core";
-import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
+} from "@alcove/core";
+import type { PresentedHostKey, SFTPConnectionConfig } from "@alcove/core";
 
 import {
   buildProbeConfig,

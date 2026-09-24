@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { describe, expect, test, vi } from "vitest";
-import { redactAndSanitizeForDisplay } from "@psilink/core";
+import { redactAndSanitizeForDisplay } from "@alcove/core";
 
 import {
   MAX_DEFERRED_CLEANUP_DELETES,

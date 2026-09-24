@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
+import { FileSyncConnection } from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { createRawSftpClient } from "../rawSftpClient";

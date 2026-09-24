@@ -15,7 +15,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="${PSILINK_DEMO_ENV:-$HERE/env}"
+ENV_FILE="${ALCOVE_DEMO_ENV:-$HERE/env}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
@@ -24,47 +24,47 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 
-for required in PSILINK_DEMO_INSTANCE_ID PSILINK_DEMO_REGION PSILINK_DEMO_PROFILE; do
+for required in ALCOVE_DEMO_INSTANCE_ID ALCOVE_DEMO_REGION ALCOVE_DEMO_PROFILE; do
   eval "value=\${$required:-}"
   [ -n "$value" ] || die "$required is unset in $ENV_FILE; refusing to guess which instance to start"
 done
 
 aws_demo() {
-  aws --profile "$PSILINK_DEMO_PROFILE" --region "$PSILINK_DEMO_REGION" "$@"
+  aws --profile "$ALCOVE_DEMO_PROFILE" --region "$ALCOVE_DEMO_REGION" "$@"
 }
 
 state() {
-  aws_demo ec2 describe-instances --instance-ids "$PSILINK_DEMO_INSTANCE_ID" \
+  aws_demo ec2 describe-instances --instance-ids "$ALCOVE_DEMO_INSTANCE_ID" \
     --query 'Reservations[0].Instances[0].State.Name' --output text
 }
 
-BEFORE="$(state)" || die "could not read $PSILINK_DEMO_INSTANCE_ID in $PSILINK_DEMO_REGION"
+BEFORE="$(state)" || die "could not read $ALCOVE_DEMO_INSTANCE_ID in $ALCOVE_DEMO_REGION"
 case "$BEFORE" in
   running)
-    log "$PSILINK_DEMO_INSTANCE_ID is already running"
+    log "$ALCOVE_DEMO_INSTANCE_ID is already running"
     ;;
   stopped)
-    log "starting $PSILINK_DEMO_INSTANCE_ID"
-    aws_demo ec2 start-instances --instance-ids "$PSILINK_DEMO_INSTANCE_ID" >/dev/null
+    log "starting $ALCOVE_DEMO_INSTANCE_ID"
+    aws_demo ec2 start-instances --instance-ids "$ALCOVE_DEMO_INSTANCE_ID" >/dev/null
     ;;
   pending)
-    log "$PSILINK_DEMO_INSTANCE_ID is already starting"
+    log "$ALCOVE_DEMO_INSTANCE_ID is already starting"
     ;;
   *)
-    die "$PSILINK_DEMO_INSTANCE_ID is '$BEFORE'; start it by hand or wait for it to settle"
+    die "$ALCOVE_DEMO_INSTANCE_ID is '$BEFORE'; start it by hand or wait for it to settle"
     ;;
 esac
 
 log "waiting for it to run"
-aws_demo ec2 wait instance-running --instance-ids "$PSILINK_DEMO_INSTANCE_ID"
+aws_demo ec2 wait instance-running --instance-ids "$ALCOVE_DEMO_INSTANCE_ID"
 
-PUBLIC_IP="$(aws_demo ec2 describe-instances --instance-ids "$PSILINK_DEMO_INSTANCE_ID" \
+PUBLIC_IP="$(aws_demo ec2 describe-instances --instance-ids "$ALCOVE_DEMO_INSTANCE_ID" \
   --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
 [ -n "$PUBLIC_IP" ] && [ "$PUBLIC_IP" != "None" ] \
   || die "the instance is running but has no public address"
-log "$PSILINK_DEMO_INSTANCE_ID is running on $PUBLIC_IP"
+log "$ALCOVE_DEMO_INSTANCE_ID is running on $PUBLIC_IP"
 
-if [ -z "${PSILINK_DEMO_DNS_NAME:-}" ] || [ -z "${CF_ZONE_NAME:-}" ] || [ -z "${CF_DNS_API_TOKEN:-}" ]; then
+if [ -z "${ALCOVE_DEMO_DNS_NAME:-}" ] || [ -z "${CF_ZONE_NAME:-}" ] || [ -z "${CF_DNS_API_TOKEN:-}" ]; then
   printf '%s\n' "$PUBLIC_IP"
   log "no zone configured; DNS was not touched"
   exit 0
@@ -76,13 +76,13 @@ ZONE_ID="$(curl -fsS -H "Authorization: Bearer $CF_DNS_API_TOKEN" \
 [ -n "$ZONE_ID" ] || die "could not resolve the zone id for $CF_ZONE_NAME"
 
 RECORD_ID="$(curl -fsS -H "Authorization: Bearer $CF_DNS_API_TOKEN" \
-  "$CF_API/zones/$ZONE_ID/dns_records?type=A&name=$PSILINK_DEMO_DNS_NAME" \
+  "$CF_API/zones/$ZONE_ID/dns_records?type=A&name=$ALCOVE_DEMO_DNS_NAME" \
   | jq -r '.result[0].id // empty')"
 
 # A 60 s TTL, because the address changes on every start and a partner's resolver
 # holding the last one is exactly the shape that made a per-exchange name
 # unworkable in the relay measurement.
-BODY="$(jq -nc --arg name "$PSILINK_DEMO_DNS_NAME" --arg ip "$PUBLIC_IP" \
+BODY="$(jq -nc --arg name "$ALCOVE_DEMO_DNS_NAME" --arg ip "$PUBLIC_IP" \
   '{type:"A", name:$name, content:$ip, ttl:60, proxied:false}')"
 
 # Upsert: a PUT when the record exists, a POST when it does not, so a demo box
@@ -99,5 +99,5 @@ fi
 [ "$(printf '%s' "$RESP" | jq -r '.success')" = "true" ] \
   || die "the DNS update failed: $(printf '%s' "$RESP" | jq -c '.errors')"
 
-log "$PSILINK_DEMO_DNS_NAME now points at $PUBLIC_IP (TTL 60)"
+log "$ALCOVE_DEMO_DNS_NAME now points at $PUBLIC_IP (TTL 60)"
 printf '%s\n' "$PUBLIC_IP"

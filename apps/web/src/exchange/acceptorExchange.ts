@@ -1,8 +1,8 @@
-import { prepareForExchange } from "@psilink/core";
+import { prepareForExchange } from "@alcove/core";
 
 import { acceptorExchangeDataSpec } from "@psi/acceptInvitation";
 
-import type { CSVRow, LinkageTerms, PreparedExchange } from "@psilink/core";
+import type { CSVRow, LinkageTerms, PreparedExchange } from "@alcove/core";
 
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 

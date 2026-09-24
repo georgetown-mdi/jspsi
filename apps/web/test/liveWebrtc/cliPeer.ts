@@ -10,7 +10,7 @@ import { trackChild } from "./childProcess.ts";
 import type { LiveLegCliOutcome, MatchedPair } from "./legTypes.ts";
 
 /**
- * The `psilink invite` party of the live WebRTC leg: the real command-line
+ * The `alcove invite` party of the live WebRTC leg: the real command-line
  * program, spawned the way the console's job driver spawns it, holding the
  * inviter seat while the browser peer accepts.
  *
@@ -62,7 +62,7 @@ const CLI_CSV =
  * the agreed terms. */
 export const CLI_IDENTITY = "Agency A, a@agency-a.example";
 
-/** A `psilink invite` that has printed its invitation and is waiting for the
+/** An `alcove invite` that has printed its invitation and is waiting for the
  * partner. */
 export interface CliInviter {
   /** The invitation it printed, for the browser peer to accept. */
@@ -110,7 +110,7 @@ function readPairs(
 }
 
 /**
- * Spawn `psilink invite` against `brokerUrl` and resolve once it has printed
+ * Spawn `alcove invite` against `brokerUrl` and resolve once it has printed
  * its invitation.
  *
  * Rejects with a {@link LEG_ENVIRONMENT_FAILURE} message when the CLI is not
@@ -133,7 +133,7 @@ export async function startCliInviter(
         `${program.entry}, which is absent. Run 'npm run build -w apps/cli'.`,
     );
 
-  const work = mkdtempSync(path.join(tmpdir(), "psilink-live-webrtc-"));
+  const work = mkdtempSync(path.join(tmpdir(), "alcove-live-webrtc-"));
   const inputPath = path.join(work, "input.csv");
   const outputPath = path.join(work, "result.csv");
   writeFileSync(inputPath, CLI_CSV);
@@ -147,9 +147,9 @@ export async function startCliInviter(
       inputPath,
       outputPath,
       "--config-file",
-      path.join(work, "psilink.yaml"),
+      path.join(work, "alcove.yaml"),
       "--key-file",
-      path.join(work, "psilink.key"),
+      path.join(work, "alcove.key"),
       "--identity",
       CLI_IDENTITY,
       "--accept-timeout",

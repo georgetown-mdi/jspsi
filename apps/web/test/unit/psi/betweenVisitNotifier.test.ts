@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
 import {
   betweenVisitNotificationState,
@@ -16,7 +16,7 @@ import type { BetweenVisitNotice } from "@psi/managed/betweenVisitNotice";
 // permission, a dismissed prompt, an engine with no notification API at all --
 // leaves the app showing nothing between visits.
 
-const OPT_IN_KEY = "psilink-between-visit-notifications";
+const OPT_IN_KEY = "alcove-between-visit-notifications";
 
 const NOTICE: BetweenVisitNotice = {
   kind: "backup",

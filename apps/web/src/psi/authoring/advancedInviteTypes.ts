@@ -11,7 +11,7 @@ import type {
   OwnColumnSelection,
   Payload,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The shared data model of the inviter's authoring console: the draft the editor

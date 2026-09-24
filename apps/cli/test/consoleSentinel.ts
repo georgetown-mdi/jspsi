@@ -41,7 +41,7 @@
 
 import { inspect } from "node:util";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 /** A console sink the sentinel gates. */
 export type ConsoleLevel = "log" | "warn" | "error";

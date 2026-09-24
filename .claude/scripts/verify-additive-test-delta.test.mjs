@@ -141,7 +141,7 @@ describe("inserted-line content", () => {
       '  vi.doMock("node:fs");',
       '  vi.spyOn(process, "exit").mockImplementation(() => undefined);',
       '  vi.stubGlobal("fetch", stub);',
-      '  vi.stubEnv("PSILINK_ALLOW", "1");',
+      '  vi.stubEnv("ALCOVE_ALLOW", "1");',
       "  vi.useFakeTimers();",
       "  expect.extend({ toBeSafe: () => ({ pass: true }) });",
       'import { vi as v } from "vitest";\nv.spyOn(process, "exit");',

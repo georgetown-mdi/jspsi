@@ -1,10 +1,10 @@
 ---
-title: "psilink Communication"
+title: "Alcove Communication"
 ---
 
-# psilink communication
+# Alcove communication
 
-This document covers the communication channels available for psilink exchanges, how parties synchronize protocol steps, how the web invitation and acceptance flows disclose and gate consent, how errors are handled, and what supporting services are required. Authentication and channel security are not covered here - see [SECURITY_DESIGN.md](SECURITY_DESIGN.md) for those topics. It does not cover the PSI protocol itself (see [PROTOCOL.md](spec/PROTOCOL.md)) or CLI configuration (see [CLI.md](CLI.md)). The classification rationale behind the terminal `ConnectionErrorKind` taxonomy is recorded in [a design note](notes/connection-error-kind-taxonomy.md). Intended readers are IT staff and developers.
+This document covers the communication channels available for Alcove exchanges, how parties synchronize protocol steps, how the web invitation and acceptance flows disclose and gate consent, how errors are handled, and what supporting services are required. Authentication and channel security are not covered here - see [SECURITY_DESIGN.md](SECURITY_DESIGN.md) for those topics. It does not cover the PSI protocol itself (see [PROTOCOL.md](spec/PROTOCOL.md)) or CLI configuration (see [CLI.md](CLI.md)). The classification rationale behind the terminal `ConnectionErrorKind` taxonomy is recorded in [a design note](notes/connection-error-kind-taxonomy.md). Intended readers are IT staff and developers.
 
 ## Channels
 
@@ -139,7 +139,7 @@ A sentence that qualifies a headline renders at the same visibility level as tha
 
 - `psi-c`'s count-only guarantee is disclosure-critical, so it and the tier bounding it -- what the rounds still disclose, whose word the count arrives on, and what a partner's choice of input defeats -- are always-visible in the core.
 - The deduplicate and fuzzy-comparison headlines state match multiplicity and breadth rather than a disclosure guarantee, so they sit inside a disclosure and what qualifies each sits with it: the fuzzy expansion is run, and its line is flagged only where the exchange will refuse the terms outright -- a count-only run, which resolves no candidate set, and where the swapped key order is flagged the same way -- and deduplicate is run, so its line states what a deduplicating match reveals.
-- Which statement follows the invitation's output direction, since that decides who reads the grouping: where the result is shared with the accepting party, that party learns, for each of its own matched records, how many of the inviting party's records share the matched value and which rows they are -- as a count and row positions rather than the value, and as that party's own unverified declaration. Where the inviting party is the sole receiver, the grouping goes to it alone: the accepting party is sent no result, so psilink presents it no group sizes and no row positions.
+- Which statement follows the invitation's output direction, since that decides who reads the grouping: where the result is shared with the accepting party, that party learns, for each of its own matched records, how many of the inviting party's records share the matched value and which rows they are -- as a count and row positions rather than the value, and as that party's own unverified declaration. Where the inviting party is the sole receiver, the grouping goes to it alone: the accepting party is sent no result, so Alcove presents it no group sizes and no row positions.
 - The limit on that withholding sits beside the statement as a fact of its own, in the register that rests on the software each party runs rather than on the exchange: the matching rounds do bring the grouping to the accepting party's software, and it is this client rather than the wire that keeps it off that operator's screen.
 - Beside either statement, at the same level, sits the note of whose records are grouped to disclose it: accepting turns the setting on for the inviting party alone, the accepting party's own records staying ungrouped. The same note states what the setting still costs that party -- more of the accepting party's records can match than a plain one-to-one run of the same two files would, each disclosing its membership and any payload columns that party sends -- and names the per-party configuration path to the other direction.
 

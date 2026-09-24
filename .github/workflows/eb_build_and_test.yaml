@@ -105,7 +105,7 @@ jobs:
     steps:
       - name: Checkout source code
         uses: actions/checkout@v7
-      # Pins Node, installs from the lockfile, and builds @psilink/core.
+      # Pins Node, installs from the lockfile, and builds @alcove/core.
       - name: Set up and build core
         uses: ./.github/actions/setup
       # eb_deploy.yaml's push filter is narrower than the trees it names, on the
@@ -173,20 +173,20 @@ jobs:
       matrix:
         include:
           # The core unit suite runs on this gate because the deployed server
-          # bundles @psilink/core. test:unit is the same vitest project as
+          # bundles @alcove/core. test:unit is the same vitest project as
           # `npm test -w packages/core` without that script's pretest rebuild:
           # the setup action has already restored or built packages/core/dist and
           # restamped its mtimes, so the rebuild would only repeat it.
           - suite: core
             command: npm run test:unit -w packages/core
           # Web unit tests run in the node environment against the already-built
-          # @psilink/core -- no dev server, browser, or Docker (the integration
+          # @alcove/core -- no dev server, browser, or Docker (the integration
           # and browser projects are the ones that stand up a server), so the
           # shared setup is all this leg needs.
           - suite: web unit
             command: npm run test:unit -w apps/web
             web-suite: "true"
-          # The cross-runtime suite drives the real `psilink` program against a
+          # The cross-runtime suite drives the real `alcove` program against a
           # party built from this app's own exchange modules, so it needs the CLI
           # built -- no other leg here does. It stands up no server and no
           # browser: its whole world is a temporary file-drop directory.
@@ -226,7 +226,7 @@ jobs:
             playwright: "true"
     steps:
       - uses: actions/checkout@v7
-      # Pins Node, installs from the lockfile, and builds @psilink/core. Those
+      # Pins Node, installs from the lockfile, and builds @alcove/core. Those
       # two are what every leg would otherwise repeat; the action restores both
       # from content-keyed caches, so they are paid once per lockfile and
       # core-source state across the whole repository rather than once per leg.

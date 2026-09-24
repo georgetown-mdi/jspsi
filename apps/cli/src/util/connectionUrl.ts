@@ -1,4 +1,4 @@
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
 /**
  * Render a URL as a string with any embedded credentials (the userinfo

@@ -1,6 +1,6 @@
 import Peer from "peerjs";
 
-import { deriveRendezvousPeerId } from "@psilink/core";
+import { deriveRendezvousPeerId } from "@alcove/core";
 
 import type { DataConnection } from "peerjs";
 

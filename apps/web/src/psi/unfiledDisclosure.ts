@@ -24,16 +24,16 @@
 
 import { z } from "zod";
 
-import { parseExchangeRecord } from "@psilink/core";
+import { parseExchangeRecord } from "@alcove/core";
 
-import type { ExchangeRecord } from "@psilink/core";
+import type { ExchangeRecord } from "@alcove/core";
 import type { ZodType } from "zod";
 
 /** The single recognized format version for a stored note. A reader rejects any
  * other value rather than migrating it, the reader-rejects-unknown rule the
  * record and the accounting of disclosures follow (see
  * docs/spec/EXCHANGE_RECORD.md). */
-export const UNFILED_DISCLOSURE_VERSION = "psilink-unfiled-disclosure/v1";
+export const UNFILED_DISCLOSURE_VERSION = "alcove-unfiled-disclosure/v2";
 
 /** The second element of the note's key, which is what separates it from the
  * accounting stored under the exchange id alone. */

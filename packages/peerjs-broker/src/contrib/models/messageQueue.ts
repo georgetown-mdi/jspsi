@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { parseBoundedJson } from "@psilink/core/untrusted-text";
+import { parseBoundedJson } from "@alcove/core/untrusted-text";
 
 import type { IMessage } from "./message.ts";
 

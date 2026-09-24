@@ -17,7 +17,7 @@ import {
   DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   LINKAGE_RULE_SET_VERDICT_COPY,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   SINGLE_PASS_DISCLOSURE_BODY,
@@ -327,7 +327,7 @@ const CONFIGURED_SFTP = {
   port: 2222,
 };
 
-const ATTACHMENT_KEY = "psilink-console-last-job";
+const ATTACHMENT_KEY = "alcove-console-last-job";
 
 /** Persist a console strand-recovery record so the recovery panel has a job to
  * offer on mount, the same shape `consoleRecovery.test.ts` writes. */
@@ -1122,7 +1122,7 @@ describe("console direct re-attaches on a busy create", () => {
     usedSigningIdentity: false,
     template: {
       kind: "command",
-      argv: ["psilink", "exchange", "clients.csv", "results.csv"],
+      argv: ["alcove", "exchange", "clients.csv", "results.csv"],
     },
   } satisfies JobHandoff;
 
@@ -1189,7 +1189,7 @@ describe("console direct re-attaches on a busy create", () => {
     );
     expect(
       JSON.parse(
-        window.localStorage.getItem("psilink-console-last-job") ?? "null",
+        window.localStorage.getItem("alcove-console-last-job") ?? "null",
       ),
     ).toMatchObject({ jobId: "job-live", seat: "inviter" });
 
@@ -1609,7 +1609,7 @@ describe("direct-exchange recoveries against the run's exchange record", () => {
     await expect
       .element(
         page.getByRole("link", {
-          name: `Download record (safe to share): psilink-record-${RECORD_STAMP}.json`,
+          name: `Download record (safe to share): alcove-record-${RECORD_STAMP}.json`,
         }),
       )
       .toBeInTheDocument();
@@ -1675,7 +1675,7 @@ describe("console lobby recurring-exchange surface", () => {
     await expect
       .element(
         page.getByRole("heading", {
-          name: "psilink - private record linkage",
+          name: "Alcove - encrypted matching and sharing",
         }),
       )
       .toBeInTheDocument();

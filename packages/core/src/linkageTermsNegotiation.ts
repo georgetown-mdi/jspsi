@@ -93,7 +93,7 @@ import type {
  * SCHEMA's own issues rather than an account of one shape, so the refusal
  * names the rule the derived document broke. Each issue is delimited
  * ({@link quoteTermsValueList}), so a value one of them names cannot spell a
- * clause of psilink's own; `identity` -- the one substituted value, and the
+ * clause of Alcove's own; `identity` -- the one substituted value, and the
  * accepting operator's own -- is refused above under an account naming the
  * local input if it fails its own rules.
  *
@@ -304,7 +304,7 @@ interface CompatibilityResult {
  * Every diagnostic it composes names its terms values through the
  * delimiting boundary in `config/compatibilityMessage.ts`, so no value a
  * partner chooses can close a delimiter or spell a second clause of
- * psilink's own prose. Enforced by type: the two accumulators hold
+ * Alcove's own prose. Enforced by type: the two accumulators hold
  * `CompatibilityMessageFragment`, so a message composed any other way does
  * not compile. `test/config/compatibilityMessage.test.ts` drives adversarial value
  * shapes through each message and asserts the clause structure holds.

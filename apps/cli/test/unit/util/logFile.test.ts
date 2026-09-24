@@ -11,7 +11,7 @@ import {
   sanitizeErrorForDisplay,
   setDiagnosticSink,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { configureLogFile } from "../../../src/util/logging";
 import { parseCommonBootstrapArgs } from "../../../src/optionDefinitions";
@@ -31,7 +31,7 @@ let tmpDir: string;
 snapshotDiagnosticSinkAndLevel();
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-logfile-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-logfile-"));
 });
 
 afterEach(() => {

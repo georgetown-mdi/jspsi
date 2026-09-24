@@ -30,7 +30,7 @@ import {
   UsageError,
   verifyDualSignedRecord,
   verifyExchangeRecord,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   AnchoredCertificateStatus,
   AssertedIdentityStatus,
@@ -52,7 +52,7 @@ import type {
   TermsHashStatus,
   UnanchoredCertificateClause,
   VerificationKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   readConfigLinkageSource,
@@ -73,7 +73,7 @@ import {
 import { csvDelimiterFlag, parseOrExit, singleValue } from "../util/flags";
 import { configureLogging, logLevelFlag } from "../util/logging";
 
-// `psilink verify-receipt` reports whether a stored exchange artifact holds up. It
+// `alcove verify-receipt` reports whether a stored exchange artifact holds up. It
 // is READ-ONLY -- it never mutates or re-signs an artifact -- and it verifies the
 // two artifacts an exchange produces, separately or together:
 //
@@ -112,8 +112,8 @@ export function builder(cmd: Argv): Argv {
       type: "string",
       describe:
         "the stored artifact to verify: an exchange record " +
-        "(psilink-record-*.json) or a dual-signed record " +
-        "(psilink-receipt-*.json)",
+        "(alcove-record-*.json) or a dual-signed record " +
+        "(alcove-receipt-*.json)",
     })
     .positional("input-file", {
       type: "string",
@@ -136,7 +136,7 @@ export function builder(cmd: Argv): Argv {
     .option("signed-record", {
       type: "string",
       describe:
-        "the dual-signed record for this exchange (psilink-receipt-*.json); " +
+        "the dual-signed record for this exchange (alcove-receipt-*.json); " +
         "checks both parties' signatures and certificates alongside the record, " +
         "and that the two artifacts are from the same run",
     })
@@ -356,7 +356,7 @@ export function firstIssue(err: unknown): string {
 }
 
 // toRetainedResult and deriveOurIdColumn are browser-safe shaping helpers that
-// live in @psilink/core; re-exported here so this command and its tests keep a
+// live in @alcove/core; re-exported here so this command and its tests keep a
 // single import site.
 export { deriveOurIdColumn, toRetainedResult };
 
@@ -529,7 +529,7 @@ export function formatVerificationReport(
           "dual-signed record."
       : "  partner receipt signatures are not checked here; this record is " +
           "self-attested. Pass --signed-record with the exchange's dual-signed " +
-          "record (psilink-receipt-*.json) to check them.",
+          "record (alcove-receipt-*.json) to check them.",
   );
   return {
     lines,
@@ -758,8 +758,8 @@ export function formatSignedRecordReport(
   if (verdict.runBinding.pairByStamp)
     lines.push(
       "  note: an exchange writes its record and its receipt together, under one " +
-        "timestamp stamp by default (psilink-record-<stamp>.json and " +
-        "psilink-receipt-<stamp>.json), so pair them by that stamp.",
+        "timestamp stamp by default (alcove-record-<stamp>.json and " +
+        "alcove-receipt-<stamp>.json), so pair them by that stamp.",
     );
   // The binder is never RECOMPUTED: deriving it needs the exchange's session key,
   // which only the two parties ever held and neither retains. What an offline
@@ -874,7 +874,7 @@ export interface ConfigSigningBlock {
  * configured. Only the two fields this command uses are read from it.
  *
  * `explicit` marks a path named on the command line: a missing explicit
- * path is a usage error, not an empty block (the same distinction `psilink
+ * path is a usage error, not an empty block (the same distinction `alcove
  * fingerprint` draws for its own config hint) -- so a typo'd `--config-file`
  * does not silently verify unanchored.
  * @internal exported for testing
@@ -920,7 +920,7 @@ export function readConfigSigningBlock(
 const MALFORMED_PARTNER_PIN_REMEDY =
   " has a signing.partner_fingerprint that is not a certificate fingerprint " +
   "(an unpadded base64url SHA-256 digest, 43 characters); obtain it from " +
-  "your partner via 'psilink fingerprint'";
+  "your partner via 'alcove fingerprint'";
 
 /**
  * `signing.partner_fingerprint` from the config's signing block. A malformed
@@ -989,7 +989,7 @@ function resolvePinnedFingerprints(
       throw new UsageError(
         "--partner-fingerprint must be a certificate fingerprint (an unpadded " +
           "base64url SHA-256 digest, 43 characters); obtain it from your " +
-          "partner via 'psilink fingerprint' and a trusted out-of-band channel",
+          "partner via 'alcove fingerprint' and a trusted out-of-band channel",
       );
   return flagValues;
 }
@@ -1073,7 +1073,7 @@ async function foundLocalIdentity(
 /**
  * This party's own anchor from the identity file the operator chose:
  * `--identity-file` first, then the config's `signing.identity_file`. With
- * neither, the slot is simply left unanchored -- psilink resolves no identity
+ * neither, the slot is simply left unanchored -- Alcove resolves no identity
  * path of its own, so there is nowhere else to look, and a verification run
  * needs no identity to reach a verdict.
  */

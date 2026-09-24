@@ -853,29 +853,29 @@ async function computeKexKeysUnderTag(
   h = await sha256(concatBytes(h, flagByte(rReq)));
   ck = await chain(ck, dh);
 
-  const confirmKey = await hkdfDerive(ck, "psilink-kex-v1:confirm", 32);
+  const confirmKey = await hkdfDerive(ck, "alcove-kex-v2:confirm", 32);
   return {
     sessionKey: await hkdfDerive(
       concatBytes(ck, h),
-      "psilink-kex-v1:session",
+      "alcove-kex-v2:session",
       32,
     ),
     initiatorConfirm: await hmacSha256(
       confirmKey,
-      concatBytes(encoder.encode("psilink-kex-v1:initiator-confirm"), h),
+      concatBytes(encoder.encode("alcove-kex-v2:initiator-confirm"), h),
     ),
     responderConfirm: await hmacSha256(
       confirmKey,
-      concatBytes(encoder.encode("psilink-kex-v1:responder-confirm"), h),
+      concatBytes(encoder.encode("alcove-kex-v2:responder-confirm"), h),
     ),
   };
 }
 
 const SHIPPED_PROTOCOL_NAME = vectors.construction.protocolName;
-const SUPERSEDED_PROTOCOL_NAME = "psilink-kex-v1:NNpsk0_25519_SHA256";
+const SUPERSEDED_PROTOCOL_NAME = "alcove-kex-v2:NNpsk0_25519_SHA256";
 
 test("the shipped protocol-version tag names the P-256 suite and differs from the superseded tag", () => {
-  expect(SHIPPED_PROTOCOL_NAME).toBe("psilink-kex-v2:NNpsk0_P256_SHA256");
+  expect(SHIPPED_PROTOCOL_NAME).toBe("alcove-kex-v3:NNpsk0_P256_SHA256");
   expect(SHIPPED_PROTOCOL_NAME).not.toBe(SUPERSEDED_PROTOCOL_NAME);
 });
 

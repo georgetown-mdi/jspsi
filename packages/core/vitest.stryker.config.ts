@@ -36,7 +36,7 @@ function widenTestNamePattern(pattern: RegExp): RegExp {
 // Stryker assigns the pattern to the resolved config before each mutant run,
 // so the widening happens on assignment rather than once at startup.
 const widenStrykerTestNamePattern = {
-  name: "psilink-stryker-test-name-pattern",
+  name: "alcove-stryker-test-name-pattern",
   configureVitest({
     vitest,
   }: {

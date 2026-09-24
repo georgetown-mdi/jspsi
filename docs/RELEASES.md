@@ -4,11 +4,11 @@ title: "Release Process"
 
 # Release Process
 
-This document describes how psilink releases are prepared, tagged, and published.
+This document describes how Alcove releases are prepared, tagged, and published.
 
 ## Versioning
 
-psilink uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
+Alcove uses [semantic versioning](https://semver.org/) (MAJOR.MINOR.PATCH):
 
 - **PATCH**: backwards-compatible bug fixes, documentation updates, dependency patches.
 - **MINOR**: backwards-compatible new features or new configuration fields. Exchange specification files written for an earlier MINOR version of the same MAJOR must continue to work.
@@ -29,7 +29,7 @@ Each release produces:
 | Docker image   | GitHub Container Registry (`ghcr.io/georgetown-mdi/alcove`) | `ghcr.io/georgetown-mdi/alcove:X.Y.Z`, `ghcr.io/georgetown-mdi/alcove:X.Y`, `ghcr.io/georgetown-mdi/alcove:latest` |
 | FIPS variant image | GitHub Container Registry (`ghcr.io/georgetown-mdi/alcove`) | `ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips`, `ghcr.io/georgetown-mdi/alcove:X.Y-fips`, `ghcr.io/georgetown-mdi/alcove:latest-fips` |
 | GitHub Release | GitHub Releases                | Tag `vX.Y.Z`                                                             |
-| Launchers      | GitHub Release assets          | `start-psilink.sh`, `Start-Psilink.ps1`, `Setup-PsilinkFileDrop.ps1`     |
+| Launchers      | GitHub Release assets          | `start-alcove.sh`, `Start-Alcove.ps1`, `Setup-AlcoveFileDrop.ps1`     |
 | Build provenance | GitHub attestation store     | Subject `ghcr.io/georgetown-mdi/alcove`, one attestation per released manifest digest |
 
 Each image contains both the CLI and the console; which role it runs is decided by its first argument (see [DEPLOYMENT.md](DEPLOYMENT.md#docker-deployment)). Both run unprivileged as uid 1000, take the same arguments, and speak the same protocol, so a partner on one can exchange with a partner on the other.
@@ -41,7 +41,7 @@ The hosted web deployment (`apps/web`) is a separate deployment to its hosting e
 The two tags differ in one thing: what serves the cryptography underneath `crypto.subtle`.
 
 - **`ghcr.io/georgetown-mdi/alcove:X.Y.Z`** -- the default artifact, built on `node:26-alpine`. It embeds no validated cryptographic module and the project claims none for it. Take this one unless a FIPS obligation says otherwise: it is smaller, its SFTP support is unrestricted, and it is the image the launchers and the Windows file-drop setup scripts pull.
-- **`ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips`** -- built on Amazon Linux 2023 and containing the CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution, so psilink's `crypto.subtle` calls dispatch into that module. It costs roughly 1.8x the size, and by default it cannot reach an SFTP server that offers only `curve25519` key exchange, only the `chacha20-poly1305@openssh.com` cipher, or only an Ed25519 host key.
+- **`ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips`** -- built on Amazon Linux 2023 and containing the CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution, so Alcove's `crypto.subtle` calls dispatch into that module. It costs roughly 1.8x the size, and by default it cannot reach an SFTP server that offers only `curve25519` key exchange, only the `chacha20-poly1305@openssh.com` cipher, or only an Ed25519 host key.
 
 **What the FIPS variant does and does not support a claim of** is in [COMPLIANCE.md](COMPLIANCE.md#fips-140), which is the single place this project states it: the certificate, the module version, the environments that certificate covers, and what stays outside the module either way. Two bounds matter here as well, because they decide whether pulling this tag is worth anything to a given deployment:
 
@@ -56,7 +56,7 @@ The variant reports both facts it can observe -- whether its own crypto is being
 docker pull ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips
 docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips
 cosign verify \
-  --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-identity-regexp '^https://github\.com/georgetown-mdi/alcove/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips
 ```
@@ -69,13 +69,13 @@ Both `--certificate-` arguments are required and each does its own work; [Verify
 docker run --rm ghcr.io/georgetown-mdi/alcove:X.Y.Z-fips --help
 ```
 
-A run whose crypto is being served by the module reports `FIPS provider active`, naming the baked-in module version when `FIPS_MODULE_VERSION` is intact in the container's environment and saying plainly that it cannot name one when that variable was cleared or overridden at start; anything else is a warning naming what the startup probe found instead. The host kernel's FIPS-mode line is separate and is reported the same way. Neither line is parsed from `openssl list`: the probe is a Node process making psilink's own call shapes under the image's configuration, and its exit status is the whole verdict.
+A run whose crypto is being served by the module reports `FIPS provider active`, naming the baked-in module version when `FIPS_MODULE_VERSION` is intact in the container's environment and saying plainly that it cannot name one when that variable was cleared or overridden at start; anything else is a warning naming what the startup probe found instead. The host kernel's FIPS-mode line is separate and is reported the same way. Neither line is parsed from `openssl list`: the probe is a Node process making Alcove's own call shapes under the image's configuration, and its exit status is the whole verdict.
 
 What the variant is, what may and may not be said about it, the three deployment tiers a claim has to keep apart, and the measured list of what does not work in it are in [fips-variant-image.md](notes/fips-variant-image.md); its pins and the checks that hold them are in [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md).
 
-The three launcher files are the host-side front door an operator runs to open the console: `start-psilink.sh` for macOS and Linux, `Start-Psilink.ps1` for Windows, and `Setup-PsilinkFileDrop.ps1`, which the Windows one dot-sources for its path resolution, credential prompts and network-share volume, and which must sit beside it. They travel as one unit; see [Stamped launchers](#stamped-launchers) for what a release does to them.
+The three launcher files are the host-side front door an operator runs to open the console: `start-alcove.sh` for macOS and Linux, `Start-Alcove.ps1` for Windows, and `Setup-AlcoveFileDrop.ps1`, which the Windows one dot-sources for its path resolution, credential prompts and network-share volume, and which must sit beside it. They travel as one unit; see [Stamped launchers](#stamped-launchers) for what a release does to them.
 
-`@psilink/core` is not currently published to the npm registry. If that changes, add an npm row to the table above.
+`@alcove/core` is not currently published to the npm registry. If that changes, add an npm row to the table above.
 
 ## Stamped launchers
 
@@ -85,21 +85,21 @@ A launcher is plaintext an operator reads before running, and it names the image
 
 | File | Line the release rewrites |
 | ---- | ------------------------- |
-| `start-psilink.sh` | `PSILINK_IMAGE_DIGEST='@@PSILINK_IMAGE_DIGEST@@'` |
-| `Start-Psilink.ps1` | `$PsilinkImageDigest = '@@PSILINK_IMAGE_DIGEST@@'` |
+| `start-alcove.sh` | `ALCOVE_IMAGE_DIGEST='@@ALCOVE_IMAGE_DIGEST@@'` |
+| `Start-Alcove.ps1` | `$AlcoveImageDigest = '@@ALCOVE_IMAGE_DIGEST@@'` |
 
 The value substituted is `steps.build.outputs.digest` from the image build -- the manifest-list digest, the same value [step 8](#8-build-and-publish-the-container-image-ci) signs with Cosign. Each launcher also names the repository in full, `ghcr.io/georgetown-mdi/alcove`, because podman requires the registry prefix and docker accepts it.
 
 **What keeps the launcher and the workflow in step.** The workflow refuses the release if a launcher does not contain its placeholder line exactly once, and again if a placeholder survives the substitution, so a reworded line cannot make the stamp silently no-op. `npm run test:scripts` pins the same two lines from the repository side, in both the launchers and the workflow. A copy that reaches an operator unstamped refuses to run and says where a release copy comes from, rather than falling back to a tag.
 
-**What a release publishes.** The `launchers` job attaches the two stamped files plus `Setup-PsilinkFileDrop.ps1` -- unstamped, and the one `Start-Psilink.ps1` dot-sources -- as assets on the release for this tag, creating it as a draft if the tag has none yet. That job is the only one in the workflow holding `contents: write`.
+**What a release publishes.** The `launchers` job attaches the two stamped files plus `Setup-AlcoveFileDrop.ps1` -- unstamped, and the one `Start-Alcove.ps1` dot-sources -- as assets on the release for this tag, creating it as a draft if the tag has none yet. That job is the only one in the workflow holding `contents: write`.
 
 **How an organisation verifies a copy.** The digest a launcher names is a claim about which image it will run; Cosign is what makes it checkable. Read the digest out of the launcher and verify the signature over that exact reference:
 
 ```sh
-grep PSILINK_IMAGE_DIGEST start-psilink.sh
+grep ALCOVE_IMAGE_DIGEST start-alcove.sh
 cosign verify \
-  --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-identity-regexp '^https://github\.com/georgetown-mdi/alcove/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/georgetown-mdi/alcove@sha256:...
 ```
@@ -110,7 +110,7 @@ A digest that verifies is the image the official release workflow published. The
 
 Every release image is scanned for vulnerable packages before it is published. The release workflow builds each image single-arch, scans it, and only then authenticates to the registry and pushes, so an image the workflow published is an image that passed the scan. Both gates sit ahead of the login, so a finding against either image stops the whole release rather than publishing one artifact and withholding the other. The hand-built push in [step 8](#8-build-and-publish-the-container-image-ci) is the one path around that.
 
-**What the gate is.** Trivy, over the image's OS packages and the language packages inside it, failing the release on a vulnerability that is HIGH or CRITICAL _and_ has a fix available. Those language packages are the production npm tree the build installs and nothing else: both runtime images take the base image's npm CLI and corepack shim out, and the default image's bundled Yarn classic install with them, so a shipped psilink image holds no package manager (see [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-shipped-images-hold-no-package-manager)). An unfixable finding does not block a release: a gate that fires on something no bump can resolve is unactionable and ends up switched off. Dependabot, the [dependency review workflow](../.github/workflows/dependency_review.yaml), and [step 4](#4-review-and-audit-dependencies) below read the dependencies this repository declares; this gate reads the image as built, which is what an operator runs. The Node binary itself is not a component Trivy catalogs, so a CVE in the Node runtime is outside this gate and moves only when the pinned base image's Node version does.
+**What the gate is.** Trivy, over the image's OS packages and the language packages inside it, failing the release on a vulnerability that is HIGH or CRITICAL _and_ has a fix available. Those language packages are the production npm tree the build installs and nothing else: both runtime images take the base image's npm CLI and corepack shim out, and the default image's bundled Yarn classic install with them, so a shipped Alcove image holds no package manager (see [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-shipped-images-hold-no-package-manager)). An unfixable finding does not block a release: a gate that fires on something no bump can resolve is unactionable and ends up switched off. Dependabot, the [dependency review workflow](../.github/workflows/dependency_review.yaml), and [step 4](#4-review-and-audit-dependencies) below read the dependencies this repository declares; this gate reads the image as built, which is what an operator runs. The Node binary itself is not a component Trivy catalogs, so a CVE in the Node runtime is outside this gate and moves only when the pinned base image's Node version does.
 
 **Where the threshold lives.** On the scan step itself, as literal inputs: `.github/workflows/release.yaml` for this gate and `.github/workflows/image_smoke.yaml` for the pre-merge one. Accepted exceptions are in `.github/trivyignore.yaml`, each vulnerability id with the reason it was accepted and an `expired_at` date. Trivy stops applying an entry on that date and the finding returns to the gate, so an acceptance that outlives the condition it was written for re-reds the weekly scan rather than standing unread.
 
@@ -158,18 +158,18 @@ The canonical release version is also what arms the wire-format pin. `npm run ch
 
 #### Reset the exchange-record format at first publication
 
-Four internal literals are development counters, cycled freely because no published artifact contains any of their values: `EXCHANGE_RECORD_VERSION` (`packages/core/src/records/exchangeRecord.ts`), `SIGNED_RECEIPT_VERSION` and `RECEIPT_CONTENT_DOMAIN` (`packages/core/src/records/signedReceipt.ts`), and `SIGNING_CERTIFICATE_VERSION` and `SIGNING_IDENTITY_VERSION` (`packages/core/src/records/signingIdentity.ts`). The first release above `0.1.0` ships every one of them reset to its own `v1` form -- `psilink-exchange-record/v1`, `psilink-signed-receipt/v1`, `psilink-signed-receipt-content/v1`, `psilink-signing-cert/v1`, and `psilink-signing-identity/v1` -- and `npm run check:exchange-record-version`, armed by the same marker, fails from that release until `EXCHANGE_RECORD_VERSION`'s own reset is taken; the other three literals carry no armed check of their own, so this checklist is what holds them to the reset. Take all four as one piece:
+Four internal literals are development counters, cycled freely because no published artifact contains any of their values: `EXCHANGE_RECORD_VERSION` (`packages/core/src/records/exchangeRecord.ts`), `SIGNED_RECEIPT_VERSION` and `RECEIPT_CONTENT_DOMAIN` (`packages/core/src/records/signedReceipt.ts`), and `SIGNING_CERTIFICATE_VERSION` and `SIGNING_IDENTITY_VERSION` (`packages/core/src/records/signingIdentity.ts`). The first release above `0.1.0` ships every one of them reset to its own `v1` form -- `alcove-exchange-record/v1`, `alcove-signed-receipt/v1`, `alcove-signed-receipt-content/v1`, `alcove-signing-cert/v1`, and `alcove-signing-identity/v1` -- and `npm run check:exchange-record-version`, armed by the same marker, fails from that release until `EXCHANGE_RECORD_VERSION`'s own reset is taken; the other three literals carry no armed check of their own, so this checklist is what holds them to the reset. Take all four as one piece:
 
 1. Set each literal to its `v1` form: `EXCHANGE_RECORD_VERSION` in `packages/core/src/records/exchangeRecord.ts`; `SIGNED_RECEIPT_VERSION` and `RECEIPT_CONTENT_DOMAIN` in `packages/core/src/records/signedReceipt.ts`; `SIGNING_CERTIFICATE_VERSION` and `SIGNING_IDENTITY_VERSION` in `packages/core/src/records/signingIdentity.ts`.
 2. Regenerate every vectors file the moved literals pin, each through its own generator under `packages/core/test/vectors/`: `generate-exchange-record-vectors.mjs` for the exchange record; `generate-signed-receipt-vectors.mjs`, whose own `RECORD_VERSION`, `CONTENT_DOMAIN`, and `CERTIFICATE_VERSION` constants restate the receipt and certificate literals by design rather than importing them, and so must move with them by hand; `generate-signing-cert-vectors.mjs`, whose `CERTIFICATE_VERSION` and `IDENTITY_VERSION` constants restate the same certificate and identity literals; and `generate-terms-envelope-vectors.mjs`, which captures a real exchange off the built certificate rather than restating it, so it carries the moved literals with no constant of its own to edit. `npm run check:vectors` holds every vectors file to its generator, so a generator constant left behind fails there.
 3. Discharge the recovery obligations `scripts/check-exchange-record-version.mjs` names for `EXCHANGE_RECORD_VERSION` -- they fail on their own once that literal moves -- and re-record its `RECORD_VERSION_PIN`. The other three literals name no equivalent obligation.
-4. Move the two version-discriminant unit tests that use the reset's own target value as the stale format they check is refused, so the reset does not quietly turn them into no-ops: `packages/core/test/records/exchangeRecord.test.ts`'s "parseExchangeRecord refuses a record written before the run binder" relabels an otherwise-current record `psilink-exchange-record/v1` and asserts the refusal a `v1`-labeled current record no longer gives; `packages/core/test/records/signingIdentity.test.ts`'s "a current-format body holding the previous version is still rejected" does the same with `psilink-signing-cert/v1`. Move each fixture to a version string the reset does not also claim.
+4. Move the two version-discriminant unit tests that use the reset's own target value as the stale format they check is refused, so the reset does not quietly turn them into no-ops: `packages/core/test/records/exchangeRecord.test.ts`'s "parseExchangeRecord refuses a record written before the run binder" relabels an otherwise-current record `alcove-exchange-record/v1` and asserts the refusal a `v1`-labeled current record no longer gives; `packages/core/test/records/signingIdentity.test.ts`'s "a current-format body holding the previous version is still rejected" does the same with `alcove-signing-cert/v1`. Move each fixture to a version string the reset does not also claim.
 5. Clear the development artifacts below, then record the reset: set `RESET_TAKEN_AT_RELEASE` to `X.Y.Z` in `scripts/check-exchange-record-version.mjs`. That retires the rule, so an ordinary forward bump after this release is not held to `v1`.
 
-**Clearing `EXCHANGE_RECORD_VERSION`'s development artifacts.** This literal's reset moves it downward, and a leftover artifact the counter numbered on its way up is misread rather than refused. Two classes can hold one, and no released artifact is among them: `packages/core/src/records/exchangeRecord.ts` does not exist at `v0.1.0`, so nothing published contains a `psilink-exchange-record/vN` literal at all.
+**Clearing `EXCHANGE_RECORD_VERSION`'s development artifacts.** This literal's reset moves it downward, and a leftover artifact the counter numbered on its way up is misread rather than refused. Two classes can hold one, and no released artifact is among them: `packages/core/src/records/exchangeRecord.ts` does not exist at `v0.1.0`, so nothing published contains an `alcove-exchange-record/vN` literal at all.
 
-- **Browser-stored managed accountings** -- the `disclosures` store of the `psilink-managed-exchanges` IndexedDB database, on any browser that ran a development build of the web app. An entry naming a higher ordinal than the build is treated as a stale page, whose remedy is a reload that cannot help and which withholds the export-then-reset recovery by design (see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#what-an-exchange-record-version-bump-does-to-a-stored-accounting)). Clear the site data for the app's origin on those devices.
-- **CLI record files on disk** -- `psilink-record-<timestamp>.json` and the `.keys.json` beside it, wherever a development build wrote one. One numbered above the reset value is refused on the version with the file still in the operator's hands; one written back when the counter itself read `v1` is not, and parses as current before failing on its field set. Delete or archive pre-release record files.
+- **Browser-stored managed accountings** -- the `disclosures` store of the `alcove-managed-exchanges` IndexedDB database, on any browser that ran a development build of the web app. An entry naming a higher ordinal than the build is treated as a stale page, whose remedy is a reload that cannot help and which withholds the export-then-reset recovery by design (see [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#what-an-exchange-record-version-bump-does-to-a-stored-accounting)). Clear the site data for the app's origin on those devices.
+- **CLI record files on disk** -- `alcove-record-<timestamp>.json` and the `.keys.json` beside it, wherever a development build wrote one. One numbered above the reset value is refused on the version with the file still in the operator's hands; one written back when the counter itself read `v1` is not, and parses as current before failing on its field set. Delete or archive pre-release record files.
 
 ### 3. Update CHANGELOG.md
 
@@ -206,13 +206,15 @@ After the PR merges to `main`:
 ```sh
 git checkout main
 git pull
-git tag -s vX.Y.Z -m "PSI-Link vX.Y.Z"
+git tag -s vX.Y.Z -m "Alcove vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
 ### 8. Build and publish the container image `[CI]`
 
-The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds both multi-platform images and pushes them to the GitHub Container Registry, signs each with Cosign, attests each one's build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). The FIPS variant's three tags are the default image's three with `-fips` appended, derived from the pushed tag in the workflow itself. The push authenticates with the workflow's own `GITHUB_TOKEN` under `packages: write`, so no registry secret is configured; the package's settings must grant this repository write access, which the first push from a checkout carrying the Dockerfile's `org.opencontainers.image.source` label establishes.
+The `vX.Y.Z` tag push in step 7 triggers `.github/workflows/release.yaml`, which builds both multi-platform images and pushes them to the GitHub Container Registry, signs each with Cosign, attests each one's build provenance (see [Build provenance](#build-provenance)), and then stamps and attaches the launchers (see [Stamped launchers](#stamped-launchers)). The FIPS variant's three tags are the default image's three with `-fips` appended, derived from the pushed tag in the workflow itself. The push authenticates with the workflow's own `GITHUB_TOKEN` under `packages: write`, so no registry secret is configured; the package's settings on ghcr.io must grant this repository the Write role under "Manage Actions access", which the maintainer sets once.
+
+The Dockerfile's `org.opencontainers.image.source` label does not do this: for an organization package it is metadata the package page shows, and it neither links the package to the repository nor grants the repository any access (a hand push carrying the label, 2026-09-24, left the package unlinked).
 
 **What has to pass before anything is pushed.** Each gate below runs before the workflow authenticates to the registry, so a release that fails one publishes nothing at all:
 
@@ -229,7 +231,7 @@ If you must build and push by hand -- for a workflow outage or a local test -- f
 From the workspace root:
 
 ```sh
-npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev --legacy-peer-deps -w packages/core -w apps/cli -w apps/web > psilink-X.Y.Z.cdx.json
+npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev --legacy-peer-deps -w packages/core -w apps/cli -w apps/web > alcove-X.Y.Z.cdx.json
 ```
 
 `--omit=dev` stays: `apps/web`'s build tools are `devDependencies` and are not shipped. See [SBOM](#software-bill-of-materials-sbom) for the scoping rationale.
@@ -246,7 +248,7 @@ Do not reach for `@cyclonedx/cyclonedx-npm --ignore-npm-errors` instead of the f
 
 ### 10. Publish the GitHub Release
 
-Step 8 leaves a draft release for tag `vX.Y.Z` with the stamped launchers. Open it, copy the CHANGELOG section for this version as the release body, attach `psilink-X.Y.Z.cdx.json`, record both Docker image digests from step 8 in the release notes -- the default image's and the FIPS variant's, each beside its tag -- and publish. Leave the launcher assets in place: they are the copy an operator downloads.
+Step 8 leaves a draft release for tag `vX.Y.Z` with the stamped launchers. Open it, copy the CHANGELOG section for this version as the release body, attach `alcove-X.Y.Z.cdx.json`, record both Docker image digests from step 8 in the release notes -- the default image's and the FIPS variant's, each beside its tag -- and publish. Leave the launcher assets in place: they are the copy an operator downloads.
 
 ### 11. Merge back to staging
 
@@ -286,7 +288,7 @@ This verifies by tag, which is the right form when the reference comes from the 
 
 ```sh
 cosign verify \
-  --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+  --certificate-identity-regexp '^https://github\.com/georgetown-mdi/alcove/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   ghcr.io/georgetown-mdi/alcove:X.Y.Z
 ```
@@ -312,8 +314,8 @@ The release workflow attests each manifest-list digest, the same digests Cosign 
 docker pull ghcr.io/georgetown-mdi/alcove:X.Y.Z
 docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/georgetown-mdi/alcove:X.Y.Z
 gh attestation verify oci://ghcr.io/georgetown-mdi/alcove@sha256:... \
-  --repo georgetown-mdi/jspsi \
-  --signer-workflow georgetown-mdi/jspsi/.github/workflows/release.yaml
+  --repo georgetown-mdi/alcove \
+  --signer-workflow georgetown-mdi/alcove/.github/workflows/release.yaml
 ```
 
 Both subjects are recorded as `ghcr.io/georgetown-mdi/alcove`, the same reference the Cosign step signs under; the two attestations are told apart by their digests, not by their subject names. Neither the attest step nor this verify command has been driven against a published release yet, and reference canonicalization is the untested edge: if verification reports no matching attestation for an image that is certainly attested, check the reference spelling first -- `ghcr.io` is the registry's canonical host, so the subject recorded and the reference verified should match byte for byte, and the first real release is what establishes that.

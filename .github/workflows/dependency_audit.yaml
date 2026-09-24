@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v7
       # Not the ./.github/actions/setup prologue: `--package-lock-only` below
       # resolves the audit from the committed lockfile alone, so this needs
-      # neither `npm ci` nor the @psilink/core build. Nothing in the development
+      # neither `npm ci` nor the @alcove/core build. Nothing in the development
       # tree is installed or executed to produce a report about the development
       # tree.
       - uses: actions/setup-node@v7

@@ -9,7 +9,7 @@ import {
   UsageError,
   computeCertificateFingerprint,
   generateSigningIdentity,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   handler,
   readConfigHints,
@@ -31,7 +31,7 @@ const noopLog = { warn: () => {} };
 snapshotDiagnosticSinkAndLevel();
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-fp-test-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-fp-test-"));
 });
 
 afterEach(() => {
@@ -678,7 +678,7 @@ test("warns when the bound identity diverges from the config identity", async ()
   expect(message).toContain('"Party A, Agency A, a@agency-a.gov"');
   expect(message).toContain("linkage_terms.identity");
   expect(message).toContain("reject");
-  // `psilink fingerprint` sends nothing, so it reports and prints the
+  // `alcove fingerprint` sends nothing, so it reports and prints the
   // fingerprint. What it must not leave unsaid is that the exchange command
   // disposes of the same divergence differently: it refuses the run.
   expect(message).toContain("refused before it runs");
@@ -734,7 +734,7 @@ test("a bound label the terms cannot state warns with the re-key exit", async ()
     expect(warn).toHaveBeenCalledOnce();
     const message = warn.mock.calls[0]?.[0] as string;
     expect(message).toContain("the linkage terms cannot state");
-    expect(message).toContain("psilink fingerprint --force --identity");
+    expect(message).toContain("alcove fingerprint --force --identity");
     expect(message).toContain("re-pin the new fingerprint");
     // The config edit the terms make impossible is not among the remedies.
     expect(message).not.toContain("set linkage_terms.identity to the bound");
@@ -927,7 +927,7 @@ test("an adopted concurrent identity that diverges warns", async () => {
 
 test("handler puts the divergence warning on stderr, leaving stdout the bare value", async () => {
   const idPath = path.join(dir, "id.json");
-  const cfg = path.join(dir, "psilink.yaml");
+  const cfg = path.join(dir, "alcove.yaml");
   fs.writeFileSync(cfg, "linkage_terms:\n  identity: Party From Config\n");
   const { stdoutWrites, stderrWrites, restore } = captureStdio();
   // console.log is vitest-intercepted, so it never reaches the stdout spy;
@@ -953,7 +953,7 @@ test("handler puts the divergence warning on stderr, leaving stdout the bare val
   const stored = await loadSigningIdentity(idPath);
   if (stored === undefined) throw new Error("the identity was not persisted");
   const fingerprint = await computeCertificateFingerprint(stored.certificate);
-  // stdout holds the value and nothing else, so `FP=$(psilink fingerprint)`
+  // stdout holds the value and nothing else, so `FP=$(alcove fingerprint)`
   // captures a clean fingerprint even when the warning fires.
   expect(stdoutWrites.join("")).toBe(`${fingerprint}\n`);
   expect(stderrWrites.join("")).toContain("linkage_terms.identity");
@@ -962,7 +962,7 @@ test("handler puts the divergence warning on stderr, leaving stdout the bare val
 
 test("handler warns on a divergent load and still prints the bare value", async () => {
   const idPath = path.join(dir, "id.json");
-  const cfg = path.join(dir, "psilink.yaml");
+  const cfg = path.join(dir, "alcove.yaml");
   // The identity was bound before the config named a different party -- the
   // routine re-run that used to print the fingerprint and nothing else.
   const stored = await generateSigningIdentity("Party A");
@@ -1001,7 +1001,7 @@ test("handler warns on a divergent load and still prints the bare value", async 
 
 /** Run the handler with `process.exit` stubbed to throw, collecting everything
  * that reached stdout (including console.log, which vitest intercepts) and
- * stderr. Runs from a directory holding no `psilink.yaml`, so no ambient config
+ * stderr. Runs from a directory holding no `alcove.yaml`, so no ambient config
  * supplies a path. */
 async function runFingerprint(options: Record<string, unknown>): Promise<{
   stdout: string;
@@ -1021,7 +1021,7 @@ async function runFingerprint(options: Record<string, unknown>): Promise<{
     process.chdir(dir);
     await handler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       force: false,
       ...options,
     } as unknown as Arguments);
@@ -1041,7 +1041,7 @@ async function runFingerprint(options: Record<string, unknown>): Promise<{
 }
 
 test("handler refuses with nothing on stdout when no identity path is named", async () => {
-  // `FP=$(psilink fingerprint)` must capture an EMPTY value and a nonzero
+  // `FP=$(alcove fingerprint)` must capture an EMPTY value and a nonzero
   // status, never a fingerprint minted at a location the operator did not
   // choose. Stdout holds the command's one result, so the refusal has to leave
   // it empty rather than explain itself there.
@@ -1068,14 +1068,14 @@ test("the refusal holds the whole remedy, unrendered by the display sanitizer", 
   // Both spellings, with an example under a mount of the identity's own.
   expect(stderr).toContain("--identity-file");
   expect(stderr).toContain("signing.identity_file");
-  expect(stderr).toContain("/run/signing/psilink-signing-identity.json");
+  expect(stderr).toContain("/run/signing/alcove-signing-identity.json");
   // What the directory has to be.
   expect(stderr).toContain("writable for this creating run");
   expect(stderr).toContain("read-only");
   expect(stderr).toContain("durable");
   expect(stderr).toContain("your partner syncs into");
   // The static reuse line, which closes the message rather than probing for a
-  // file psilink no longer knows a location for.
+  // file Alcove no longer knows a location for.
   expect(stderr).toContain("already hold an identity from an earlier release");
   expect(stderr).toContain("re-pin");
   // Nothing was truncated away, and no elision marker reached the operator.
@@ -1084,7 +1084,7 @@ test("the refusal holds the whole remedy, unrendered by the display sanitizer", 
 
 test.each([
   ["absent", undefined],
-  ["a path that does not exist", path.join(os.tmpdir(), "psilink-no-home")],
+  ["a path that does not exist", path.join(os.tmpdir(), "alcove-no-home")],
 ])(
   "a HOME that is %s changes nothing: still a refusal, still no file",
   async (_label, home) => {
@@ -1121,7 +1121,7 @@ test.each([
 );
 
 test("--identity-file creates the identity exactly where it was named", async () => {
-  const idPath = path.join(dir, "named", "psilink-signing-identity.json");
+  const idPath = path.join(dir, "named", "alcove-signing-identity.json");
   const { stdout, thrown } = await runFingerprint({
     identity: "Party A",
     "identity-file": idPath,
@@ -1138,7 +1138,7 @@ test("signing.identity_file in the config is honoured, and re-runs are stable", 
   // The mounted-credentials shape: the path lives in the config, the home
   // directory is somewhere else and ephemeral, and a second run reports the
   // fingerprint the first one minted rather than a new one.
-  const idPath = path.join(dir, "secrets", "psilink-signing-identity.json");
+  const idPath = path.join(dir, "secrets", "alcove-signing-identity.json");
   const cfg = path.join(dir, "config.yaml");
   fs.writeFileSync(
     cfg,
@@ -1147,7 +1147,7 @@ test("signing.identity_file in the config is honoured, and re-runs are stable", 
     ),
   );
   const ephemeralHome = (run: number): string =>
-    path.join(os.tmpdir(), `psilink-ephemeral-${path.basename(dir)}-${run}`);
+    path.join(os.tmpdir(), `alcove-ephemeral-${path.basename(dir)}-${run}`);
   const previousHome = process.env["HOME"];
   try {
     // A different, never-created home on each run, as a container restart
@@ -1185,9 +1185,9 @@ test("--identity-file wins over signing.identity_file in the config", async () =
 });
 
 test("a ~-relative identity path the operator named is expanded, not refused", async () => {
-  // psilink never CHOOSES the home directory; an operator who names one is
+  // Alcove never CHOOSES the home directory; an operator who names one is
   // honoured exactly as they wrote it.
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-home-"));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-home-"));
   const previousHome = process.env["HOME"];
   const previousProfile = process.env["USERPROFILE"];
   try {
@@ -1221,11 +1221,11 @@ test("handler refuses to export the certificate over the identity file itself", 
   const exitSpy = captureProcessExit();
   const cwd = process.cwd();
   try {
-    process.chdir(dir); // hermetic: no ambient psilink.yaml is consulted
+    process.chdir(dir); // hermetic: no ambient alcove.yaml is consulted
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "identity-file": idPath,
         "export-certificate": idPath, // the destructive fat-finger
         "log-level": "silent",
@@ -1252,11 +1252,11 @@ test("handler rejects a repeated single-value flag with a usage error (exit 64)"
   const exitSpy = captureProcessExit();
   const cwd = process.cwd();
   try {
-    process.chdir(dir); // hermetic: no ambient psilink.yaml is consulted
+    process.chdir(dir); // hermetic: no ambient alcove.yaml is consulted
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         identity: ["Party A", "Party B"],
         "log-level": "silent",
         force: false,
@@ -1277,7 +1277,7 @@ test("handler rejects a repeated --log-level (exit 64) naming the flag", async (
     await expect(
       handler({
         _: [],
-        $0: "psilink",
+        $0: "alcove",
         "log-level": ["info", "debug"],
       } as unknown as Arguments),
     ).rejects.toThrow("exit:64");
@@ -1291,7 +1291,7 @@ test("handler rejects a repeated --log-level (exit 64) naming the flag", async (
 // --- readConfigHints ---------------------------------------------------------
 
 test("readConfigHints returns empty when the default config is absent", () => {
-  // run from a dir with no psilink.yaml
+  // run from a dir with no alcove.yaml
   const cwd = process.cwd();
   try {
     process.chdir(dir);
@@ -1317,7 +1317,7 @@ test.each([
   ["unresolved alias", (s: string) => `signing:\n  password: *${s}\n`],
 ])("readConfigHints does not echo an inline credential: %s", (_, mk) => {
   const SECRET = "S3cr3tSFTPPassw0rd";
-  const cfg = path.join(dir, "psilink.yaml");
+  const cfg = path.join(dir, "alcove.yaml");
   fs.writeFileSync(cfg, mk(SECRET));
   let caught: unknown;
   try {
@@ -1331,7 +1331,7 @@ test.each([
 });
 
 test("readConfigHints reads identity and identity_file from YAML", () => {
-  const cfg = path.join(dir, "psilink.yaml");
+  const cfg = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     cfg,
     [

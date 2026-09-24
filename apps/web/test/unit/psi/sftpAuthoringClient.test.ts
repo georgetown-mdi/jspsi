@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { DISPLAY_TRUNCATION_MARKER } from "@psilink/core";
+import { DISPLAY_TRUNCATION_MARKER } from "@alcove/core";
 
 import { probeSftpHostKey } from "@psi/jobClient/sftpAuthoringClient";
 

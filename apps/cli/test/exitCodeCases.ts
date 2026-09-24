@@ -2,7 +2,7 @@ import {
   ConnectionError,
   InternalConsistencyError,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { PERSISTENCE_LOSS_EXIT_CODE } from "../src/eventStream";
 

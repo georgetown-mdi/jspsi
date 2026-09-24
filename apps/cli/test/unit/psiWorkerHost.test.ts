@@ -3,7 +3,7 @@ import {
   WorkerPsiEngine,
   type PsiWorkerRequest,
   type PsiWorkerResponse,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { createWorkerThreadHandle } from "../../src/psiWorkerHost";
 

@@ -8,7 +8,7 @@ import { createElement } from "react";
 
 import "@mantine/core/styles.css";
 
-import { inferMetadata } from "@psilink/core";
+import { inferMetadata } from "@alcove/core";
 
 import {
   OWN_COLUMNS_EMPTY_ALL_NOTICE,
@@ -20,7 +20,7 @@ import { MatchingSharingSection } from "@exchange/MatchingSharingSection";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
-import type { Metadata } from "@psilink/core";
+import type { Metadata } from "@alcove/core";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 
 // The own-columns control as the operator meets it on step 2: its three states,

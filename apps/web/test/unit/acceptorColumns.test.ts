@@ -8,7 +8,7 @@ import {
   deriveAcceptedLinkageTerms,
   safeParseLinkageTerms,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   acceptorCleaningAttention,
@@ -54,7 +54,7 @@ import {
   setColumnTypeForMatching,
 } from "@psi/metadataEditing";
 
-import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
+import type { CSVRow, LinkageTerms, Metadata } from "@alcove/core";
 import type { AcceptorColumnsState } from "@exchange/acceptorColumnsModel";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 

@@ -10,7 +10,7 @@ import {
   InternalConsistencyError,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The process exit code for a failure in this implementation rather than in
@@ -28,7 +28,7 @@ import {
 export const INTERNAL_FAULT_EXIT_CODE = 70;
 
 /**
- * The process exit code `psilink verify-receipt` reports for a definite
+ * The process exit code `alcove verify-receipt` reports for a definite
  * verification failure: `EX_DATAERR` (65), the sysexits code for input data
  * that was incorrect in some way. Read by both of the command's report
  * renderers -- the unsigned record and the dual-signed record -- and rolled up

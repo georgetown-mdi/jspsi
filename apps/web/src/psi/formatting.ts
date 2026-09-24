@@ -7,7 +7,7 @@
 import {
   MAX_INVITATION_LIFETIME_SECONDS,
   hasExpiryInstantPassed,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { OutputDirection } from "./authoring/advancedInvite";
 

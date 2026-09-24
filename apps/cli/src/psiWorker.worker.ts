@@ -2,12 +2,12 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { parentPort, workerData } from "node:worker_threads";
 
-import { sanitizeErrorForDisplay, servePsiWorker } from "@psilink/core";
+import { sanitizeErrorForDisplay, servePsiWorker } from "@alcove/core";
 import type {
   PsiWorkerInit,
   PsiWorkerRequest,
   PsiWorkerResponse,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { loadCliPsiBackend } from "./psiBackend";
 

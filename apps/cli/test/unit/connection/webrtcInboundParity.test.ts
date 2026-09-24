@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vitest";
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError } from "@alcove/core";
 import {
   WEBRTC_INBOUND_FRAME_FIXTURES,
   comparableVerdict,
   frameScanRefusal,
   preScanVerdict,
-} from "@psilink/testkit/webrtcInboundFrames";
+} from "@alcove/testkit/webrtcInboundFrames";
 
 import { BoundedInboundFrames } from "../../../src/connection/webrtc/inboundBounds";
 import { chunkPacked } from "../../../src/connection/webrtc/peerjsWire";
@@ -14,7 +14,7 @@ import { chunkPacked } from "../../../src/connection/webrtc/peerjsWire";
 import type {
   FrameVerdict,
   WebrtcFrameFixture,
-} from "@psilink/testkit/webrtcInboundFrames";
+} from "@alcove/testkit/webrtcInboundFrames";
 import type { InboundBoundOptions } from "../../../src/connection/webrtc/inboundBounds";
 
 // The WebRTC inbound bound has two enforcement points over one wire format: core's
@@ -28,7 +28,7 @@ import type { InboundBoundOptions } from "../../../src/connection/webrtc/inbound
 // different rules, and a rule that fires on a whole frame but not on the same frame
 // arriving in chunks.
 //
-// The set itself is `@psilink/testkit/webrtcInboundFrames`, shared with the web app's
+// The set itself is `@alcove/testkit/webrtcInboundFrames`, shared with the web app's
 // PeerJS wrap, which is held to it the same way (apps/web/test/unit/
 // webrtcInboundParity.test.ts) -- so the two transports' verdicts are compared against
 // one reference and therefore against each other. What lives here is the half no

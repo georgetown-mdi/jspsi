@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
+import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@alcove/core";
 
 import { isolatedColumnName } from "@components/ColumnName";
 

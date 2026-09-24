@@ -10,16 +10,16 @@ import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 
-import { COUNT_ONLY_PROBE_TERMS } from "@psilink/core/testing";
+import { COUNT_ONLY_PROBE_TERMS } from "@alcove/core/testing";
 import { createAppMount } from "./renderApp";
 
 import type { ComponentProps, ReactNode } from "react";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 
 // What this file measures is the renderer: which count-only sentences the consent
 // screen shows, in which tier, for which entitlements. The whole tier is reached
@@ -142,7 +142,7 @@ describe("InvitationTerms: the count-only tier a psi-c invitation renders", () =
   });
 
   test("caveats the reported count only where both parties are entitled to one", async () => {
-    // Where both are entitled, one party is sent the other's tally and psilink does
+    // Where both are entitled, one party is sent the other's tally and Alcove does
     // not check it. Where exactly one is, that party is the receiver by the role
     // rule and computes its own, so a line saying a count was reported would name a
     // frame the run does not send.

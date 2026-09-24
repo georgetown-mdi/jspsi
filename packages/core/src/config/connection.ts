@@ -301,8 +301,8 @@ const sharedSecretSchema = z
 
 /**
  * Shared secret for mutual authentication via the P-256 key exchange, stored
- * with expiration in `.psilink.key`, injected at runtime -- never in
- * `psilink.yaml` (the top-level `authentication` block on
+ * with expiration in `.alcove.key`, injected at runtime -- never in
+ * `alcove.yaml` (the top-level `authentication` block on
  * {@link ExchangeSpec}). `sharedSecret` is optional: a config parsed alone may
  * lack one. Before calling {@link authenticateConnection}, populate it with a
  * value matching {@link SHARED_SECRET_REGEX} -- enforced there at runtime, not
@@ -310,8 +310,8 @@ const sharedSecretSchema = z
  */
 export interface Authentication {
   /**
-   * Shared secret; loaded from `.psilink.key` at runtime and injected into the
-   * `authentication` block, never written to `psilink.yaml`. Must be a
+   * Shared secret; loaded from `.alcove.key` at runtime and injected into the
+   * `authentication` block, never written to `alcove.yaml`. Must be a
    * base64url-encoded 32-byte value (43 characters from `[A-Za-z0-9_-]`, final
    * character in `[AEIMQUYcgkosw048]`). Invitation secrets and persistent
    * (rotation) secrets share this format, differing only in the accompanying
@@ -331,9 +331,9 @@ export interface Authentication {
   /**
    * Operator policy: maximum age, in days, to stamp onto a rotated token. A
    * successful exchange records `expires` = rotation time + `tokenMaxAgeDays`
-   * days into `.psilink.key`, so a dormant partnership cannot hold a valid
+   * days into `.alcove.key`, so a dormant partnership cannot hold a valid
    * token indefinitely; omitted means no expiry (the default). Unlike
-   * `sharedSecret`/`expires`, this is operator-authored in `psilink.yaml`. A
+   * `sharedSecret`/`expires`, this is operator-authored in `alcove.yaml`. A
    * positive integer bounded by {@link MAX_TOKEN_MAX_AGE_DAYS}, computed at
    * rotation time (in the CLI), not at parse time.
    */
@@ -353,7 +353,7 @@ export const MAX_TOKEN_MAX_AGE_DAYS = 36500;
 /**
  * Schema for the top-level `authentication` block, embedded by
  * {@link ExchangeSpecSchema} as a sibling of `signing`. The injected fields
- * (`sharedSecret`/`expires`) come from `.psilink.key` and are warn-and-stripped
+ * (`sharedSecret`/`expires`) come from `.alcove.key` and are warn-and-stripped
  * if set in YAML by the CLI loader, which strips them before this schema runs.
  * `strictObject`, unlike the sibling spec blocks: a misspelled
  * `tokenMaxAgeDays` -- a security control -- must reject at parse, not silently
@@ -732,7 +732,7 @@ export const MAX_TIMEOUT_SECONDS = 7 * 24 * 60 * 60;
  * `serverConnectTimeoutMs`. Defined in core because both the schema's `.max()`
  * and the CLI's `nonNegativeIntFlag` parse guard must agree on it. An
  * over-ceiling value is rejected as a `UsageError` (exit 64) from either
- * `psilink.yaml` or `--max-reconnect-attempts`.
+ * `alcove.yaml` or `--max-reconnect-attempts`.
  */
 export const MAX_RECONNECT_ATTEMPTS = 7 * 24 * 60 * 60;
 
@@ -1123,7 +1123,7 @@ export interface SFTPConnectionConfig {
  * channel; no SSH connection is made. Use `file://` URLs with the CLI.
  *
  * Shared-secret authentication applies in the same way as the `sftp` channel:
- * the shared secret in `.psilink.key` authenticates the exchange partner. This
+ * the shared secret in `.alcove.key` authenticates the exchange partner. This
  * matters because the remote end may be accessing the same storage over SFTP
  * rather than a local mount, so filesystem permissions alone do not guarantee
  * the partner's identity.

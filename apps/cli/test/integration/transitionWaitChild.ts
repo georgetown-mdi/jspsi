@@ -14,7 +14,7 @@
 import fs from "node:fs";
 
 import logLibrary from "loglevel";
-import { FileSyncConnection } from "@psilink/core";
+import { FileSyncConnection } from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 
@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   // line is emitted here exactly as an operator would see it. loglevel binds a
   // logger's level at creation, so this precedes the adapter.
   logLibrary.setDefaultLevel("info");
-  const remote = required("PSILINK_TEST_REMOTE_PATH");
+  const remote = required("ALCOVE_TEST_REMOTE_PATH");
   const adapter = new SSH2SFTPClientAdapter({
     verbosity: 0,
     ephemeralSessions: true,
@@ -52,18 +52,18 @@ async function main(): Promise<void> {
   await conn.open({
     channel: "sftp",
     server: {
-      host: required("PSILINK_TEST_HOST"),
-      port: Number(required("PSILINK_TEST_PORT")),
-      username: required("PSILINK_TEST_USERNAME"),
-      password: required("PSILINK_TEST_PASSWORD"),
-      hostKeyFingerprint: required("PSILINK_TEST_HOST_KEY"),
+      host: required("ALCOVE_TEST_HOST"),
+      port: Number(required("ALCOVE_TEST_PORT")),
+      username: required("ALCOVE_TEST_USERNAME"),
+      password: required("ALCOVE_TEST_PASSWORD"),
+      hostKeyFingerprint: required("ALCOVE_TEST_HOST_KEY"),
       path: remote,
     },
   });
   // Released the way an idle boundary releases it, so what follows is a re-dial.
   await adapter.releaseForIdle();
   process.stdout.write("RELEASED\n");
-  await waitForGo(required("PSILINK_TEST_GO_FILE"));
+  await waitForGo(required("ALCOVE_TEST_GO_FILE"));
 
   // Re-establishes through the adapter's own gate against the now-stalling server,
   // so this dial holds the session transition and never settles on its own.

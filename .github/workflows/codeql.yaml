@@ -10,7 +10,7 @@ name: CodeQL
 # analyzes first-party code.
 #
 # Free here: code scanning with CodeQL is free on public repositories
-# (georgetown-mdi/jspsi is public), so this needs no GitHub Advanced Security
+# (georgetown-mdi/alcove is public), so this needs no GitHub Advanced Security
 # license. Findings appear as code-scanning alerts in the repository Security
 # tab.
 #
@@ -40,7 +40,7 @@ name: CodeQL
 #
 # JavaScript/TypeScript needs no build step (build-mode: none): CodeQL extracts
 # the sources directly, so unlike the build/test workflows this neither runs the
-# ./.github/actions/setup prologue nor builds @psilink/core.
+# ./.github/actions/setup prologue nor builds @alcove/core.
 
 on:
   # Manual trigger for an on-demand full-tree scan (PR runs are diff-informed);

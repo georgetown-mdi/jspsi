@@ -9,7 +9,7 @@ import {
   prepareForExchange,
   resolveLinkageCardinality,
   validateCompatibility,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   acceptorDeduplicateRefusal,
@@ -23,7 +23,7 @@ import type {
   ConnectionEndpoint,
   InvitationToken,
   LinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { DeploymentProfile } from "@utils/clientConfig";
 
 const webrtcEndpoint: ConnectionEndpoint = {

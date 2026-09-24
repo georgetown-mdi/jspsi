@@ -244,7 +244,7 @@ describe("a status body over its cap fails the reader safely", () => {
       status: "ok",
       fingerprint: `${"B".repeat(42)}A`,
       created: true,
-      identityFileName: ".psilink-signing-identity.json",
+      identityFileName: ".alcove-signing-identity.json",
     });
     await expect(
       resolveSigningFingerprint("me", {}, answering(body)),
@@ -289,7 +289,7 @@ describe("a hand-off body over its cap fails the reader safely", () => {
       template: {
         kind: "config",
         yaml: "version: 1\n",
-        argv: ["psilink", "exchange", "input.csv", "results.csv"],
+        argv: ["alcove", "exchange", "input.csv", "results.csv"],
       },
     });
     await expect(
@@ -407,7 +407,7 @@ describe("a well-formed body under its cap reaches the client", () => {
       template: {
         kind: "config",
         yaml: "version: 1\n",
-        argv: ["psilink", "exchange", "input.csv", "results.csv"],
+        argv: ["alcove", "exchange", "input.csv", "results.csv"],
       },
     };
     await expect(

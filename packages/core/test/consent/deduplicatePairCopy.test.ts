@@ -324,7 +324,7 @@ describe("the partner-declared seat's copy", () => {
         "groups that matched",
     );
     expect(DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT).toContain(
-      "That count is your own declaration, which psilink does not check " +
+      "That count is your own declaration, which Alcove does not check " +
         "against your data",
     );
   });

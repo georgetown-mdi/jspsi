@@ -58,8 +58,8 @@ const configPath = join(repoRoot, "packages", "core", "stryker.config.mjs");
 // A report written under the repository root (Stryker's default is
 // reports/mutation/) would leave an untracked directory in the working tree.
 const workDir =
-  process.env.PSILINK_STRYKER_WORK_DIR ??
-  join(process.env.RUNNER_TEMP ?? tmpdir(), "psilink-stryker");
+  process.env.ALCOVE_STRYKER_WORK_DIR ??
+  join(process.env.RUNNER_TEMP ?? tmpdir(), "alcove-stryker");
 const toolchainDir = join(workDir, "toolchain");
 const reportDir = join(workDir, "reports");
 const jsonReportPath = join(reportDir, "mutation.json");
@@ -99,7 +99,7 @@ function installToolchain(typescriptVersion) {
   writeFileSync(
     join(toolchainDir, "package.json"),
     `${JSON.stringify(
-      { name: "psilink-stryker-toolchain", version: "0.0.0", private: true },
+      { name: "alcove-stryker-toolchain", version: "0.0.0", private: true },
       undefined,
       2,
     )}\n`,

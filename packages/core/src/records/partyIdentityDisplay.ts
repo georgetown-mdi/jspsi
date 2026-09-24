@@ -1,7 +1,7 @@
 // The one place a missing party identity becomes text. `linkage_terms.identity`
 // is optional (config/linkageTermsSchema.ts); a party that gives no name gets this
 // marker, never `undefined`, an empty cell, or a stand-in such as the account
-// psilink runs as. Every sink that shows a party identity routes through here
+// Alcove runs as. Every sink that shows a party identity routes through here
 // and displays the same marker, so it is treated as an absence, not a name.
 
 import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
@@ -15,7 +15,7 @@ import type { Displayable } from "../utils/sanitizeForDisplay.js";
 /**
  * What a surface shows in place of a party's identity when the party supplied
  * none. Parenthesized and lower-case so it states an absence -- nobody gave a
- * name, and psilink did not pick one -- rather than filling in a name of its
+ * name, and Alcove did not pick one -- rather than filling in a name of its
  * own. Display cannot separate this marker from a party that named itself the
  * same text: `identity` is unauthenticated free text, so a forged marker
  * renders exactly like a genuine one. The record document can make that

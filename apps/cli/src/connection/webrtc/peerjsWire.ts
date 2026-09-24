@@ -1,6 +1,6 @@
 import { unpack } from "peerjs-js-binarypack";
 
-import { ConnectionError, encodeBinaryPackValue } from "@psilink/core";
+import { ConnectionError, encodeBinaryPackValue } from "@alcove/core";
 
 /**
  * The PeerJS DataConnection wire, written out rather than obtained by running

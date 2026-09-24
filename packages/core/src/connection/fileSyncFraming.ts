@@ -114,7 +114,7 @@ export interface DeserializedMessage {
 // signal separating a same-version peer's corrupt frame from a foreign wire
 // format: a pre-binary-envelope JSON control message begins with '{' (0x7B),
 // and a future version bump raises the byte, so an unrecognized value most
-// likely means an incompatible psilink version. The read path turns this
+// likely means an incompatible Alcove version. The read path turns this
 // into a "likely incompatible partner version" hint rather than a raw
 // "malformed envelope" message; it is not a certain diagnosis, since a
 // foreign format that happens to reuse byte 0 == 1 still falls through to

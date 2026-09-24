@@ -9,7 +9,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError } from "@alcove/core";
 
 import {
   acceptAsWebParty,
@@ -34,7 +34,7 @@ import type { CliRun } from "./cliParty";
  * file-drop directory -- the only transport a Node host can stand up without
  * a browser and a broker. This proves the two runtimes complete a handshake
  * and PSI rounds WITH each other (byte-parity fixtures only pin that their
- * outputs agree). The CLI party is the real `psilink` program; the web party
+ * outputs agree). The CLI party is the real `alcove` program; the web party
  * is assembled from the web app's own modules (apps/web/src).
  *
  * The harness supplies what apps/web has neither of and may not import from
@@ -90,7 +90,7 @@ const COMPLETING_PEER_TIMEOUT_MS = 60_000;
 // against a production wait.
 const REFUSAL_PEER_TIMEOUT_MS = 10_000;
 
-// A hard deadline on each `psilink` invocation, comfortably past every peer
+// A hard deadline on each `alcove` invocation, comfortably past every peer
 // budget above so a run that hangs is reported as a hang rather than absorbed
 // into a budget's expiry.
 const CLI_DEADLINE_MS = 150_000;
@@ -106,7 +106,7 @@ interface Workspace {
 }
 
 function makeWorkspace(): Workspace {
-  const root = mkdtempSync(path.join(tmpdir(), "psilink-cli-web-interop-"));
+  const root = mkdtempSync(path.join(tmpdir(), "alcove-cli-web-interop-"));
   const dropDir = path.join(root, "drop");
   const cliDir = path.join(root, "cli");
   const webDir = path.join(root, "web");
@@ -121,7 +121,7 @@ function makeWorkspace(): Workspace {
     cliDir,
     cliInput,
     cliOutput: path.join(cliDir, "out.csv"),
-    cliConfig: path.join(cliDir, "psilink.yaml"),
+    cliConfig: path.join(cliDir, "alcove.yaml"),
     webInput,
   };
 }
@@ -178,7 +178,7 @@ describe.skipIf(!cliIsBuilt)(
       const token = invitationFrom(invite);
 
       // An offline invite embeds no endpoint, so its configuration names none
-      // and psilink says so; supplying the shared directory is the operator step
+      // and Alcove says so; supplying the shared directory is the operator step
       // it asks for.
       expect(namesFileDrop(workspace.cliConfig, workspace.dropDir)).toBe(false);
       fillInFileDropConnection({

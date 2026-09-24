@@ -4,7 +4,7 @@
 //
 // docs/spec/PROTOCOL.md's "Wire-format deltas: existing frames only, and no
 // version bump" states the rule in prose: a wire-format delta ships within
-// PROTOCOL_VERSION 1 while psilink is pre-publication, and takes a bump from the
+// PROTOCOL_VERSION 1 while Alcove is pre-publication, and takes a bump from the
 // first published deployment onward. A future obligation written as prose is the
 // shape that rots -- the release it binds arrives long after the sentence was
 // written, nothing fails when it is forgotten, and the change that should have
@@ -157,17 +157,17 @@ export const UNCOVERED_VECTORS = [
   {
     vectors: "canonical-vectors.json",
     versionedBy:
-      "RFC 8785 itself: a conformance corpus transcribed from docs/spec/CANONICAL_ENCODING.md rather than a psilink frame layout, so the external standard carries its versioning.",
+      "RFC 8785 itself: a conformance corpus transcribed from docs/spec/CANONICAL_ENCODING.md rather than an Alcove frame layout, so the external standard carries its versioning.",
   },
   {
     vectors: "exchange-record-vectors.json",
     versionedBy:
-      "the record document's own `psilink-exchange-record/v8` discriminant (docs/spec/EXCHANGE_RECORD.md). The record is written locally and never sent to the partner.",
+      "the record document's own `alcove-exchange-record/v9` discriminant (docs/spec/EXCHANGE_RECORD.md). The record is written locally and never sent to the partner.",
   },
   {
     vectors: "kex-vectors.json",
     versionedBy:
-      "the KEX protocol-name tag hashed into the handshake transcript (`psilink-kex-v2`), which docs/spec/PROTOCOL.md names as a marker distinct from this one.",
+      "the KEX protocol-name tag hashed into the handshake transcript (`alcove-kex-v3`), which docs/spec/PROTOCOL.md names as a marker distinct from this one.",
   },
   {
     vectors: "psi-prebuild-manifest.json",

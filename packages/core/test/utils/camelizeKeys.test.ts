@@ -167,7 +167,7 @@ test("snakeizeKeys is the inverse of camelizeKeys for schema keys", () => {
 // through this function. Validation runs on the camelized shape, so an issue
 // path holds the camelCase name while the operator reads the snake_case
 // document. The deep writer is the same function, so a name it produces matches
-// how psilink's own writer spells the document's keys.
+// how Alcove's own writer spells the document's keys.
 test("snakeizeKey names a key exactly as the deep writer spells it", () => {
   const onDisk = {
     linkage_fields: [{ affixes_allowed: true }],

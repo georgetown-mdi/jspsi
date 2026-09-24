@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Opens the psilink console in your browser. Run it whenever you want to run
+    Opens the Alcove console in your browser. Run it whenever you want to run
     an exchange.
 
 .DESCRIPTION
@@ -21,19 +21,19 @@
 
     A network folder -- a mapped drive, a network path, or a DFS namespace --
     cannot be handed to Docker directly, so this asks
-    Setup-PsilinkFileDrop.ps1, which must be in the same folder, to work out the
+    Setup-AlcoveFileDrop.ps1, which must be in the same folder, to work out the
     real server and share behind it, and then builds the network-share volume
     Docker needs. A folder on this PC needs none of that and is mounted as it
     stands.
 
 .LINK
-    https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md
+    https://github.com/georgetown-mdi/alcove/blob/main/support/windows-network-filedrop/troubleshooting.md
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\Start-Psilink.ps1
+    powershell -ExecutionPolicy Bypass -File .\Start-Alcove.ps1
 
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .\Start-Psilink.ps1 -DataRoot 'C:\psilink\work'
+    powershell -ExecutionPolicy Bypass -File .\Start-Alcove.ps1 -DataRoot 'C:\alcove\work'
 #>
 
 [CmdletBinding()]
@@ -44,7 +44,7 @@ param(
     [string] $RendezvousOutboundDir,
     [ValidateRange(1, 65535)]
     [int] $Port = 3000,
-    [string] $VolumeName = 'psilink-sync',
+    [string] $VolumeName = 'alcove-sync',
     [switch] $NoBrowser,
     # Dot-source the script with this switch to define its functions and stop
     # before the launcher runs; it is how the Pester suite in
@@ -61,42 +61,42 @@ $ErrorActionPreference = 'Stop'
 # from a release and refuses to run: an unpinned launcher would run whatever is
 # behind a floating tag today, which is the one thing an operator reading this
 # file cannot check for themselves.
-$PsilinkImageRepository = 'ghcr.io/georgetown-mdi/alcove'
-$PsilinkImageDigest = '@@PSILINK_IMAGE_DIGEST@@'
+$AlcoveImageRepository = 'ghcr.io/georgetown-mdi/alcove'
+$AlcoveImageDigest = '@@ALCOVE_IMAGE_DIGEST@@'
 
-$PsilinkReleasesUrl = 'https://github.com/georgetown-mdi/jspsi/releases'
-$PsilinkTroubleshootingUrl = 'https://github.com/georgetown-mdi/jspsi/blob/main/support/windows-network-filedrop/troubleshooting.md'
+$AlcoveReleasesUrl = 'https://github.com/georgetown-mdi/alcove/releases'
+$AlcoveTroubleshootingUrl = 'https://github.com/georgetown-mdi/alcove/blob/main/support/windows-network-filedrop/troubleshooting.md'
 
-# The verdict schema this launcher was written against. `psilink doctor --json`
+# The verdict schema this launcher was written against. `alcove doctor --json`
 # carries its own; anything else is refused rather than parsed on, because a
 # later version may have re-meaned a field this one reads.
-$PsilinkVerdictVersion = 1
+$AlcoveVerdictVersion = 1
 
 # The overall verdicts and check statuses this launcher knows. Both vocabularies
 # are closed within a schema version, so a value outside one of these sets means
 # the document is not the version it claims and is refused rather than mapped
 # onto the nearest thing.
-$PsilinkOverallValues = @('ok', 'fix_and_retry', 'fatal')
-$PsilinkStatusValues = @('ok', 'warn', 'fail', 'skipped')
+$AlcoveOverallValues = @('ok', 'fix_and_retry', 'fatal')
+$AlcoveStatusValues = @('ok', 'warn', 'fail', 'skipped')
 
 # The marker the probe leaves for the mount check to find. Fixed rather than
 # unique, so a run always clears any copy an earlier one left; the per-run token
 # written into it is what tells the two apart.
-$PsilinkMarkerName = 'psilink-setup-check.tmp'
+$AlcoveMarkerName = 'alcove-setup-check.tmp'
 
-$script:PsilinkEngine = ''
+$script:AlcoveEngine = ''
 
 # The share credential this run has already been given, and the server it was
 # given for. A second share on that server offers this answer rather than
 # asking for the same one twice, and Clear-ShareCredential drops both at every
 # way out of the volumes below.
-$script:PsilinkShareCredential = $null
-$script:PsilinkShareCredentialServer = ''
+$script:AlcoveShareCredential = $null
+$script:AlcoveShareCredentialServer = ''
 
 # ==========================================================================
 # Display
 #
-# Named apart from the Write-* helpers in Setup-PsilinkFileDrop.ps1: this script
+# Named apart from the Write-* helpers in Setup-AlcoveFileDrop.ps1: this script
 # dot-sources that one, which would otherwise replace these mid-run with its own
 # definitions of the same names.
 # ==========================================================================
@@ -122,7 +122,7 @@ function Read-YesNo {
         -DefaultYes is where an empty answer goes, which is the letter the
         prompt capitalises.
 
-        Carried here rather than borrowed from Setup-PsilinkFileDrop.ps1's
+        Carried here rather than borrowed from Setup-AlcoveFileDrop.ps1's
         Read-YesNoAnswer, as Get-LocalFolderName below is: the questions this
         answers are asked on the path a run keeps when that script cannot be
         loaded at all -- a constrained language mode, or no copy of it beside
@@ -155,36 +155,36 @@ function Show-FromContainer {
 # The image reference
 # ==========================================================================
 
-function Get-PsilinkImage {
+function Get-AlcoveImage {
     <#  Fully qualified, registry included: podman requires the prefix and
         docker accepts it, so one reference serves both. #>
-    return "$PsilinkImageRepository@$PsilinkImageDigest"
+    return "$AlcoveImageRepository@$AlcoveImageDigest"
 }
 
-function Test-PsilinkImageStamp {
+function Test-AlcoveImageStamp {
     <#  Whether this copy carries a real digest, established positively rather
         than by looking for the placeholder: a half-applied stamp is then
         refused on the same branch as an unstamped one, and the placeholder
         token appears in this file exactly once, where the release step expects
         it. #>
-    param([string] $Digest = $PsilinkImageDigest)
+    param([string] $Digest = $AlcoveImageDigest)
 
     return [bool]($Digest -cmatch '^sha256:[0-9a-f]{64}$')
 }
 
-function Assert-PsilinkImageStamp {
-    if (Test-PsilinkImageStamp) {
-        Show-Ok "Image pinned to $(Get-PsilinkImage)"
+function Assert-AlcoveImageStamp {
+    if (Test-AlcoveImageStamp) {
+        Show-Ok "Image pinned to $(Get-AlcoveImage)"
         return $true
     }
     Show-Fail 'This copy of the launcher did not come from a release.'
     Show-Note 'It carries no image digest, so there is nothing here to say which'
-    Show-Note 'psilink it would run. Rather than run whatever is behind a'
+    Show-Note 'Alcove it would run. Rather than run whatever is behind a'
     Show-Note 'floating tag today, it stops.'
     Write-Host ''
     Show-Info 'A release copy has the digest filled in. Download one from:'
-    Show-Info "    $PsilinkReleasesUrl"
-    Show-Info 'or ask whoever in your organisation distributes psilink for the'
+    Show-Info "    $AlcoveReleasesUrl"
+    Show-Info 'or ask whoever in your organisation distributes Alcove for the'
     Show-Info 'copy they approved.'
     return $false
 }
@@ -240,7 +240,7 @@ function Invoke-EngineQuiet {
         first and "-v" becomes -Verbose instead of reaching docker. #>
     param(
         [Parameter(Mandatory = $true)][string[]] $EngineArgs,
-        [string] $Engine = $script:PsilinkEngine
+        [string] $Engine = $script:AlcoveEngine
     )
 
     if (-not (Test-EngineCommand -Engine $Engine)) { return (New-AbsentEngineResult -Engine $Engine) }
@@ -263,7 +263,7 @@ function Invoke-EngineCapture {
         for the reason Invoke-EngineQuiet gives. #>
     param(
         [Parameter(Mandatory = $true)][string[]] $EngineArgs,
-        [string] $Engine = $script:PsilinkEngine
+        [string] $Engine = $script:AlcoveEngine
     )
 
     if (-not (Test-EngineCommand -Engine $Engine)) { return (New-AbsentEngineResult -Engine $Engine) }
@@ -333,7 +333,7 @@ function Get-JsonText {
 }
 
 function Read-DoctorVerdict {
-    <#  Read one line of `psilink doctor --json` output, per
+    <#  Read one line of `alcove doctor --json` output, per
         docs/spec/CLI_DOCTOR.md. Returns a hashtable:
 
           Ok       whether the document is a verdict this launcher understands
@@ -365,16 +365,16 @@ function Read-DoctorVerdict {
         return @{ Ok = $false; Reason = 'the verdict carries no version' }
     }
     $version = $document.version
-    if ($version -ne $PsilinkVerdictVersion) {
+    if ($version -ne $AlcoveVerdictVersion) {
         return @{ Ok = $false
-                  Reason = "the verdict is version $version and this launcher reads version $PsilinkVerdictVersion" }
+                  Reason = "the verdict is version $version and this launcher reads version $AlcoveVerdictVersion" }
     }
 
     if (-not (Test-JsonMember -Object $document -Name 'overall')) {
         return @{ Ok = $false; Reason = 'the verdict carries no overall value' }
     }
     $overall = [string] $document.overall
-    if ($PsilinkOverallValues -notcontains $overall) {
+    if ($AlcoveOverallValues -notcontains $overall) {
         return @{ Ok = $false; Reason = "the verdict's overall value '$overall' is not one this launcher knows" }
     }
 
@@ -389,7 +389,7 @@ function Read-DoctorVerdict {
                 return @{ Ok = $false; Reason = 'a check in the verdict carries no status' }
             }
             $status = [string] $entry.status
-            if ($PsilinkStatusValues -notcontains $status) {
+            if ($AlcoveStatusValues -notcontains $status) {
                 return @{ Ok = $false; Reason = "the check status '$status' is not one this launcher knows" }
             }
             $checks += @{
@@ -449,7 +449,7 @@ function Invoke-DoctorBattery {
         [Parameter(Mandatory = $true)][string[]] $BatteryArgs
     )
 
-    $run = Invoke-EngineCapture -EngineArgs (@('run', '--rm') + $EngineArgs + @((Get-PsilinkImage)) + $BatteryArgs + @('--json'))
+    $run = Invoke-EngineCapture -EngineArgs (@('run', '--rm') + $EngineArgs + @((Get-AlcoveImage)) + $BatteryArgs + @('--json'))
 
     # Docker reserves 125 and above for its own failure to start a container,
     # and every verdict code is below it -- so this is "the checks never ran"
@@ -495,7 +495,7 @@ function Invoke-DoctorBattery {
             Show-Fail 'The checks could not be run, so nothing was established.'
             Show-Note 'There is no ACTION to follow: the checks that would have'
             Show-Note 'produced one never ran.'
-            Show-Info "See $PsilinkTroubleshootingUrl"
+            Show-Info "See $AlcoveTroubleshootingUrl"
         }
     }
     return @{ Established = $true; Overall = $verdict.Overall }
@@ -587,20 +587,20 @@ function Show-DfsManualRoute {
     <#  The way on from a server and share the operator would not confirm, and
         it stays inside the launcher: -RendezvousDir takes a network path as
         typed, so the path read off the DFS tab goes where the wrong one did.
-        Setup-PsilinkFileDrop.ps1 makes a volume and stops, which is not what
+        Setup-AlcoveFileDrop.ps1 makes a volume and stops, which is not what
         someone opening the console came for. #>
 
     Show-Info 'Open the folder in File Explorer, right-click, Properties, and'
     Show-Info 'read the DFS tab: it names the real server, share and folder.'
     Show-Info 'Then run this script again and give that path instead:'
     Show-Info ''
-    Show-Info '    .\Start-Psilink.ps1 -RendezvousDir ''\\fs-04.agency.gov\exchange$\dropbox'''
+    Show-Info '    .\Start-Alcove.ps1 -RendezvousDir ''\\fs-04.agency.gov\exchange$\dropbox'''
     Show-Info ''
     Show-Info 'Add -RendezvousOutboundDir the same way if your partner named a'
     Show-Info 'second folder. A path typed there is used as it stands, so it'
     Show-Info 'reaches the real share rather than the namespace.'
     Show-Info ''
-    Show-Info "See $PsilinkTroubleshootingUrl, 'Reading the real path from Windows'."
+    Show-Info "See $AlcoveTroubleshootingUrl, 'Reading the real path from Windows'."
 }
 
 function Resolve-DfsSuggestion {
@@ -722,8 +722,8 @@ function Clear-ShareCredential {
     <#  Drop the share credential this run was given and the server it was
         given for. Nothing past the volumes reaches a file server. #>
 
-    $script:PsilinkShareCredential = $null
-    $script:PsilinkShareCredentialServer = ''
+    $script:AlcoveShareCredential = $null
+    $script:AlcoveShareCredentialServer = ''
 }
 
 function New-RendezvousShareMount {
@@ -762,19 +762,19 @@ function New-RendezvousShareMount {
     )
 
     $credential = $null
-    if ($script:PsilinkShareCredential -and $script:PsilinkShareCredentialServer -eq $Server) {
+    if ($script:AlcoveShareCredential -and $script:AlcoveShareCredentialServer -eq $Server) {
         # $($Share) rather than $Share: the question mark is read as part of
         # the variable name, which leaves the share out of the question.
         if (Read-YesNo -Prompt "Use the same credentials for \\$Server\$($Share)? [Y/n]" -DefaultYes) {
-            $credential = $script:PsilinkShareCredential
+            $credential = $script:AlcoveShareCredential
         }
     }
     if (-not $credential) {
         Show-Head 'Credentials for the file server'
         $credential = Read-ShareCredential
         if (-not $credential) { return @{ Mounted = $false; VolumeName = '' } }
-        $script:PsilinkShareCredential = $credential
-        $script:PsilinkShareCredentialServer = $Server
+        $script:AlcoveShareCredential = $credential
+        $script:AlcoveShareCredentialServer = $Server
     }
     $plainPass = $credential.Password
     $token = [Guid]::NewGuid().ToString('N')
@@ -784,7 +784,7 @@ function New-RendezvousShareMount {
         $env:SMB_SHARE = $Share
         $env:SMB_USER = $credential.Username
         $env:SMB_DOMAIN = $credential.Domain
-        $env:SMB_MARKER = $PsilinkMarkerName
+        $env:SMB_MARKER = $AlcoveMarkerName
         $env:SMB_TOKEN = $token
         $env:SMB_PASS = $plainPass
 
@@ -805,9 +805,9 @@ function New-RendezvousShareMount {
         }
 
         Show-Head "Creating the network-share volume '$VolumeName'"
-        if ($script:PsilinkEngine -ne 'docker') {
+        if ($script:AlcoveEngine -ne 'docker') {
             Show-Alert 'The volume options below have only ever been driven against docker.'
-            Show-Note "$script:PsilinkEngine may reject or read them differently. If it"
+            Show-Note "$script:AlcoveEngine may reject or read them differently. If it"
             Show-Note 'does, its own message is the answer -- nothing here predicts'
             Show-Note 'what it will make of them.'
         }
@@ -815,7 +815,7 @@ function New-RendezvousShareMount {
         $volumeMade = New-ShareVolume -VolumeName $VolumeName `
             -Server $Server -Share $Share -SubPath $SubPath `
             -Username $credential.Username -Password $plainPass -Domain $credential.Domain `
-            -Engine $script:PsilinkEngine
+            -Engine $script:AlcoveEngine
         if (-not $volumeMade) { return @{ Mounted = $false; VolumeName = '' } }
 
         foreach ($leg in $Legs) {
@@ -844,7 +844,7 @@ function Test-LocalRendezvousFolder {
     <#  A folder on this PC is bind-mounted as it stands, so the kernel's view is
         the only view there is -- and that is what the mount battery checks: the
         write, the exclusive create, and the rename onto an existing file that
-        psilink's rendezvous is built on. There is no share to ask over the
+        Alcove's rendezvous is built on. There is no share to ask over the
         network, so the probe battery does not apply. #>
     param(
         [Parameter(Mandatory = $true)][string] $Path,
@@ -875,10 +875,10 @@ function Show-VolumeRemoval {
     }
     Write-Host ''
     Show-Alert $storedLine
-    Show-Note "metadata: '$script:PsilinkEngine volume inspect $volumeList' shows it"
+    Show-Note "metadata: '$script:AlcoveEngine volume inspect $volumeList' shows it"
     Show-Note 'to anyone who can run Docker on this PC. When you are finished:'
     Show-Info ''
-    Show-Info "    $script:PsilinkEngine volume rm $volumeList"
+    Show-Info "    $script:AlcoveEngine volume rm $volumeList"
     Show-Info ''
     Show-Info 'That removes what it names but not every trace of the password, so'
     Show-Info 'retire or rotate the account when the exchanges are done. The'
@@ -975,7 +975,7 @@ function Get-LocalFolderName {
         segment of its path, and nothing for a drive root, which has no folder
         name and whose letter means nothing on the partner's machine.
 
-        This is the local arm of Setup-PsilinkFileDrop.ps1's
+        This is the local arm of Setup-AlcoveFileDrop.ps1's
         Get-RendezvousFolderName, whose share arm the network branch below
         reaches through the dot-source instead. It is carried here rather than
         borrowed because a folder on this PC is usable when that script cannot
@@ -1201,7 +1201,7 @@ function Get-ConsoleEngineArgs {
     if ($OutboundMount -or $OutboundLeg) {
         $engineArgs += @('--env', "JOB_RENDEZVOUS_OUTBOUND_NAME=$OutboundName")
     }
-    return $engineArgs + @((Get-PsilinkImage), 'serve')
+    return $engineArgs + @((Get-AlcoveImage), 'serve')
 }
 
 # ==========================================================================
@@ -1227,12 +1227,12 @@ if ($LoadFunctionsOnly) { return }
 # ==========================================================================
 # Preflight
 # ==========================================================================
-Show-Head 'psilink console'
+Show-Head 'Alcove console'
 
-if (-not (Assert-PsilinkImageStamp)) { exit 1 }
+if (-not (Assert-AlcoveImageStamp)) { exit 1 }
 
-$script:PsilinkEngine = Find-ContainerEngine
-if (-not $script:PsilinkEngine) {
+$script:AlcoveEngine = Find-ContainerEngine
+if (-not $script:AlcoveEngine) {
     if (-not (Get-Command docker -ErrorAction SilentlyContinue) -and
         -not (Get-Command podman -ErrorAction SilentlyContinue)) {
         Show-Fail 'Neither docker nor podman is installed on this PC.'
@@ -1246,33 +1246,33 @@ if (-not $script:PsilinkEngine) {
     }
     exit 1
 }
-if (Test-WindowsContainerMode -Engine $script:PsilinkEngine) {
+if (Test-WindowsContainerMode -Engine $script:AlcoveEngine) {
     Show-Fail 'Docker Desktop is in Windows containers mode.'
-    Show-Note 'psilink and these checks are Linux containers. In this mode the'
+    Show-Note 'Alcove and these checks are Linux containers. In this mode the'
     Show-Note 'engine answers normally and then every container fails to start.'
     Show-Info ''
     Show-Info 'Right-click the Docker whale icon in the notification area and'
     Show-Info 'choose "Switch to Linux containers...", then run this again.'
     exit 1
 }
-Show-Ok "Using $script:PsilinkEngine."
+Show-Ok "Using $script:AlcoveEngine."
 
-# Setup-PsilinkFileDrop.ps1 owns the Explorer-path-to-server-and-share
+# Setup-AlcoveFileDrop.ps1 owns the Explorer-path-to-server-and-share
 # resolution, and the rule that names a folder within a share, and this script
 # reuses both rather than carrying a second copy. It is loaded with
 # -LoadFunctionsOnly, which defines its functions and runs none of its setup
 # flow. Everything it is reached for belongs to the network branch, so a run
 # that cannot load it keeps the whole of the local one.
-$setupScript = Join-Path $PSScriptRoot 'Setup-PsilinkFileDrop.ps1'
+$setupScript = Join-Path $PSScriptRoot 'Setup-AlcoveFileDrop.ps1'
 $canResolveNetworkPaths = $false
 if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
     Show-Alert "PowerShell is in $($ExecutionContext.SessionState.LanguageMode) mode."
     Show-Note 'An application-control policy on this PC has restricted what'
     Show-Note 'scripts may do. A folder on this PC still works; a network folder'
     Show-Note 'needs the Command Prompt setup script, which the same policy does'
-    Show-Note "not reach. See $PsilinkTroubleshootingUrl, 'The script will not run'."
+    Show-Note "not reach. See $AlcoveTroubleshootingUrl, 'The script will not run'."
 } elseif (-not (Test-Path -LiteralPath $setupScript)) {
-    Show-Alert 'Setup-PsilinkFileDrop.ps1 is not in this folder.'
+    Show-Alert 'Setup-AlcoveFileDrop.ps1 is not in this folder.'
     Show-Note 'It has to sit beside this script: it is what works out the real'
     Show-Note 'server behind a mapped drive or a network path. Without it, only'
     Show-Note 'a folder on this PC can be used.'
@@ -1624,7 +1624,7 @@ Write-Host 'Nothing is kept between runs: the container is removed when it stops
 Write-Host 'and everything the exchange produces is in your own folders.'
 Write-Host ''
 
-$containerName = "psilink-console-$PID"
+$containerName = "alcove-console-$PID"
 # A rendezvous mount is passed only when the operator gave the partner-shared
 # folder its own home; with one folder for everything the console falls back to
 # JOB_DATA_ROOT, which is the shape docs/DEPLOYMENT.md calls the simplest one.
@@ -1655,7 +1655,7 @@ try {
         if (-not $NoBrowser) { Start-Process $url | Out-Null }
         Write-Host ''
         Show-Info 'Leave this window open while you use it.'
-        Show-Info "If it closes without stopping the console, run: $script:PsilinkEngine stop $containerName"
+        Show-Info "If it closes without stopping the console, run: $script:AlcoveEngine stop $containerName"
     } else {
         Show-Fail "Nothing answered on $url."
         Write-Host ''

@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "psilink - private record linkage",
-  "short_name": "psilink",
+  "name": "Alcove - encrypted matching and sharing",
+  "short_name": "Alcove",
   "description": "Find the records you both hold - without either of you seeing the other's data.",
   "start_url": "/",
   "scope": "/",

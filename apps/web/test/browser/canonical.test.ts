@@ -7,10 +7,10 @@ import {
   CanonicalEncodingError,
   canonicalBytes,
   canonicalString,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // The companion to packages/core/test/utils/canonical.test.ts: it runs the SAME
-// checked-in vectors through the browser build of @psilink/core in real
+// checked-in vectors through the browser build of @alcove/core in real
 // Chromium. The Node suite proves Node matches the vectors and this suite
 // proves the browser matches the same vectors, so the two platforms produce
 // byte-identical canonical output. The canonicalizer uses only platform-neutral

@@ -262,7 +262,7 @@ interface Options {
   // CLI-only, NON-persistable runtime controls for the entry sweep
   // (--sweep-exchange-files / --force-retain-sweep). NOT mirrored on
   // FileSyncOptions / the Zod config schema, where anything is persistable in
-  // psilink.yaml, contradicting "invocation-scoped, never persisted": a config
+  // alcove.yaml, contradicting "invocation-scoped, never persisted": a config
   // spelling either flag resolves none of it (pinned in connection.test.ts).
   // They reach this type through the constructor's Partial<Options> alone (the
   // verbose/joinerRecoveryMs precedent). The CLI command layer threads them on a

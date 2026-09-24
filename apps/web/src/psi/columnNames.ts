@@ -1,4 +1,4 @@
-import { MAX_NAME_LENGTH, NAME_SHAPE_PATTERN } from "@psilink/core";
+import { MAX_NAME_LENGTH, NAME_SHAPE_PATTERN } from "@alcove/core";
 
 import {
   MAX_STANDARDIZATION_STEPS,
@@ -7,7 +7,7 @@ import {
 } from "@jobs/intentSchemas";
 import { isolatedColumnName } from "@components/ColumnName";
 
-import type { Standardization } from "@psilink/core";
+import type { Standardization } from "@alcove/core";
 
 /**
  * The 1-based positions of columns with an empty (zero-length) name, in column
@@ -179,7 +179,7 @@ export function overlongColumnsAlert(positions: ReadonlyArray<number>): {
       `${plural ? "their names are" : "its name is"} longer than ` +
       `${MAX_NAME_LENGTH} characters (a character outside the basic set, such as ` +
       `an emoji, counts as two). A column's name travels with its values, and ` +
-      `your partner's copy of psilink refuses a name that long, so the exchange ` +
+      `your partner's copy of Alcove refuses a name that long, so the exchange ` +
       `cannot start. Shorten the header${plural ? "s" : ""} in your file, or set ` +
       `${plural ? "those columns" : "that column"} so ${plural ? "they are" : "it is"} not sent.`,
   };

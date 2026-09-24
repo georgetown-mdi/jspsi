@@ -4,7 +4,7 @@
 # because the state holds every value in terraform.tfvars.
 
 bucket       = "<state bucket name>"
-key          = "psilink/hosted/terraform.tfstate"
+key          = "alcove/hosted/terraform.tfstate"
 region       = "us-west-2"
 encrypt      = true
 use_lockfile = true

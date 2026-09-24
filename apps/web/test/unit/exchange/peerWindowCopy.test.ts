@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { DEFAULT_PEER_TIMEOUT_MS } from "@psilink/core";
+import { DEFAULT_PEER_TIMEOUT_MS } from "@alcove/core";
 
 import {
   SERVER_JOB_PEER_WINDOW_BODY,

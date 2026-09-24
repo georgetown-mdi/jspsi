@@ -4,7 +4,7 @@ import { selectedBackend } from "./sftpServer";
 
 /**
  * A test that runs only against the in-process SFTP backend, skipped when
- * `PSILINK_SFTP_BACKEND=native` selects a real OpenSSH `sshd`.
+ * `ALCOVE_SFTP_BACKEND=native` selects a real OpenSSH `sshd`.
  *
  * What qualifies: a test that drives the server into a state only a server this
  * suite controls can be put into -- a withheld close, a vanished session, a key

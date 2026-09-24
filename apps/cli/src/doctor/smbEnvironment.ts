@@ -1,6 +1,6 @@
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
-// The input contract `psilink doctor` reads. It is the environment, not flags:
+// The input contract `alcove doctor` reads. It is the environment, not flags:
 // the caller is the Windows file-drop setup script (and the host-side launcher
 // that follows it), which already passes these names to the container, and the
 // password must not become an argv value that every `ps` on the machine can
@@ -78,7 +78,7 @@ function rejectIf(
 function assertNoProblems(problems: string[]): void {
   if (problems.length === 0) return;
   throw new UsageError(
-    `psilink doctor cannot run with the environment it was given: ` +
+    `alcove doctor cannot run with the environment it was given: ` +
       problems.join("; "),
   );
 }

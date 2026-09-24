@@ -5,7 +5,7 @@ import {
   displayPartyIdentity,
   holdsPrivateKeyMaterial,
   summarizeInvitation,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { commitAcceptance } from "@psi/acceptConsent";
 import { isBareSftpHost } from "@psi/sftpHost";
@@ -18,7 +18,7 @@ import { dateTimeLabel } from "@psi/formatting";
 import { TRANSPORT_LEDGER_LABELS } from "@psi/transportChooser";
 import { saveRailNote } from "./saveExchangeModel";
 
-import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
+import type { InvitationToken, LinkageTerms, Metadata } from "@alcove/core";
 import type { LedgerOutcome } from "@psi/ledger";
 
 import type { RailFact, RailStepState } from "@psi/rail";
@@ -545,7 +545,7 @@ export function acceptUnsupported(
       title: ACCEPT_UNSUPPORTED_TITLE,
       message:
         "This invitation runs an in-browser (WebRTC) exchange, which is out of " +
-        "scope on this console. Accept it from a standard psilink web app in " +
+        "scope on this console. Accept it from a standard Alcove web app in " +
         "your browser instead.",
     };
   // An SFTP accept connects to the partner-named server (no rendezvous mount), so
@@ -558,7 +558,7 @@ export function acceptUnsupported(
         title: ACCEPT_UNSUPPORTED_TITLE,
         message:
           "This invitation uses separate inbound and outbound directories, which " +
-          "this console does not run. Accept it with the psilink command-line " +
+          "this console does not run. Accept it with the Alcove command-line " +
           "tool instead.",
       };
     // The partner authored the host; the accept form shows it read-only, so a host
@@ -570,7 +570,7 @@ export function acceptUnsupported(
         title: ACCEPT_UNSUPPORTED_TITLE,
         message:
           "This invitation names an SFTP host that is not a plain address (it " +
-          "contains a URL, path, or whitespace). Accept it with the psilink " +
+          "contains a URL, path, or whitespace). Accept it with the Alcove " +
           "command-line tool instead.",
       };
     return undefined;

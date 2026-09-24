@@ -17,11 +17,11 @@
  * {@link assessManagedInputColumns}).
  */
 
-import { decideLinkageTermsVerdict } from "@psilink/core";
+import { decideLinkageTermsVerdict } from "@alcove/core";
 
 import { failedRun } from "./managedRunRotate";
 
-import type { ExchangeSpec, LinkageField } from "@psilink/core";
+import type { ExchangeSpec, LinkageField } from "@alcove/core";
 import type { ManagedExchangeLastRun } from "./managedExchangeRecord";
 
 /**

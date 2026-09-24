@@ -2,7 +2,7 @@
 /// <reference types="vite/client" />
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   clearManagedExchanges,
@@ -19,7 +19,7 @@ import { tickManagedSchedules } from "@psi/managed/managedScheduleRunner";
 
 import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 import type { ManagedScheduleTickSeams } from "@psi/managed/managedScheduleRunner";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 // The two run paths against each other, on real Chromium Web Locks and real
 // IndexedDB: an attended Run and a scheduled attempt are the two contexts that

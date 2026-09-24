@@ -26,7 +26,7 @@ describe("markerPath", () => {
     expect(path).toBe(
       join(
         tmpdir(),
-        "psilink-orchestration-reads",
+        "alcove-orchestration-reads",
         "8f2b1c66-0000-4000-8000-0123456789ab",
       ),
     );
@@ -45,7 +45,7 @@ describe("markerPath", () => {
   it("keeps an id holding separators inside the marker directory", () => {
     for (const id of ["../../etc/passwd", "/", "a/b"]) {
       expect(dirname(markerPath(id)), id).toBe(
-        join(tmpdir(), "psilink-orchestration-reads"),
+        join(tmpdir(), "alcove-orchestration-reads"),
       );
     }
   });

@@ -1,10 +1,10 @@
-# @psilink/peerjs-broker
+# @alcove/peerjs-broker
 
 The PeerJS-compatible WebSocket signaling broker two parties rendezvous through before their WebRTC data channel opens. It brokers only rendezvous-setup messages: no exchange payload crosses it, and the parties authenticate each other directly (see [docs/SECURITY_DESIGN.md](../../docs/SECURITY_DESIGN.md#channel-security)). Its upgrade-surface bounds -- inbound frame size, handshake parameter lengths, timeouts, the liveness reaper, and the relay queue caps -- are specified in [docs/spec/CHANNEL_SECURITY.md](../../docs/spec/CHANNEL_SECURITY.md).
 
 `src/contrib/` is vendored from [peerjs-server](https://github.com/peers/peerjs-server) under the MIT license carried beside it, kept in upstream's file layout so review history stays traceable rather than kept as upstream wrote it: about a third of the directory's lines are this project's own hardening, concentrated in `services/webSocketServer/index.ts`, `models/realm.ts`, and `models/messageQueue.ts`. The files this project has not edited since the vendoring -- upstream's message routing, `messageHandler/` and `models/message.ts` -- are excluded from linting for that traceability; the rest of the directory is linted, as is the first-party remainder of this workspace.
 
-The package ships TypeScript source and has no build step of its own, though it reads `@psilink/core/untrusted-text` from that workspace's `dist/`, so build core (`npm run build -w packages/core`) before running it. That subpath, rather than the package root, is the whole of its reach into core: this is a network-facing process, so the packages it can reach at run time are the packages an advisory can force a redeploy over. `scripts/broker-core-reach.test.mjs` holds both halves of that -- the source imports and the built subpath's own closure -- and [docs/notes/broker-runtime-closure.md](../../docs/notes/broker-runtime-closure.md) records why. The web app consumes the package as a workspace dependency and bundles it into the server it deploys; the CLI's signaling test harness spawns the standalone entry point below.
+The package ships TypeScript source and has no build step of its own, though it reads `@alcove/core/untrusted-text` from that workspace's `dist/`, so build core (`npm run build -w packages/core`) before running it. That subpath, rather than the package root, is the whole of its reach into core: this is a network-facing process, so the packages it can reach at run time are the packages an advisory can force a redeploy over. `scripts/broker-core-reach.test.mjs` holds both halves of that -- the source imports and the built subpath's own closure -- and [docs/notes/broker-runtime-closure.md](../../docs/notes/broker-runtime-closure.md) records why. The web app consumes the package as a workspace dependency and bundles it into the server it deploys; the CLI's signaling test harness spawns the standalone entry point below.
 
 ## Running it standalone
 
@@ -13,12 +13,12 @@ npm start -w packages/peerjs-broker
 npm start -w packages/peerjs-broker -- --host 0.0.0.0 --port 9000
 ```
 
-By default it listens on `127.0.0.1` on an ephemeral port, mounts the signaling server at `/api`, and accepts the PeerJS protocol's well-known `peerjs` realm key. It prints one line, `psilink-broker <port>`, on stdout once it is listening, then stays up until it is signalled; nothing else reaches stdout, so a parent process reads the port with a single match. That line reports the port alone -- the address is the operator's own instruction, while an ephemeral port is not known until the bind returns.
+By default it listens on `127.0.0.1` on an ephemeral port, mounts the signaling server at `/api`, and accepts the PeerJS protocol's well-known `peerjs` realm key. It prints one line, `alcove-broker <port>`, on stdout once it is listening, then stays up until it is signalled; nothing else reaches stdout, so a parent process reads the port with a single match. That line reports the port alone -- the address is the operator's own instruction, while an ephemeral port is not known until the bind returns.
 
 | Setting      | Flag               | Environment           | Default         |
 | ------------ | ------------------ | --------------------- | --------------- |
-| Bind address | `--host <address>` | `PSILINK_BROKER_HOST` | `127.0.0.1`     |
-| Port         | `--port <number>`  | `PSILINK_BROKER_PORT` | `0` (ephemeral) |
+| Bind address | `--host <address>` | `ALCOVE_BROKER_HOST` | `127.0.0.1`     |
+| Port         | `--port <number>`  | `ALCOVE_BROKER_PORT` | `0` (ephemeral) |
 | Mount path   | `--path <mount>`   | --                    | `/api`          |
 | Realm key    | `--key <api-key>`  | --                    | `peerjs`        |
 
@@ -38,4 +38,4 @@ Every socket the broker releases without going on to serve it -- an upgrade no c
 
 The channel carries peer-controlled text (a parse failure quotes the bytes it choked on), so the sink escapes what it writes and caps its own volume; the escaping and the rate limit are specified in [docs/spec/CHANNEL_SECURITY.md](../../docs/spec/CHANNEL_SECURITY.md).
 
-Where the lines go is the caller's: `CreatePeerServerWSOnly` takes a `SignalingDiagnosticSink` -- one function, taking one line of already-escaped text -- as a required argument ahead of its options, so no embedding builds a broker without saying where its reports go. The standalone runner writes to stderr, leaving stdout for its ready line; the web app's mount writes through a prefixed `@psilink/core` logger, where routing and verbosity are core's.
+Where the lines go is the caller's: `CreatePeerServerWSOnly` takes a `SignalingDiagnosticSink` -- one function, taking one line of already-escaped text -- as a required argument ahead of its options, so no embedding builds a broker without saying where its reports go. The standalone runner writes to stderr, leaving stdout for its ready line; the web app's mount writes through a prefixed `@alcove/core` logger, where routing and verbosity are core's.

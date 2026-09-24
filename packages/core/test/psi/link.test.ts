@@ -118,7 +118,7 @@ test("results are correct", () => {
 // This dataset has one (the server's repeated "1" under the second key) and the
 // client holds no "1", so the deduplicating run reproduces the one-to-one table
 // exactly -- the property that keeps the widening confined to matched groups.
-// The many-to-one matching itself is exercised in psiLinkManyToOne.test.ts.
+// The many-to-one matching itself is exercised in linkManyToOne.test.ts.
 test("a deduplicating cardinality leaves an unmatched duplicate group's table unchanged", async () => {
   const [mServerConn, mClientConn] = createMessagePipe();
   const mServer = new PSIParticipant(
@@ -163,7 +163,7 @@ test("a deduplicating cardinality leaves an unmatched duplicate group's table un
 
 // many-to-many applies the "many" side's rules to both parties, so a matched value
 // stands for a group on each side and contributes the two groups' product. Both
-// strategies pair that, over the same rows; psiLinkManyToMany.test.ts holds each
+// strategies pair that, over the same rows; linkManyToMany.test.ts holds each
 // strategy's behavior at length.
 test("many-to-many pairs in the cascade", async () => {
   const bothSided = [["E1", "E1"]];

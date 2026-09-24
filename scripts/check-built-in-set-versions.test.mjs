@@ -167,7 +167,7 @@ function fixtureTree({
   pins,
   ledgerText,
 } = {}) {
-  const root = mkdtempSync(resolve(tmpdir(), "psilink-set-versions-"));
+  const root = mkdtempSync(resolve(tmpdir(), "alcove-set-versions-"));
   temporaryRoots.push(root);
   const write = (relative, content) => {
     mkdirSync(resolve(root, dirname(relative)), { recursive: true });
@@ -584,7 +584,7 @@ describe("the check driven end to end", () => {
   });
 
   it("fails a --root missing the source file rather than crashing", () => {
-    const root = mkdtempSync(resolve(tmpdir(), "psilink-set-versions-"));
+    const root = mkdtempSync(resolve(tmpdir(), "alcove-set-versions-"));
     temporaryRoots.push(root);
     const { status, stderr } = runCheck(root);
     expect(status).toBe(1);

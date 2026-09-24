@@ -44,7 +44,7 @@ again. It is **not** a saved copy of the exchange's inputs or outputs:
 - **It never holds the input data, nor any row value derived from it.** The
   record holds a **pointer** to the operator's file at most, never a copy of
   its contents (`inputFileHandle` under [Persisted across
-  runs](#persisted-across-runs)). This mirrors the CLI, where `psilink.yaml`
+  runs](#persisted-across-runs)). This mirrors the CLI, where `alcove.yaml`
   references data by path and never embeds it, and the exchange-record artifact
   commits to data rather than embedding it (see
   [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)).
@@ -65,7 +65,7 @@ omits (see [Export artifact](#export-artifact)). Its core is this party's own
 **exchange-file document** -- the same shared config schema the web app mints
 and the CLI consumes -- plus the secret and the small set of local-only fields
 that document does not hold. This is the CLI-parity shape: what
-the CLI keeps as `psilink.yaml` plus `.psilink.key`, the browser keeps as one
+the CLI keeps as `alcove.yaml` plus `.alcove.key`, the browser keeps as one
 record. Persisting the whole document, rather than a bespoke subset of its
 fields, keeps the record from becoming a parallel format of the kind the
 no-parallel-format contract in [EXCHANGE_FILE.md](EXCHANGE_FILE.md) exists to
@@ -79,7 +79,7 @@ narrative, a match result, a count, or a row value. The constraint is the type,
 not a prose promise.
 
 The CLI parity has one deliberate break. The CLI's two artifacts are separable:
-an operator can retire the secret alone (delete `.psilink.key`, keep the config)
+an operator can retire the secret alone (delete `.alcove.key`, keep the config)
 and permission the two files differently. The one-record design does not offer
 that separability: there is no secret-only retirement -- removing a managed
 secret means deleting the whole record and re-establishing it by re-invite --
@@ -95,19 +95,19 @@ are the standing definition of the managed exchange.
 
 | Field | Type | Notes |
 | ----- | ---- | ----- |
-| `schemaVersion` | string literal | The single recognized literal for v3, `psilink-managed-exchange/v3`; a reader rejects any other value rather than migrating it -- the earlier literals among them, `psilink-managed-exchange/v1` (whose records hold no `standingCondition`) and `psilink-managed-exchange/v2` (whose condition holds no operator response) -- matching the reader-rejects-unknown rule the exchange-record and verification-keys files follow (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)). |
+| `schemaVersion` | string literal | The single recognized literal for v4, `alcove-managed-exchange/v4`; a reader rejects any other value rather than migrating it -- the earlier literals among them, `alcove-managed-exchange/v1` (whose records hold no `standingCondition`) and `alcove-managed-exchange/v2` (whose condition holds no operator response) -- matching the reader-rejects-unknown rule the exchange-record and verification-keys files follow (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)). |
 | `id` | string (UUID) | A locally-generated identifier for this managed exchange, distinct from any rendezvous id. Used only to name the record in local UI; never sent on the wire. |
 | `label` | string, at most 120 characters (enforced at write) | An operator-supplied display name for the partnership. Local only; never sent -- but disclosed to any reader of the store (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). The length cap is enforced; the content guidance is not and cannot be: keeping agreement numbers, contact details, and other sensitive counterparty detail out of the label is **operator cooperation**, exactly as export-source invalidation is -- the field's only structural protections are the cap and its never-sent locality. |
 | `exchangeFile` | object | This party's exchange-file document, verbatim: the validated `ExchangeSpec` shape both applications share (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md), "The artifact is the CLI config schema") -- the linkage terms both parties validated (column **shape** and disclosed payload column **names**, never a row value), metadata, standardization, any payload-column commitments, the acceptor's own outbound-payload consent record (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md#payload-disclosure-consent), "Payload-disclosure consent"), the acceptor's `expectedPartnerDeduplicate` -- the cardinality side the accepted invitation declared for the partner, which a re-run holds the partner to (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md#terms-binding-consent), "Terms-binding consent") -- this party's own `includeOwnColumns` output-composition choice, a closed two-value enum naming no column, this party's own `csvDelimiter` -- the field-delimiter choice its input file is read under and its result file written with, naming no column and holding no row value: one character, or the reserved word `detect` where the operator chose to have the delimiter taken from the file itself, a value distinct from the field being absent; an absent field is read and written with a comma, so every record stored without one keeps reading and no migration pass rewrites it -- and the connection block. A record stored before that rule holds no delimiter: it was read by detection and now reads as a comma, with no `schemaVersion` change, so a recurring exchange whose input is not comma-separated fails closed at its next window, with the single-column delimiter remedy stated at launch. It has **no `authentication` block** (the secret lives in `sharedSecret` below) and is composed exactly as the mint layer composes a downloadable file: assembled from a credential-free locator input, validated through the shared schema, with the **parse result** (never the raw input) persisted. The document's operator-authored free-text fields persist verbatim with it: each metadata column's optional `description` (no schema length bound), each standardization step's `params` (an open parameter map -- an authored cleaning step can embed a literal value, a pattern or a replacement string), and `retentionDisposition` (bounded at 1024 characters, the config schema's text bound), plus the terms' own 1024-bounded payload `description` and legal-agreement `purpose` strings. The record stores the document as minted, or as the operator last edited its local settings, so the content guidance for these fields is the same **operator cooperation** the `label` row describes, and no additional bound or strip pass runs at persist time: the document is kept verbatim, and a document the mint layer accepts must remain saveable as managed (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). The document's terms and connection are fixed for the partnership: a re-invite re-issues the document verbatim with only a fresh secret, and exchanging on different terms is a new exchange, not an edit or re-invite of this record. Its three per-party settings -- `includeOwnColumns`, `csvDelimiter`, and `retentionDisposition` -- are local fields the operator edits in place (see [Local settings of the document](#local-settings-of-the-document)). |
 | `side` | enum (`"inviter"` \| `"acceptor"`), or absent | This party's side of the partnership; dispatches a re-run to the matching rendezvous flow (see [Role: a local `side` field](#role-a-local-side-field-not-the-document)). Local-only by design -- not the document's `connection.role`, which no web path reads. Present exactly when the document's connection is `webrtc`, the one channel whose connection names a `role`: a [configuration-only record](#the-configuration-only-record) on `sftp` or `filedrop` holds none, and a reader refuses a record whose `side` and channel disagree. |
 | `inputFileHandle` | `FileSystemFileHandle` or absent | A persisted **pointer** to the operator's input file, held where the File System Access API exists (Chromium), with persistent read permission where the platform grants it (an installed app), so an unattended run reads the standing file with nobody present and an attended re-run is one action. It is a reference, never a copy: no input content or row value derived from it persists, which is where the no-second-copy invariant is enforced. It is also live, not a snapshot: each run calls `getFile()` at run start and reads whatever file exists at the path, the pointer following the name rather than the file that stood there when it was picked -- a `File` already obtained stops being readable once the file underneath it changes, so `File` objects are never retained across runs -- which is what makes putting the current period's extract at the same name the data-refresh workflow, by an overwrite in place, a rename over the name, or a delete and a create (see [The input file each run](../MANAGED_EXCHANGE.md#the-input-file-each-run)). A missing entry at run start fails the file read with a clean not-found, recorded as a benign `"input"` failure (see `lastRun`), never routed through desync/attack framing. What it does add to the store's disclosure is the input file's **name**, and the granted read permission extends an in-origin reader's reach to the file's current contents (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). Absent on browsers without the API (each attended run re-selects the file) and in any imported record: the handle is a device- and profile-local platform object stored by structured clone, with no file serialization, so the export artifact omits it and the first run after an import re-acquires one by selection. |
 | `outputDirectoryHandle` | `FileSystemDirectoryHandle` or absent | A persisted **pointer** to the folder the operator granted for a scheduled run's results, held where the File System Access API exists. A run with nobody present writes its results CSV into that folder, under a name holding the exchange's label and the run's own instant, so successive runs accumulate rather than overwrite and two exchanges granted one folder are told apart by name; a run whose grant is absent, not honoured unattended, or revoked, and one whose write fails, parks the results instead (see [The parked results of a scheduled run](#the-parked-results-of-a-scheduled-run)). The grant is taken at schedule entry and by re-pointing, never at run time: the directory picker requires a user gesture, and at run time the permission is **queried and never prompted**, the same unattended rule `inputFileHandle` takes. The mode is `readwrite`, a larger grant than the input side's single-file read -- an in-origin script can read and write everything in that folder while it stands (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). Absent on browsers without the API, and never in the export artifact, for the reason `inputFileHandle` is: it is a device- and profile-local platform object stored by structured clone, with no serialization. What an import then holds depends on which import it is: one that installs a fresh record has no handle and re-grants, while a [revive-in-place](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) -- this profile's own spent record, updated rather than duplicated -- keeps the grant that record already held, since the folder was granted to this profile and the handle never left it. |
-| `sharedSecret` | string (base64url, 43 chars / 32 bytes), or absent | The **current** rotated shared secret, matching `SHARED_SECRET_REGEX` (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) -- the `.psilink.key` analog the exchange-file document never holds. This is the one at-rest secret in the record. Rotated after every successful run and re-persisted before the run is treated as succeeded (see [Persist-before-success ordering](#persist-before-success-ordering)). Absent in a [configuration-only record](#the-configuration-only-record), which runs nowhere here; its absence is what withholds the run, and no other field records that. Present only where the document's connection is `webrtc`, the one channel this app runs, and the document states no `signing` block, a part this app cannot run; a reader refuses a record holding one on any other channel or beside that block. |
+| `sharedSecret` | string (base64url, 43 chars / 32 bytes), or absent | The **current** rotated shared secret, matching `SHARED_SECRET_REGEX` (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) -- the `.alcove.key` analog the exchange-file document never holds. This is the one at-rest secret in the record. Rotated after every successful run and re-persisted before the run is treated as succeeded (see [Persist-before-success ordering](#persist-before-success-ordering)). Absent in a [configuration-only record](#the-configuration-only-record), which runs nowhere here; its absence is what withholds the run, and no other field records that. Present only where the document's connection is `webrtc`, the one channel this app runs, and the document states no `signing` block, a part this app cannot run; a reader refuses a record holding one on any other channel or beside that block. |
 | `expires` | string (ISO 8601, UTC `Z`) or absent | The instant after which `sharedSecret` must not be used; the recovery when it lapses is re-invite. Absent means no bound is in force. The record inherits the CLI key file's **consumer** semantics for `expires` -- one field, one meaning to every consumer (see [Token age and rotation policy](../SECURITY_DESIGN.md#token-age-and-rotation-policy), a citation about meaning, not sourcing) -- while its **provenance** is single-source: only the max-age stamp writes it, the invitation's setup lifetime having been consumed at provisioning. Two write paths stamp it -- a successful run's rotation write-back and an operator's in-place edit of `tokenMaxAgeDays` -- both under the same never-move-later rule (see [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires)). |
 | `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). It is a **local field** the operator may edit in place without a re-invite; what the edit does to `expires` is [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires). |
 | `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Absent for an exchange run attended-only. The field-by-field layout is in [The `schedule` object](#the-schedule-object). |
 | `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"` \| `"skipped"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"custody-unreadable"` \| `"input"` \| `"terms-shortfall"` \| `"consent"` \| `"handed-off"` \| `"cancelled"`). A `"missed"` outcome records a no-show: the wait for the other party's runner spent its whole budget with nobody arriving, so no handshake ran. A scheduled run reaches it when an agreed window passes without a completed handshake; an attended run reaches it when its own wait for the partner expires. It has no `failureKind` -- the outcome is the whole account, and it is held apart from `"transport"` (a connection that was made and broke, whose remedy is retrying the connection) and from `"cancelled"` (the operator stopped the run). It is benign, retried at the next window or whenever the operator runs the exchange again, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). A `"skipped"` outcome records an agreed window the scheduled runner declined to open because the operator's [compromise response](#the-operators-response-to-it) stood on the record: nothing connected and nothing rotated, so it is neither a run nor a no-show, it has no `failureKind`, and it leaves the miss count where it stood (see [A due window under the operator's compromise response](#a-due-window-under-the-operators-compromise-response)). An `"input"` failure records a benign pre-run acquisition problem -- the handle's file missing, moved, or unreadable at run start -- detected before any connection, likewise never routed through that framing; putting the file back clears it, so its surface offers the run again. A `"terms-shortfall"` failure records the other benign pre-run input state, held apart from it because its remedy is not another attempt: the file was read and cannot satisfy every linkage key the standing terms declare, so the run is refused before connecting (by the run-start input guard, or by the run boundary's own `assertLinkageTermsSatisfiable` inside the pre-connection prepare), and the same file refuses identically at the next window. Its remedy is a file covering every agreed key, or terms re-agreed with the partner out of band -- never a retry or a bare re-pick. A `"terms-shortfall"` entry additionally holds `singleColumnInput`, admitted only as `true` and omitted rather than written `false`, when the file the run-start input guard read came out as ONE column -- the shape a file separated by something other than this record's `csvDelimiter` comes out as. The reading is what tells the delimiter remedy apart from a real shortfall of the agreed keys, and by the next visit the launch error that held it is gone, so the next visit's summary and the between-visit notification read it off the entry: where it is set both state the delimiter remedy, and where it is absent both state the agreed-keys copy. A `"consent"` failure records the third pre-connection refusal: a send-side disclosure gate refused because the set this run would send is not the one the exchange recorded agreeing to send (see [What the setup consent covers across runs](../MANAGED_EXCHANGE.md#what-the-setup-consent-covers-across-runs)). It is likewise benign and outside that framing. A `"handed-off"` failure records the fourth: the run found this device's copy [spent](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) by an export and refused inside the run+rotate lock, before reading the input file and before connecting, rather than rotating a secret whose owner is now elsewhere. It is the single-owner invariant holding rather than a fault, so it too stays outside the desync/attack framing, and it is the record's own account of a run -- attended or scheduled -- that met a hand-off nobody was present to answer for. A `"custody-unreadable"` failure records the fifth, and it is that same refusal failing to read the entry it decides on: the sibling entry did not validate, or its store did not answer, so the run stopped in the same place rather than rotating on custody it could not establish. It is held apart from `"storage"` because the two leave different states behind -- a `"storage"` failure rotated a secret it could not save, which can leave the two parties holding different ones and is recovered by re-inviting, while this refusal precedes the handshake and rotates nothing, so nothing here is a desync and a fresh secret would replace one nothing moved. `"consent"`, `"terms-shortfall"`, `"handed-off"`, and `"custody-unreadable"` are the failure kinds a surface must **not** present as retryable: the same input determines the same disclosure and falls the same way short of the same keys, a handed-off copy refuses identically at every later run, and a run reads the same unreadable entry every time, so the remedy is the operator's, not another attempt's. A record written before a value was added to either enum still reads -- an entry with `"input"` for a shortfall loads and tiers as the generic input state; the converse is the reader-rejects-unknown rule's consequence, an artifact with an outcome or kind this reader does not know being refused whole rather than read with the value dropped. Widening either enum therefore leaves `schemaVersion` where it is: the version moves for a member an older build would read past and lose state by, not for a value it refuses, and not for `singleColumnInput`, whose absence is the agreed-keys copy every build states: a build that does not know it gives worse advice rather than reading a state wrongly. A **re-invite clears `lastRun`** in the same rotation transaction that advances the fresh secret: the re-invite is the recovery for the failure the entry recorded, so leaving it would re-derive a consumed tier at the next visit -- and once the import marker is cleared alongside, a stale `"auth"` failure would re-derive as the attack tier rather than the benign import one. A successful run instead advances `lastRun` to `"succeeded"`; only the re-invite recovery drops it. Which of two runs' entries the store keeps is [Recording a run outcome](#recording-a-run-outcome). |
-| `standingCondition` | object | The unanswered **standing condition**: evidence that this device's secret may no longer be the partnership's, raised by a run and not answered since. It holds one of two forms, neither with free text: a raised condition, `since` (ISO 8601 UTC, the instant of the run that raised it) and `kind` (`"auth"` \| `"storage"`), the two `failureKind`s whose remedy is out-of-band rather than an act on this device; or `{"kind": "none"}` while none stands. A raised condition additionally holds the operator's `response` where one has been given -- `kind` (`"compromise"`) and `at` (ISO 8601 UTC, the instant they answered) -- nested inside the condition it answers rather than beside it, so the acts that clear the condition clear the response with it (see [The standing condition](#the-standing-condition)). The field is **required**, so a reader never has to tell a record holding none from one written without the field: a record stored under `psilink-managed-exchange/v1`, which has no such field, is rejected whole and re-established by re-invite, as is one under `psilink-managed-exchange/v2`, whose condition cannot hold a response (see [Versioning](#versioning-an-app-upgrade-can-invalidate-a-stored-record)). It stands BESIDE `lastRun` rather than inside it because `lastRun` holds one run: the next run's stamp replaces it, so a no-show or a later success would otherwise carry the evidence off with the entry that held it and the operator would never again be asked for the confirmation the design requires (see [A standing condition outlives the run that raised it](../MANAGED_EXCHANGE.md#a-standing-condition-outlives-the-run-that-raised-it)). What raises and clears it is [The standing condition](#the-standing-condition). |
+| `standingCondition` | object | The unanswered **standing condition**: evidence that this device's secret may no longer be the partnership's, raised by a run and not answered since. It holds one of two forms, neither with free text: a raised condition, `since` (ISO 8601 UTC, the instant of the run that raised it) and `kind` (`"auth"` \| `"storage"`), the two `failureKind`s whose remedy is out-of-band rather than an act on this device; or `{"kind": "none"}` while none stands. A raised condition additionally holds the operator's `response` where one has been given -- `kind` (`"compromise"`) and `at` (ISO 8601 UTC, the instant they answered) -- nested inside the condition it answers rather than beside it, so the acts that clear the condition clear the response with it (see [The standing condition](#the-standing-condition)). The field is **required**, so a reader never has to tell a record holding none from one written without the field: a record stored under `alcove-managed-exchange/v1`, which has no such field, is rejected whole and re-established by re-invite, as is one under `alcove-managed-exchange/v2`, whose condition cannot hold a response (see [Versioning](#versioning-an-app-upgrade-can-invalidate-a-stored-record)). It stands BESIDE `lastRun` rather than inside it because `lastRun` holds one run: the next run's stamp replaces it, so a no-show or a later success would otherwise carry the evidence off with the entry that held it and the operator would never again be asked for the confirmation the design requires (see [A standing condition outlives the run that raised it](../MANAGED_EXCHANGE.md#a-standing-condition-outlives-the-run-that-raised-it)). What raises and clears it is [The standing condition](#the-standing-condition). |
 
 Everything in this table except `sharedSecret` is non-secret but not
 non-sensitive. Together the persisted fields disclose the partnership's
@@ -123,8 +123,8 @@ rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape).
 
 A record MAY hold **no `sharedSecret`**. Such a record is a **configuration
 only**: the agreed terms, the connection, and the local settings, with nothing to
-run them on. One route writes one -- importing a command-line `psilink.yaml`
-without its `.psilink.key` (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#bringing-a-command-line-configuration-back))
+run them on. One route writes one -- importing a command-line `alcove.yaml`
+without its `.alcove.key` (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#bringing-a-command-line-configuration-back))
 -- and the exchange it describes keeps running wherever that key file is.
 
 **A record on any channel but `webrtc` is one.** This app conducts webrtc
@@ -185,29 +185,29 @@ build that predates it also requires.
 
 **One import is offered beside every listing.** The list offers one import
 control whether it is empty, populated, or unreadable. It takes the backup
-artifact or a command-line `psilink.yaml` and routes by what the file holds, not
+artifact or a command-line `alcove.yaml` and routes by what the file holds, not
 by which listing it stands beside:
 
 - **A backup** installs or revives a runnable record, reconciled against the
   one exchange it holds ([Reconciling a backup
   import](#reconciling-a-backup-import)).
-- **A `psilink.yaml` chosen alone**, on any channel, installs a
+- **An `alcove.yaml` chosen alone**, on any channel, installs a
   configuration-only record: a `webrtc` file lands as a record with no key, and
   an `sftp` or `filedrop` file as a record on a channel this app does not run.
   It holds no secret, reconciles against no stored record, and runs nowhere
   here, so nothing it installs can be a second live copy of anything.
-- **A `psilink.yaml` chosen together with its `.psilink.key`** installs a
+- **An `alcove.yaml` chosen together with its `.alcove.key`** installs a
   runnable record ([Importing the key file beside a
   configuration](#importing-the-key-file-beside-a-configuration)), with a
   reconciliation and refusals of its own.
 
 #### Importing the key file beside a configuration
 
-A `psilink.yaml` chosen together with its `.psilink.key`, in one pick of the
+An `alcove.yaml` chosen together with its `.alcove.key`, in one pick of the
 import control, installs a **runnable** record: the configuration-only record
-the `psilink.yaml` alone would install, holding the key file's secret. Which
+the `alcove.yaml` alone would install, holding the key file's secret. Which
 file is the key file is read off the names -- the one whose name ends in
-`.key`, the name psilink writes (`DEFAULT_KEY_PATH`, `apps/cli/src/keyFile.ts`)
+`.key`, the name Alcove writes (`DEFAULT_KEY_PATH`, `apps/cli/src/keyFile.ts`)
 -- and two files that are not one of each, a key file chosen alone, and more
 than two files are refused before either is read. The code:
 `readManagedCommandLinePair` and `readManagedCommandLineKeyFile`
@@ -215,7 +215,7 @@ than two files are refused before either is read. The code:
 `importManagedCommandLinePair` (`managedExchangeImport.ts`).
 
 **What it accepts.** The configuration exactly as the configuration-only import
-accepts it, and a key file holding exactly what psilink writes there: a JSON
+accepts it, and a key file holding exactly what Alcove writes there: a JSON
 object with a `sharedSecret` matching `SHARED_SECRET_REGEX` and an optional ISO
 8601 `expires`, and no other field. The key file is validated on its own -- the
 configuration's schema parse never sees it -- through the sensitive-JSON
@@ -226,7 +226,7 @@ under the re-take's size cap, applied before the file is read.
 **What it refuses**, with nothing written:
 
 - A key file over the cap, one that is not JSON, one that is not an object, and
-  one whose `sharedSecret` is absent or not a psilink shared secret, whose
+  one whose `sharedSecret` is absent or not an Alcove shared secret, whose
   `expires` is not an ISO 8601 date and time, or that holds any other field.
   The refusal names each problem in fixed words and states no byte of the file:
   no field value, no field name it did not expect, no parser message.
@@ -334,7 +334,7 @@ schema admits: the locator subset (`server.host`, `server.port`,
 `server.private_key`, `server.private_key_passphrase`,
 `server.keyboard_interactive`, `server.host_key_fingerprint`, `proxy`, and
 `provider_options`. Nothing in this app runs an sftp record, so each of these
-is held unchanged for the file psilink runs (EXCHANGE_FILE.md, "What a consumer
+is held unchanged for the file Alcove runs (EXCHANGE_FILE.md, "What a consumer
 does with a setting it cannot honor"). A credential among them is held only as
 an `@path` reference, never as a value:
 
@@ -353,7 +353,7 @@ an `@path` reference, never as a value:
   setting and never its value. One holding an `@path` is held and exported
   byte-for-byte. The browser never reads the file an `@path` names, and the
   configuration page names each setting written as one (the host-key pin and
-  any other `provider_options` key included) with a warning that psilink reads
+  any other `provider_options` key included) with a warning that Alcove reads
   that file on the machine that runs the exported document.
 
 The command-line import and export apply one rule, measured off the locator arms
@@ -371,7 +371,7 @@ the `"initiator"`). The document's `connection.role` field is not
 used for this: no web path reads it, and the record does not change that -- the
 document is persisted untouched. The field is not inert everywhere, which is why
 the local `side` is not redundant with it: on the CLI, `role` is what a webrtc
-run derives its own rendezvous peer id from, and `psilink exchange` refuses a
+run derives its own rendezvous peer id from, and `alcove exchange` refuses a
 webrtc connection that has none (`apps/cli/src/protocol.ts`). A document the
 web composes has no `role` at all -- the locator expansion writes only
 `host`/`port`/`path` (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md)) -- so the side a
@@ -1215,7 +1215,7 @@ The artifact's shape and custody model:
 
 - **Contents.** The persisted record fields above -- the exchange-file document
 plus `sharedSecret`, `expires`, the schedule, and the local bookkeeping, the
-browser analog of handing over `psilink.yaml` and `.psilink.key` together --
+browser analog of handing over `alcove.yaml` and `.alcove.key` together --
 **minus both platform handles**. A `FileSystemFileHandle` and a
 `FileSystemDirectoryHandle` are device- and profile-local platform objects with no
 file serialization, so the export omits them and the first run after an import
@@ -1238,15 +1238,15 @@ record's `id` is likewise not included: it is a device-local record
 - **Top-level shape.** The artifact is a JSON document with an `artifactVersion`
 tag and three parts that keep the two CLI halves separable from the browser-only
 fields. The tag is its own reader-rejects-unknown literal --
-`psilink-managed-exchange-backup/v2`, the single value this build accepts, and
+`alcove-managed-exchange-backup/v3`, the single value this build accepts, and
 the only one it writes -- distinct from the record's `schemaVersion`: the on-disk
 artifact format versions independently of the stored record. Every other value
 is refused on the literal rather than migrated, the superseded
-`psilink-managed-exchange-backup/v1` being recognized only far enough to say so
+`alcove-managed-exchange-backup/v2` being recognized only far enough to say so
 (below). `exchangeDocument` embeds the exchange-file document as a
-valid `psilink.yaml` (the snake_case YAML the CLI loads, serialized through the
+valid `alcove.yaml` (the snake_case YAML the CLI loads, serialized through the
 same discipline the mint layer applies to a validated spec). `key` is the
-`.psilink.key` pair (`sharedSecret` and, when a bound is in force, `expires`).
+`.alcove.key` pair (`sharedSecret` and, when a bound is in force, `expires`).
 And `local` holds the browser-only fields the two CLI artifacts do not (`label`,
 `side`, `schedule`, `lastRun`, `standingCondition`, `tokenMaxAgeDays`, and the
 two held-grant markers above). The [standing
@@ -1255,11 +1255,11 @@ included, because an export that dropped either would be a fourth way to clear
 one, and only the operator's acknowledgement, a re-invite, and a delete may. The
 artifact's field is optional and omitted where none stands, so an import holding
 none installs a record whose condition is the `"none"` form. The response rides
-only in a `psilink-managed-exchange-backup/v2` artifact: the `artifactVersion`
+only in an `alcove-managed-exchange-backup/v3` artifact: the `artifactVersion`
 literal moved for it, so a build that does not know the member refuses the file
 whole on the tag. Nothing strips it -- an artifact holding an answered condition
 either imports with the answer or is refused entire. The artifact's own
-  JSON keys are `camelCase`, by design: the `.psilink.key` file the CLI reads is
+  JSON keys are `camelCase`, by design: the `.alcove.key` file the CLI reads is
   itself `camelCase` JSON (`sharedSecret`, `expires`), parsed without a
   `snake_case` conversion, so a `camelCase` `key` block is what maps onto a valid
   key file with no renaming. Only the embedded `exchangeDocument` is `snake_case`,
@@ -1277,7 +1277,7 @@ either imports with the answer or is refused entire. The artifact's own
   build whose condition schema does not know the member drops it rather than
   refusing the file -- installing a record whose condition holds no answer and
   offering the fresh invitation over it. That is why the response moved the
-  `artifactVersion` literal to `psilink-managed-exchange-backup/v2`: such a
+  `artifactVersion` literal to `alcove-managed-exchange-backup/v3`: such a
   build refuses the whole file on the tag and reconstructs no record from it.
   The nested schemas do run, and one rejection can name the tag and a nested
   path together; what the tag fixes is that nothing is installed, not that
@@ -1289,7 +1289,7 @@ either imports with the answer or is refused entire. The artifact's own
   build's export as a likely cause and states the two ways past it -- bring the
   page up to date, or write the file from a build that matches -- alongside the
   wrong-file and modified-file checks. A file tagged
-  `psilink-managed-exchange-backup/v1`, the format this one replaced, is the
+  `alcove-managed-exchange-backup/v2`, the format this one replaced, is the
   other direction and is told apart from both: neither remedy applies to it, so
   the refusal states that the backup is from an earlier version and points at
   setting the exchange up again with the partner.
@@ -1308,8 +1308,8 @@ either imports with the answer or is refused entire. The artifact's own
 - **CLI-separable format.** The record is the CLI's config-plus-key pair kept as
 one browser object, and its export stays consumable by the CLI toolchain rather
 than becoming a third format. The embedded `exchangeDocument` is a valid
-`psilink.yaml`. The `key` block's `sharedSecret` and `expires` pair maps onto a
-valid `.psilink.key`, and can be lifted out verbatim, since the field names
+`alcove.yaml`. The `key` block's `sharedSecret` and `expires` pair maps onto a
+valid `.alcove.key`, and can be lifted out verbatim, since the field names
 already match the key file's. The `local` block's fields are cleanly separable
 and ignorable. This is a format-compatibility commitment, not a
   claim the embedded exchange runs there: the composed webrtc connection holds
@@ -1318,7 +1318,7 @@ and ignorable. This is a format-compatibility commitment, not a
 - **Plaintext, custody-protected.** The artifact is a plaintext credential file,
   not passphrase-encrypted. Passphrase encryption is not done: the
   record must be usable with nobody present to supply a passphrase, and the
-  artifact adopts the CLI key file's trust model instead. `.psilink.key` is a
+  artifact adopts the CLI key file's trust model instead. `.alcove.key` is a
   plaintext credential protected by custody and storage permissions, not by a
   passphrase, and the export asks for the same handling: owner-only storage,
   never an unencrypted transmission channel, and the backup guidance in [Key
@@ -1364,7 +1364,7 @@ record, in a separate origin-local store keyed by the record `id`, and are
     the marker to bytes that exist: a step that resolved without serializing would leave
     a marker attesting bytes nothing produced, so it fails the export instead.
   - **The command-line export marks nothing.** What it writes is the CLI's own
-    `psilink.yaml` and `.psilink.key`. The import takes that pair back ([Importing
+    `alcove.yaml` and `.alcove.key`. The import takes that pair back ([Importing
     the key file beside a configuration](#importing-the-key-file-beside-a-configuration)),
     so the files can restore the secret, and the export still stamps no marker: the
     marker attests a file nothing rewrites, and the key file is the command line's
@@ -1468,7 +1468,7 @@ record, in a separate origin-local store keyed by the record `id`, and are
   that record's fields, keeps its `id` and its platform handles -- the input file
   and the granted output folder -- clears the spent state,
   and marks it imported and backed-up, rather than installing a duplicate). The
-  command-line export downloads the CLI's `psilink.yaml` and `.psilink.key`, which
+  command-line export downloads the CLI's `alcove.yaml` and `.alcove.key`, which
   the command line runs from and rewrites; the import refuses that pair against the
   record the hand-off spent ([Importing the key file beside a
   configuration](#importing-the-key-file-beside-a-configuration)), and the route
@@ -1554,7 +1554,7 @@ record, in a separate origin-local store keyed by the record `id`, and are
   [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#rollback-at-rest-copies-can-silently-resurrect)).
 - **The import marker** (`importedAt`, an ISO 8601 UTC instant) records that this
   device installed or revived the record from a backup artifact or from a
-  command-line `psilink.yaml` and its `.psilink.key`, or took it back from a
+  command-line `alcove.yaml` and its `.alcove.key`, or took it back from a
   command-line hand-off. It is the evidence the desync tiering reads to tell an
   **import/restore since the last successful run** apart from an unexplained
   handshake failure (Tier 1 versus
@@ -1571,7 +1571,7 @@ record, in a separate origin-local store keyed by the record `id`, and are
     a command-line hand-off](#taking-a-command-line-hand-off-back) stamps it too,
     with or without a key file, and the one that installs a key file's secret clears
     the backup marker rather than stamping it. An import of a command-line
-    `psilink.yaml` with its `.psilink.key` stamps it and no backup marker ([Importing
+    `alcove.yaml` with its `.alcove.key` stamps it and no backup marker ([Importing
     the key file beside a configuration](#importing-the-key-file-beside-a-configuration)).
   - **Rotation clears it.** The persist-before-success rotation write clears the
     import marker in the **same** transaction that advances the secret. A rotation is
@@ -1646,7 +1646,7 @@ is named, and the import installs nothing unless the operator confirms
 installing beside them.** A live record is one no hand-off and no migration has
 spent. The agreed terms are the part of the linkage terms a partner refuses an
 exchange over when its copy differs -- every field but this party's own
-`identity` and the terms' `date` (`partnerBoundTerms`, `@psilink/core`) --
+`identity` and the terms' `date` (`partnerBoundTerms`, `@alcove/core`) --
 compared in canonical form. A record with no `side` matches nothing. The code:
 `findLiveCopiesByTermsAndSide` (`apps/web/src/psi/managed/managedLiveCopyMatch.ts`).
 
@@ -1694,11 +1694,11 @@ which is all operator cooperation can be (see [Single-owner
 invariant](#single-owner-invariant)).
 
 **The secret comes from the key file, not from a fresh invitation.** The hand-off
-wrote this exchange's own secret into `.psilink.key` with no re-invite, so the
+wrote this exchange's own secret into `.alcove.key` with no re-invite, so the
 take-back needs none either. Each command-line run rotates the secret and writes
 the rotated one back to that file, which decides what a re-take needs:
 
-- **Runs have happened there.** The operator chooses that `.psilink.key`, and the
+- **Runs have happened there.** The operator chooses that `.alcove.key`, and the
   re-take reads its `sharedSecret` and `expires` into the record.
 - **None has.** The stored secret is still the partnership's, and no file is needed.
 - **The file cannot be produced.** The exchange is taken back without it, and the
@@ -1710,14 +1710,14 @@ through the sensitive-JSON chokepoint and the strict key-pair schema, and only a
 validated pair reaches the store. A file that is not a key file leaves the record
 spent and the store untouched.
 
-**What the check cannot cover.** A `.psilink.key` holds the secret and its bound
+**What the check cannot cover.** A `.alcove.key` holds the secret and its bound
 and nothing naming the exchange it belongs to, so no check here tells this
 exchange's key file from another exchange's or from a stale copy of the same one --
 every exchange's file has that one name. Any schema-valid file whose secret differs
 from the stored one is therefore installed over it, and the record then holds a
 secret the partner does not share, recoverable only by a fresh invitation. The
 confirmation states that cost and where the right file is (the folder holding this
-exchange's `psilink.yaml` on the machine it was handed to); the operator's reading
+exchange's `alcove.yaml` on the machine it was handed to); the operator's reading
 of it is the only check there is, and the re-take refuses no file the schema
 accepts.
 
@@ -1791,7 +1791,7 @@ therefore its own store, which also keeps it out of the export artifact
 structurally, exactly as the three markers above are kept out.
 
 **Shape.** One object per exchange: a `version`
-(`psilink-disclosure-accounting/v1`, its own reader-rejects-unknown literal) and
+(`alcove-disclosure-accounting/v2`, its own reader-rejects-unknown literal) and
 `entries`, the exchange records oldest first. A stored value that fails
 validation -- an unrecognized version, an unknown key, or an entry that is not a
 valid exchange record -- rejects the whole read rather than loading the entries
@@ -1993,7 +1993,7 @@ holds no accounting: `lastRun` is a timestamp and closed enums with no free-text
 field, and it keeps only the most recent run.
 
 **Shape.** One object per exchange: a `version`
-(`psilink-unfiled-disclosure/v1`, its own reader-rejects-unknown literal) and
+(`alcove-unfiled-disclosure/v2`, its own reader-rejects-unknown literal) and
 `entries`, oldest first. An entry holds `at`, the ISO 8601 instant the shortfall
 was noted, which falls inside the run it stands for; and, where the run built a
 record the reader admits, `record`, that run's exchange record retained verbatim.
@@ -2050,7 +2050,7 @@ still at rest and only this build's refusal makes it unfilable.
 **When the note cannot be written.** Storage full, a database that will not
 open, or a note already stored that this build cannot read leaves the note
 unwritable at exactly the moment it is owed. The fact then falls back to
-origin-local `localStorage` under `psilink-unfiled-disclosure`: a version literal
+origin-local `localStorage` under `alcove-unfiled-disclosure`: a version literal
 and a bounded list of exchange ids, holding no instant and no record, so it can
 be written where a record-sized write was refused. The flag is cleared where its
 own alert has rendered -- not on a visit that shows nothing for the exchange,
@@ -2216,7 +2216,7 @@ and the parking is downstream of all three. A refusal the store will not record
 either leaves only a diagnostic-log line; nothing else is claimed.
 
 **Reader-rejects-unknown, with no recovery arm.** The stored value carries its
-own format literal (`psilink-parked-results/v1`), and a reader refuses an
+own format literal (`alcove-parked-results/v2`), and a reader refuses an
 unrecognized version, an unknown key, or an entry that is not one of the four
 shapes, rather than loading a shortened set. The refused value is left exactly
 where it is, and neither recovery arm the accounting offers is offered here: no
@@ -2231,7 +2231,7 @@ value.
 
 **What the format literal does and does not decide.** An optional field added to
 a shape -- `fallback` on the results and too-large shapes -- leaves
-`psilink-parked-results/v1` where it is. Moving it would refuse every entry an
+`alcove-parked-results/v2` where it is. Moving it would refuse every entry an
 operator has not collected yet, which is the loss the reader-rejects-unknown rule
 exists to bound rather than to cause. A newer build reads an entry holding no
 `fallback` as the plain case, no grant held, which is what that absence means in
@@ -2258,7 +2258,7 @@ exchange](../MANAGED_EXCHANGE.md#deleting-a-managed-exchange)).
 The operator's opt-in to OS notifications about scheduled runs (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#the-between-visit-notification)) is
 a **device preference**, not record state. It is stored in origin-local
-`localStorage` under `psilink-between-visit-notifications`, holding the literal
+`localStorage` under `alcove-between-visit-notifications`, holding the literal
 `on` and nothing else; any other value, an absent key, and storage that refuses
 the read alike mean not opted in. It **MUST NOT** enter the record, a local
 sibling keyed by record `id`, or the export artifact: it says nothing about an

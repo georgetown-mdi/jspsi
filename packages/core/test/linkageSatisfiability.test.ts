@@ -2364,7 +2364,7 @@ describe("transformRefusalIn", () => {
     ).toBeUndefined();
     expect(transformRefusalIn(undefined)).toBeUndefined();
     expect(
-      transformRefusalIn({ psilinkTransformRefusal: { reason: "invented" } }),
+      transformRefusalIn({ alcoveTransformRefusal: { reason: "invented" } }),
     ).toBeUndefined();
   });
 
@@ -2375,7 +2375,7 @@ describe("transformRefusalIn", () => {
     // rather than text of that link's choosing rendered in the mapped alert.
     const taggedChain = (refusal: unknown): Error =>
       new Error("mint failed", {
-        cause: { psilinkTransformRefusal: refusal },
+        cause: { alcoveTransformRefusal: refusal },
       });
     expect(
       transformRefusalIn(

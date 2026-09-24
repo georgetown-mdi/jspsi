@@ -2,7 +2,7 @@
 #
 # The build appends this file to .devcontainer/egress-allowlist, the list every
 # profile's proxy lane starts from, so the infra profile's assembled reach is
-# that file plus this one. `cat /etc/psilink-egress-proxy/filter` in a running
+# that file plus this one. `cat /etc/alcove-egress-proxy/filter` in a running
 # container prints the result.
 #
 # One pattern per line; `#` starts a comment. A pattern is a hostname, or a
@@ -25,7 +25,7 @@
 # so that SSH (which is routed through the proxy for every destination) can
 # reach github.com.
 #
-# PSILINK_EGRESS_EXTRA_HOSTS in the repository-root .env adds a comma-separated
+# ALCOVE_EGRESS_EXTRA_HOSTS in the repository-root .env adds a comma-separated
 # list of further patterns at container start, for a zone name or an instance
 # address that should not be a repository change.
 

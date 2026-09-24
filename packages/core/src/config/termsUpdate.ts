@@ -60,7 +60,7 @@ export const TERMS_UPDATE_DERIVATIONS = Object.freeze([
 
 type TermsUpdateDerivation = (typeof TERMS_UPDATE_DERIVATIONS)[number];
 
-const TERMS_UPDATE_LABEL_PREFIX = "psilink-terms-update-v1:";
+const TERMS_UPDATE_LABEL_PREFIX = "alcove-terms-update-v2:";
 
 /** Bytes of the partnership identifier, before base64url encoding. */
 const PARTNERSHIP_ID_BYTES = 16;
@@ -215,7 +215,7 @@ export async function encodeTermsUpdate(
 function refusedFormat(reason: string): TermsUpdateRefusedError {
   return new TermsUpdateRefusedError(
     "format",
-    `this is not a psilink terms update: ${reason}`,
+    `this is not an Alcove terms update: ${reason}`,
   );
 }
 

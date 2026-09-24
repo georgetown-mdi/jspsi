@@ -10,7 +10,7 @@ export function defaultSpawnAggregateWorker(): AggregateWorker {
   // The worker's message contract is exactly AggregateRequest/AggregateResponse, so
   // adapt the structurally-wider real `Worker` to the narrow interface the
   // controller drives. The `{ type: "module" }` form lets the worker use ESM
-  // imports (`@psilink/core`, the pure compute).
+  // imports (`@alcove/core`, the pure compute).
   return new Worker(new URL("./nonEmptyAggregate.worker.ts", import.meta.url), {
     type: "module",
   }) as unknown as AggregateWorker;

@@ -17,7 +17,7 @@ import {
   safeParseLinkageTerms,
   validateCompatibility,
   validateStandardizationAgainstTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   addKey,
@@ -50,7 +50,7 @@ import type {
   OutputDirection,
 } from "../../../src/psi/authoring/advancedInvite.js";
 
-import type { LinkageTerms, Metadata } from "@psilink/core";
+import type { LinkageTerms, Metadata } from "@alcove/core";
 
 /** The names of the draft keys that reference an `ssn` field. */
 function ssnKeyNames(draft: AdvancedInviteDraft): Array<string> {
@@ -2427,8 +2427,8 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
   test("an import citing the built-in set over rules that are not it emits no citation", () => {
     // The one reference this build can resolve is checked against the SET, not
     // against the rules the importing document claimed for it. A partner document
-    // is free to put psilink's own set name over anything; re-emitting it would
-    // have psilink vouch for a misdescription of rules it ships and knows.
+    // is free to put Alcove's own set name over anything; re-emitting it would
+    // have Alcove vouch for a misdescription of rules it ships and knows.
     const misdescribed = structuredClone(defaultExport());
     expect(misdescribed.linkageRuleSet).toEqual(
       DEFAULT_LINKAGE_RULE_SET.reference,
@@ -2445,7 +2445,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
 
   test("a citation half-naming the built-in key set is still checked against those keys", () => {
     // Each half is named and versioned on its own, so each resolves on its own:
-    // pairing a field-set name this build cannot resolve with psilink's own key
+    // pairing a field-set name this build cannot resolve with Alcove's own key
     // set buys the key half no pass. Those keys are checked against the set this
     // build ships, and one edited key costs the citation.
     const halfMatched = structuredClone(defaultExport());
@@ -2459,7 +2459,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     };
     expect(safeParseLinkageTerms(halfMatched).success).toBe(true);
     // Unedited by the operator: the rebuild of the import as it arrived already
-    // declines it, so psilink never re-emits its own key-set name over keys that
+    // declines it, so Alcove never re-emits its own key-set name over keys that
     // are provably not that set.
     expect(rebuild(halfMatched).linkageRuleSet).toBeUndefined();
   });

@@ -1,4 +1,4 @@
-# Maintainer notes: psilink file-drop setup on Windows
+# Maintainer notes: Alcove file-drop setup on Windows
 
 Notes on [`support/windows-network-filedrop`](../windows-network-filedrop/README.md).
 They live outside that folder on purpose: the guide is handed to an operator as
@@ -7,7 +7,7 @@ addressed to whoever maintains it next.
 
 ## The problem
 
-psilink ships as a Docker image. Some agencies keep their exchange folder
+Alcove ships as a Docker image. Some agencies keep their exchange folder
 ("file drop") on a network location -- a mapped drive like `Z:\Exchange`, or
 `\\fileserver\exchange`. Docker cannot bind-mount those: its engine runs in a
 Linux VM that cannot see mapped drives or UNC paths, so `--mount` fails with
@@ -21,17 +21,17 @@ folder and reading the DFS tab.
 
 ## What is here
 
-- `Setup-PsilinkFileDrop.ps1` -- takes the folder path as the user sees it in
+- `Setup-AlcoveFileDrop.ps1` -- takes the folder path as the user sees it in
   Explorer plus network credentials, resolves the server, share and subfolder,
-  asks the operator to confirm them, runs `psilink doctor probe` against the
-  share from inside a container, creates the volume, runs `psilink doctor mount`
+  asks the operator to confirm them, runs `alcove doctor probe` against the
+  share from inside a container, creates the volume, runs `alcove doctor mount`
   over it, and prints the `docker run` command.
-- `Start-Psilink.ps1` -- the launcher: the same ground plus starting the console
+- `Start-Alcove.ps1` -- the launcher: the same ground plus starting the console
   and opening it. It dot-sources the setup script with `-LoadFunctionsOnly` for
   the path resolution, the credential prompts and the CIFS volume sequence
   rather than carrying a second copy of any of them, which is why the two travel
   together and why a release publishes both.
-- `start-psilink.sh` -- the launcher for macOS and Linux. It shares only the
+- `start-alcove.sh` -- the launcher for macOS and Linux. It shares only the
   doctor verdict contract with the PowerShell one; there is no resolution
   machinery in it, because a path the host can see is a path the engine can.
 - `README.md` -- the setup page, covering this script and the Command Prompt
@@ -44,7 +44,7 @@ own notes, [`cmd_windows-network-filedrop.md`](cmd_windows-network-filedrop.md).
 
 The PowerShell script carries no container-side diagnostic of its own; the
 Command Prompt one carries three shell scripts, and its notes cover them. The
-diagnostic used to live as a here-string inside `Setup-PsilinkFileDrop.ps1`, and
+diagnostic used to live as a here-string inside `Setup-AlcoveFileDrop.ps1`, and
 a second, hand-maintained copy of it used to sit beside the script for reading;
 that copy drifted -- it read `SMB_VERS` where the script exported `SMB_DIALECT`,
 so running it with the script's own environment silently ignored the dialect --
@@ -85,14 +85,14 @@ a Samba server can be made to serve the Unix extensions a native Windows server
 never does, which is the case these options exist for. The Windows side does not
 reach the mount either: the resolution workflow drives the script's resolution
 functions on a Windows runner and stops before part 4. And the runs recorded
-below reached "the volume mounts and psilink can write to it" while the image
+below reached "the volume mounts and Alcove can write to it" while the image
 still ran as root, where the DAC override made the mapping irrelevant. That is
 why a working share passed before and why it is not evidence now.
 
 Re-measuring it takes the shape that pass took: run either script through part
 4 against a real share and read that same verdict. Both scripts' probes are the
-measurement -- `psilink doctor mount` for the PowerShell
-one, `cmd_psilink-volcheck.sh` for the Command Prompt one -- and both run inside
+measurement -- `alcove doctor mount` for the PowerShell
+one, `cmd_alcove-volcheck.sh` for the Command Prompt one -- and both run inside
 the published image, so their write is uid 1000's write and a wrong mapping
 fails them rather than passing silently. Worth doing against a native Windows
 server rather than the Samba rig: Samba can be configured to serve Unix
@@ -101,8 +101,8 @@ for.
 
 **The PowerShell script's own container-side diagnostics are gone, 5 August
 2026.** Both here-strings -- the smbclient probe and the volume check -- were
-deleted, and the script runs the image's `psilink doctor probe` and
-`psilink doctor mount` instead, branching on their exit codes (0, 78, 69) rather
+deleted, and the script runs the image's `alcove doctor probe` and
+`alcove doctor mount` instead, branching on their exit codes (0, 78, 69) rather
 than parsing anything. Everything recorded below about those here-strings is the
 record of code that no longer exists in this script. The behaviour each finding
 produced is carried by the doctor batteries in `apps/cli/src/doctor/`, whose own
@@ -151,8 +151,8 @@ here-string, which is the reason they are still worth reading:
   rather than a proxy for it; it stands for the Command Prompt copy, which still
   uses `mkdir`.
 - **The stale sweep cleared names the probe never wrote.** It listed
-  `psilink-write-probe.tmp`; the write stage created `psilink-probe-$$.tmp`.
-  Seeding `psilink-probe-9.tmp.renamed` on a fully writable share produced
+  `alcove-write-probe.tmp`; the write stage created `alcove-probe-$$.tmp`.
+  Seeding `alcove-probe-9.tmp.renamed` on a fully writable share produced
   `NT_STATUS_OBJECT_NAME_COLLISION -- created a file but could not rename it`
   and sent the operator to ask for rights they already held. Swept by mask now,
   and the probe name comes from `SMB_TOKEN`: `$$` is not unique here, measured
@@ -208,7 +208,7 @@ redirect turns that into a throw rather than the non-zero exit code the function
 reads -- which is what its catch is for.
 
 **The SMB-served mapped drive and the DFS namespace are covered in CI as of 5
-August 2026.** `Setup-PsilinkFileDrop.Tests.ps1` drives the script's own
+August 2026.** `Setup-AlcoveFileDrop.Tests.ps1` drives the script's own
 resolution functions on a `windows-latest` runner that serves itself an SMB
 share over loopback: a letter mapped to that share resolves to its UNC and
 classifies as a network drive; a letter mapped to a link in a standalone DFS
@@ -234,7 +234,7 @@ checks are verified by the passes above and by nothing else.
 annotations, which is all a reader of a CI run can see.
 
 **The launchers, as of 6 August 2026: both are driven end to end against a stub
-engine.** `scripts/start-psilink-launcher.test.mjs` drives `start-psilink.sh` on
+engine.** `scripts/start-alcove-launcher.test.mjs` drives `start-alcove.sh` on
 Linux CI against a stub engine on PATH -- a real process reading the real
 argument vector, so the mounts and the publish binding are asserted as the
 engine receives them. Covered: the unstamped refusal, and
@@ -258,7 +258,7 @@ one pass reaching the console. Nothing there pulls the real image, opens a
 browser, or reaches a network.
 
 **What the identity route has not been driven against is an engine.**
-`start-psilink.sh` runs the container as the operator's own account on a Linux
+`start-alcove.sh` runs the container as the operator's own account on a Linux
 host, which is the answer to a bind mount carrying host ownership through to an
 image that runs as a fixed number. The stub engine reads the argument vector and
 answers; what it cannot say is what a real one does with it. Rootless podman is
@@ -276,7 +276,7 @@ answers. So does the troubleshooting page's account of a folder writable only
 through a supplementary group -- what `--user` does with the other groups a
 login carries has been reasoned about here and not run.
 
-`Start-Psilink.ps1` is covered by `Start-Psilink.Tests.ps1`, most of it purely:
+`Start-Alcove.ps1` is covered by `Start-Alcove.Tests.ps1`, most of it purely:
 the verdict reader against the same fixtures, the release stamp, the DFS
 candidate selection, the console's argument vector, the parameter-name reader
 the dot-source protects itself with, and both engine wrappers against a name
@@ -301,7 +301,7 @@ catch is the real one.
 separately.** Each of these scripts delegates its checks to a capability of
 `ghcr.io/georgetown-mdi/alcove`, and a stub engine answers for the image whatever the image
 would really have said. `image_smoke.yaml`'s capability gate closes that: it
-derives the set from the scripts -- the psilink argument vectors they hand a
+derives the set from the scripts -- the Alcove argument vectors they hand a
 container, and the helper scripts the `.cmd` pipes into a shell in it -- and runs
 each against a real image, once against the one the job just built and once a
 week against the published `ghcr.io/georgetown-mdi/alcove:latest` the setup script actually
@@ -400,7 +400,7 @@ cannot run refuses rather than proceeds.
 
 ## Verification pass on staging, 30 July 2026
 
-Run against `d530f47`, the commit that moved the checks into the psilink image,
+Run against `d530f47`, the commit that moved the checks into the Alcove image,
 because that change had not been exercised from Windows in that form. The rig
 was a Samba 4.21.9 container on the Docker bridge, Windows 11, Docker Desktop
 28.3.2. The share password throughout was `Pa!ss&w%rd^1`, which carries every
@@ -458,7 +458,7 @@ here, but they were driven against the branch's copies rather than staging's:
 - **Nothing was made to fail.** Every run was a working share. The MEANING and
   ACTION text for every failure -- `LOGON_FAILURE`, the transport-failure path,
   the dialect messages, the write/rename/delete split -- is untested against the
-  psilink image, and the troubleshooting page says as much to the operator. A
+  Alcove image, and the troubleshooting page says as much to the operator. A
   wrong password is the cheapest of these to provoke and the one an operator is
   likeliest to meet first.
 - **`by-hand.md` was not walked.** It is a new page of roughly five hundred
@@ -478,8 +478,8 @@ here, but they were driven against the branch's copies rather than staging's:
 
 Run from two lab VMs against staging
 `f4271a0d8f50abbf4755cf4fd30b9e8ffb873220`, from a checkout with
-`core.autocrlf=false`. Ten runs: four of `Setup-PsilinkFileDrop.ps1`, five of
-`Start-Psilink.ps1`, one of `cmd_Setup-PsilinkFileDrop.cmd`. Seven were typed at
+`core.autocrlf=false`. Ten runs: four of `Setup-AlcoveFileDrop.ps1`, five of
+`Start-Alcove.ps1`, one of `cmd_Setup-AlcoveFileDrop.cmd`. Seven were typed at
 the workstation's RDP session; three were scheduled tasks inside that same
 session, two of them answering their prompts through a stand-in `Read-Host` and
 one on standard input. An SSH logon cannot stand in for that session: `Z:` shows
@@ -516,17 +516,17 @@ repository half of that stamp is still unexercised.
 ### The ownership mapping holds
 
 A volume created with `username=...,uid=1000,gid=1000` over that server took
-every operation psilink's rendezvous needs, from the image's unprivileged
+every operation Alcove's rendezvous needs, from the image's unprivileged
 account, by all three routes that make one:
 
-- `Setup-PsilinkFileDrop.ps1` with the published image: `doctor mount` reported
+- `Setup-AlcoveFileDrop.ps1` with the published image: `doctor mount` reported
   the mount readable, the marker agreed, a file written and renamed into place,
   a second exclusive create refused, and a rename onto an existing file.
-- `Start-Psilink.ps1` with the staging image: every volume check returned
+- `Start-Alcove.ps1` with the staging image: every volume check returned
   "Nothing here blocks an exchange" -- over a volume on a share subfolder, one
   on a folder within it, and one on a second share.
-- `cmd_Setup-PsilinkFileDrop.cmd`: "The volume mounts and psilink can write to
-  it." and "Exclusive create and rename behave the way psilink needs.", over a
+- `cmd_Setup-AlcoveFileDrop.cmd`: "The volume mounts and Alcove can write to
+  it." and "Exclusive create and rename behave the way Alcove needs.", over a
   volume it created with the same options.
 
 That is the measurement the State section above stands on.
@@ -583,7 +583,7 @@ branch:
 - **`Z: is mapped to \\server\share` printed once per folder** where both
   folders were on `Z:`. Once per drive letter now.
 - **Answering no at the launcher's share confirmation led away from the
-  launcher**, to `Setup-PsilinkFileDrop.ps1 -Server ... -Share ...`, which makes
+  launcher**, to `Setup-AlcoveFileDrop.ps1 -Server ... -Share ...`, which makes
   a volume and stops rather than opening a console; and it opened "Windows would
   not say what is behind that path" where Windows had just said it. It points at
   `-RendezvousDir` with the path read off the DFS tab instead, and says what the
@@ -605,7 +605,7 @@ branch:
 
 The eleventh is not a code change and is not fixed here: **no operator can get a
 launcher that runs today.** The README sends them to a release for
-`Start-Psilink.ps1`, a copy from anywhere else refuses to run, and there are no
+`Start-Alcove.ps1`, a copy from anywhere else refuses to run, and there are no
 releases; the published `latest` also predates split-pair support, so no
 published image can serve a partner whose accept kit routes them to the
 launcher. Cutting a release resolves both, and that is the maintainer's call.
@@ -666,7 +666,7 @@ becomes available, measure the premise first -- if `Get-SmbConnection` does
 name the target, a much smaller fix exists.
 
 **Partly reversed, 5 August 2026: the suggestion is back, as an offer.**
-`Start-Psilink.ps1` asks `Get-SmbConnection` for a correction when the operator
+`Start-Alcove.ps1` asks `Get-SmbConnection` for a correction when the operator
 says the resolved server and share are wrong, and offers what it finds rather
 than substituting it. Of the three defects above, two no longer hold and one
 still does.
@@ -680,11 +680,11 @@ under a different share.
 *Namespace-root masking is measured away.* The claim that the connection list
 answers with the name already in hand was read off the protocol, not measured;
 the rig has measured it. Check-run `92447351999`'s `Q3_resolve` annotation,
-taken after a write through `\\runnervmhisb5\psilinkdfs2d4600cc\drop` whose
-folder target is `\\runnervmhisb5\psilinkci2d4600cc`, records:
+taken after a write through `\\runnervmhisb5\alcovedfs2d4600cc\drop` whose
+folder target is `\\runnervmhisb5\alcoveci2d4600cc`, records:
 
 ```text
-smb_connections=localhost\psilinkci2d4600cc|runnervmhisb5\IPC$|runnervmhisb5\psilinkci2d4600cc|runnervmhisb5\psilinkdfs2d4600cc
+smb_connections=localhost\alcoveci2d4600cc|runnervmhisb5\IPC$|runnervmhisb5\alcoveci2d4600cc|runnervmhisb5\alcovedfs2d4600cc
 ```
 
 The target share is there alongside the namespace root, so dropping the
@@ -704,7 +704,7 @@ the non-elevated premise is assigned to the planned real-Windows end-to-end
 pass, which is also the only thing that can exercise the offer's prompt.
 
 The offer is reached only after the operator declines the confirmation, which
-keeps it off every path that resolved correctly. `Setup-PsilinkFileDrop.ps1` is
+keeps it off every path that resolved correctly. `Setup-AlcoveFileDrop.ps1` is
 unchanged: it still prints the manual route and stops.
 
 **The probe reports derived facts, not the operator's data.** Step 3 used to
@@ -953,7 +953,7 @@ repeated by whoever tries next.
 
 ## Before running it
 
-The script creates a Docker volume named `psilink-sync`; `-VolumeName`
+The script creates a Docker volume named `alcove-sync`; `-VolumeName`
 overrides it. An existing volume of that name is replaced, but only after
 inspecting it -- one that is not a CIFS volume is left alone and the run
 refuses, because the name is unvalidated and a typo would otherwise destroy

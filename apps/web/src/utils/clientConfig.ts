@@ -19,7 +19,7 @@ interface Env {
   PEERJS_DEBUG_LEVEL: number;
   LOG_LEVEL: keyof LogLevel;
   DEPLOYMENT_PROFILE: DeploymentProfile;
-  PSILINK_VERSION: string;
+  ALCOVE_VERSION: string;
 }
 
 const schema: JSONSchemaType<Env> = {
@@ -52,7 +52,7 @@ const schema: JSONSchemaType<Env> = {
       enum: ["hosted", "console"],
       default: "hosted",
     },
-    PSILINK_VERSION: {
+    ALCOVE_VERSION: {
       // The release version of the image this build ships in, baked in from
       // the canonical `apps/cli/package.json` version by the image build (see
       // the Dockerfile and docs/RELEASES.md). Empty in the continuously
@@ -105,8 +105,8 @@ export function isConsoleBuild(): boolean {
  * has none. A released console image is the one build that has one; it
  * is what the partner accept kit names its `docker run` image by, so the
  * partner runs the version that minted their invitation. */
-export function psilinkVersion(): string | undefined {
-  return config.PSILINK_VERSION === "" ? undefined : config.PSILINK_VERSION;
+export function alcoveVersion(): string | undefined {
+  return config.ALCOVE_VERSION === "" ? undefined : config.ALCOVE_VERSION;
 }
 
 export { ConfigManager };

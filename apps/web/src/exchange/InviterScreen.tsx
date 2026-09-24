@@ -16,7 +16,7 @@ import {
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   transformRefusalIn,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   InvitationFileError,
@@ -42,7 +42,7 @@ import { fetchSftpConnection } from "@psi/jobClient/serverJobExchangeDriver";
 import { invitationLocation } from "@psi/invitationLocation";
 import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
 
-import { isConsoleBuild, psilinkVersion } from "@utils/clientConfig";
+import { alcoveVersion, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
@@ -217,7 +217,7 @@ import type {
   SemanticType,
   Standardization,
   TransformRefusal,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired,
  * so the hook's controller is not rebuilt every render on a fresh `[]` identity
@@ -1346,7 +1346,7 @@ export function InviterScreen() {
     if (acceptKitExchange === undefined) return;
     triggerBlobDownload(
       acceptKitFileName(new Date()),
-      buildAcceptKit({ ...acceptKitExchange, version: psilinkVersion() }),
+      buildAcceptKit({ ...acceptKitExchange, version: alcoveVersion() }),
       "text/plain",
     );
   }

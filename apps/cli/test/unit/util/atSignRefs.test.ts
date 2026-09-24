@@ -3,12 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import { UsageError, parseExchangeSpec } from "@psilink/core";
+import { UsageError, parseExchangeSpec } from "@alcove/core";
 import type {
   ExchangeSpec,
   SFTPConnectionConfig,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   applyConnectionCredentials,
@@ -23,7 +23,7 @@ let dir: string;
 let prevHome: string | undefined;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-atsign-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-atsign-"));
   // Saved/restored around every test so the ~-expansion case can repoint HOME
   // without leaking into other tests.
   prevHome = process.env.HOME;

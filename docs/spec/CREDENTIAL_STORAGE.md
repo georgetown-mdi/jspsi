@@ -4,7 +4,7 @@ title: "Credential and Result File Storage"
 
 # Credential and result file storage
 
-This document specifies how PSI-Link writes its owner-only credential and result
+This document specifies how Alcove writes its owner-only credential and result
 files: the POSIX exclusive-create, exact-mode, and atomic-rename discipline, the
 platform-dependent `fsync` durability and cross-write crash-ordering guarantee
 laid over it, the macOS `F_FULLFSYNC` caveat and NFSv4-ACL strip, the
@@ -15,10 +15,10 @@ load-check internals. It is the implementation-level complement to the
 these files protect and states the operator-facing required permissions,
 warnings, and remediation commands; this document covers how each write is
 constructed. The same construction governs every owner-only artifact written in
-one shot: the key file (`.psilink.key`), the signing identity, the
+one shot: the key file (`.alcove.key`), the signing identity, the
 self-attested exchange record and the private verification-keys file beside it
 (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)), the dual-signed receipt, the
-operator config `psilink.yaml`, and the credentials file that holds the
+operator config `alcove.yaml`, and the credentials file that holds the
 operator's SMB password to `smbclient` for `doctor probe`. It is therefore
 specified once here and referenced from each. Two owner-only artifacts are written on the
 same principle without taking that construction, and each is specified where it
@@ -32,7 +32,7 @@ auditors and implementors.
 
 ## POSIX write discipline
 
-The CLI writes `.psilink.key` with mode `0600` (owner-read-only). The write goes
+The CLI writes `.alcove.key` with mode `0600` (owner-read-only). The write goes
 to a sibling temp file created on an exclusive, non-following descriptor
 (`O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW`) whose mode is set on the descriptor
 before any content is written, then atomically renamed into place, mirroring the
@@ -50,7 +50,7 @@ being correct, and a failure to unlink it does not undo the creation.
 Everything ahead of the final step is identical, so the mode, the exclusive
 non-following temp create, and the `fsync` ordering below hold for both steps.
 Three artifacts take create-if-absent: a signing identity being created for the
-first time, a key file provisioned from an invitation, and a `psilink init`
+first time, a key file provisioned from an invitation, and an `alcove init`
 config the operator asked to create rather than replace. The rename is what a
 rotating key file, a regenerated signing identity, a rewritten config, an
 exchange record, and a receipt take, each overwriting by design.
@@ -133,7 +133,7 @@ Each writer therefore clears the file's extended ACL at the point where it
 enforces the mode, on macOS alone: `execFileSync("/bin/chmod", [...flags, "-N",
 file])`, run on the temp file after its `fchmod` and before any content is
 written, and on the streamed result CSV between its `fchmod` and its truncate.
-`-N` deletes the ACL entirely -- on an artifact psilink writes, no ACE is
+`-N` deletes the ACL entirely -- on an artifact Alcove writes, no ACE is
 intended, so the mode is meant to be the file's whole access story. There is no
 `--` separator: macOS's `chmod` has none and fails trying to open it as a file
 (driven on the real tool, 2026-08-17, recorded on the introducing pull
@@ -166,7 +166,7 @@ content lands in:
 
 | Call site | Flags | Why |
 | --------- | ----- | --- |
-| Temp-file writers (`writeFileOwnerOnly`, `writeFileAtomic`) | `-h -N` | The path is psilink's own temp path, opened with `O_EXCL` and `O_NOFOLLOW`; a symlink at it is one planted in the create window. `-h` acts on the named entry, so following one cannot redirect the strip onto another file's ACL while the content goes to the temp file. |
+| Temp-file writers (`writeFileOwnerOnly`, `writeFileAtomic`) | `-h -N` | The path is Alcove's own temp path, opened with `O_EXCL` and `O_NOFOLLOW`; a symlink at it is one planted in the create window. `-h` acts on the named entry, so following one cannot redirect the strip onto another file's ACL while the content goes to the temp file. |
 | Streamed result CSV (`createOwnerOnlyWriteStream`) | `-N` | The path is an operator-supplied output path, opened without `O_NOFOLLOW` and `fchmod`'d on the descriptor, so a pre-existing symlink there is followed by design (see [Result CSV output](#result-csv-output)). `chmod` resolves the path for the same reason: acting on the link node would clear an ACL that governs nothing while the rows landed in a target whose ACEs still stood. Because the strip re-resolves the path rather than acting on the already-`fchmod`'d descriptor -- Node's `fs` exposes no fd-based ACL API -- a destPath swapped between the `fchmod` and the strip aims the two at different files. |
 | `--log-file` descriptor (`configureLogFile`) | `-N` | The path is an operator-supplied flag value, opened `"a"` with neither `O_NOFOLLOW` nor `O_EXCL`, so a symlink there is followed and the lines land in its target. The strip resolves the path for the same reason the streamed CSV's does, and inherits the same known limitation: it re-resolves the path rather than acting on the open descriptor. |
 | `doctor probe` work directory (`runProbe`) | `-h -N` | The path is one `mkdtemp` created itself, so a symlink at it is one planted in the window after that create. `-h` acts on the named entry, so following one cannot clear an unrelated directory's ACL while the credentials file is created under an inheritable ACE that still stands. |
@@ -198,7 +198,7 @@ removes it before the message is composed, so `reportedPath` there is
 `os.tmpdir()` -- the surviving parent that holds the inheritable ACE, not the
 removed `mkdtemp` directory -- and that is the path the generic `ls -le` /
 `chmod -N` remediation copy points the operator at. On a shared or system
-`TMPDIR` (`TMPDIR=/tmp`, say), that parent is not psilink's own: running
+`TMPDIR` (`TMPDIR=/tmp`, say), that parent is not Alcove's own: running
 `chmod -N` against it would clear every principal's ACEs on a directory other
 software shares, not just the inheritable one this run left behind. The
 operator should inspect and remove only the inheritable entries at that path,
@@ -279,19 +279,19 @@ forms. A child that ran to completion untimed renders
 reaches the operator -- and for the temp-file writers the operand is the temp
 path, `<destination>.tmp.<pid>`. A spawn failure and both timeout shapes render
 `spawnSync /bin/chmod <errno>` instead, naming the binary and no operand. The
-temp path is psilink's own construction and holds no content when the strip
+temp path is Alcove's own construction and holds no content when the strip
 refuses, and the refusal message already names the destination it derives from,
 so what the first form adds beyond the errno is this process's pid.
 
 Off macOS no strip is attempted: on Linux the numeric `chmod` already collapses
 the POSIX ACL mask, and Windows owner-only enforcement is the `icacls`
-narrowing below. The operator-facing remediation for a file psilink did not
+narrowing below. The operator-facing remediation for a file Alcove did not
 write (`ls -le` to inspect, `chmod -N` to clear) is in
 [SECURITY_DESIGN.md](../SECURITY_DESIGN.md#required-permissions).
 
 ## Writable-and-readable-parent pre-flight
 
-Before a recurring exchange's handshake, psilink validates that the key file can
+Before a recurring exchange's handshake, Alcove validates that the key file can
 be written, because a write that fails after the handshake has rotated the
 shared secret can desynchronize the two parties' tokens and force a
 re-invitation. On POSIX the key file's parent directory must be both writable
@@ -323,7 +323,7 @@ write with):
 6. **Writability is established by creating and removing a probe file**, not by
    an access check: `access()` reports only the read-only attribute on Windows
    and can misreport under Linux capabilities such as `CAP_DAC_OVERRIDE`. The
-   probe is named `.psilink-write-probe-<pid>-<8 hex>`, created exclusively, and
+   probe is named `.alcove-write-probe-<pid>-<8 hex>`, created exclusively, and
    removed in a `finally`; a stale probe left by an earlier run is swept first,
    and every failure of that sweep is ignored as cosmetic.
 7. **Readability is established by opening the parent for reading**, on POSIX
@@ -454,7 +454,7 @@ CLI obtains internally via `whoami`. On a standalone (non-domain) machine
 
 ## Result CSV output
 
-The matched-records CSV that `psilink exchange` writes to an output path -- the
+The matched-records CSV that `alcove exchange` writes to an output path -- the
 most sensitive artifact the tool produces -- is created owner-only on the same
 principle as the key file: `0600` on Unix and an `icacls`-narrowed ACL on
 Windows, applied before any rows are written, so the output is not left world- or

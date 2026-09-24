@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import type { InvitationToken, LinkageTerms } from "@alcove/core";
 
 // The two withholding flags the mocked summarizer answers with, read fresh on
 // every call so one test can drive both directions. Hoisted because vi.mock's
@@ -14,8 +14,8 @@ const forced = vi.hoisted(() => ({
 // contradicts that token's own terms can only reach the renderer by answering
 // for the summarizer. Every other export passes through, so the fixtures and
 // the asserted copy stay core's own.
-vi.mock("@psilink/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@alcove/core")>();
   return {
     ...actual,
     summarizeInvitation: (token: InvitationToken) => ({
@@ -31,7 +31,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { displayInvitation } from "../../src/invitationDisplay";
 
@@ -116,7 +116,7 @@ describe("displayInvitation: the deduplicate variant's one input", () => {
     // faithful to the protocol rule until that rule grows a condition --
     // prints the other sentence and fails.
     const core =
-      await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+      await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
 
     // Non-vacuity: each fixture contradicts the flag it is rendered under, so
     // neither case can pass by the two agreeing.
@@ -158,7 +158,7 @@ describe("displayInvitation: the own-membership variant's one input", () => {
     // re-deriving the verdict from the strategy and the payload declaration
     // prints the other sentence and fails.
     const core =
-      await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+      await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
 
     // Non-vacuity: each fixture contradicts the flag it is rendered under, so
     // neither case can pass by the two agreeing.

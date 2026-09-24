@@ -16,7 +16,7 @@ import {
   ruleSetCitation,
   summarizeInvitation,
   withholdsPartnerAssociationTable,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   consentSurfaceSink,
@@ -33,7 +33,7 @@ import type {
   Metadata,
   PreparedExchange,
   getLogger,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The heading the display leads with. It states what has been sent so far and

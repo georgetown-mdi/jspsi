@@ -10,11 +10,11 @@ import {
   getDefaultLinkageTerms,
   getLogger,
   runExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   minimalExchangeResult,
   minimalPreparedExchange,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 
 import {
   DISCLOSURE_NOT_FILED_WARNING,
@@ -45,7 +45,7 @@ import type { RunnableManagedExchangeRecord } from "../../../src/psi/managed/man
 import type { DataConnection } from "peerjs";
 import type Peer from "peerjs";
 
-import type * as PsilinkCore from "@psilink/core";
+import type * as AlcoveCore from "@alcove/core";
 import type {
   BuiltExchangeRecord,
   HandshakeRole,
@@ -54,7 +54,7 @@ import type {
   RendezvousRole,
   ResolvedRunShape,
   RunExchangeOptions,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { PeerCloseOutcome } from "../../../src/psi/transport/waitForPeerClose.js";
 import type { RunOutputs } from "@psi/runOutputs";
@@ -140,8 +140,8 @@ vi.mock("@psi/runOutputs", () => ({
 vi.mock("@openmined/psi.js/psi_wasm_web", () => ({
   default: () => Promise.resolve({}),
 }));
-vi.mock("@psilink/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof PsilinkCore>();
+vi.mock("@alcove/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof AlcoveCore>();
   const stubPartnerTerms = actual.getDefaultLinkageTerms(
     "Managed re-run partner fixture",
   );
@@ -923,7 +923,7 @@ describe("filing the run's disclosure", () => {
         audit: {
           record,
           keys: {
-            version: "psilink-exchange-keys/v1",
+            version: "alcove-exchange-keys/v2",
             salts: {
               localPayloadSent: "local-payload-salt",
               partnerPayloadReceived: "partner-payload-salt",
@@ -1145,7 +1145,7 @@ describe("filing a stopped run's disclosure", () => {
     return {
       record: await disclosureRecord({ outcome: "receipt-swap-terminated" }),
       keys: {
-        version: "psilink-exchange-keys/v1",
+        version: "alcove-exchange-keys/v2",
         salts: {
           localPayloadSent: "local-payload-salt",
           partnerPayloadReceived: "partner-payload-salt",
@@ -1217,7 +1217,7 @@ describe("filing a stopped run's disclosure", () => {
         partnerPayloadColumn: "ward",
       }),
       keys: {
-        version: "psilink-exchange-keys/v1",
+        version: "alcove-exchange-keys/v2",
         salts: {
           localPayloadSent: "local-payload-salt",
           partnerPayloadReceived: "partner-payload-salt",
@@ -1425,7 +1425,7 @@ describe("filing a stopped run's disclosure", () => {
     });
     mockedRunExchange.mockRejectedValueOnce(failure);
     const { exchangeRecordFromFailure: realRecordFromFailure } =
-      await vi.importActual<typeof PsilinkCore>("@psilink/core");
+      await vi.importActual<typeof AlcoveCore>("@alcove/core");
     mockedRecordFromFailure.mockImplementationOnce(realRecordFromFailure);
     const logged = vi.spyOn(log, "error").mockImplementation(() => {});
     const onWarning = vi.fn();

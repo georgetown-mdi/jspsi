@@ -2420,7 +2420,7 @@ describe("buildKeyStrings", () => {
   // dropping such a row would run the exchange to completion matching fewer
   // records than the terms describe, where passing the candidate set through
   // reaches the strategy refusal that covers exactly this omission
-  // (fanOutReachedMatchingRefusal, pinned at the strategies in psiLink.test.ts).
+  // (fanOutReachedMatchingRefusal, pinned at the strategies in link.test.ts).
 
   test("an unlisted producer over the width bound is kept, not dropped", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});

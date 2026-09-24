@@ -25,20 +25,20 @@ npm run test:integration -w apps/cli
 
 By default the server runs in-process (an `ssh2.Server` on an ephemeral
 loopback port serving a temporary directory), so each run -- and each worktree
--- is isolated with no shared port or state. Set `PSILINK_SFTP_BACKEND=native`
+-- is isolated with no shared port or state. Set `ALCOVE_SFTP_BACKEND=native`
 to run the same suite against a native OpenSSH `sshd` spawned as an
 unprivileged child, exercising the adapter against a real server:
 
 ```sh
-PSILINK_SFTP_BACKEND=native npm run test:integration -w apps/cli
+ALCOVE_SFTP_BACKEND=native npm run test:integration -w apps/cli
 ```
 
 The native backend runs hardened configurations real deployments use, selected
-by `PSILINK_SFTP_NATIVE_PROFILE` (default `baseline`, the plain forced
+by `ALCOVE_SFTP_NATIVE_PROFILE` (default `baseline`, the plain forced
 `internal-sftp` config); the same conformance suite runs against each:
 
 ```sh
-PSILINK_SFTP_BACKEND=native PSILINK_SFTP_NATIVE_PROFILE=restricted-crypto npm run test:integration -w apps/cli
+ALCOVE_SFTP_BACKEND=native ALCOVE_SFTP_NATIVE_PROFILE=restricted-crypto npm run test:integration -w apps/cli
 ```
 
 - `restricted-crypto` -- a locked-down kex/cipher/MAC/host-key/pubkey policy,
@@ -220,8 +220,8 @@ asserts the ORDER of what goes on the wire.
 #### The one-command acceptance leg
 
 `oneCommandAcceptance.test.ts` drives whole COMMANDS rather than the transport
-beneath them: an inviting `psilink invite` mints a webrtc invitation and waits,
-and an accepting `psilink accept INVITATION INPUT_FILE OUTPUT_FILE` resolves its
+beneath them: an inviting `alcove invite` mints a webrtc invitation and waits,
+and an accepting `alcove accept INVITATION INPUT_FILE OUTPUT_FILE` resolves its
 positionals, renders the consent surface, takes its confirmation from stdin,
 resolves the connection from the invitation's own endpoint, dials, and runs the
 exchange -- with the linkage result asserted on both sides. Both parties are
@@ -292,7 +292,7 @@ withheld close, a vanished session, a key exchange narrowed mid-run, a listener
 ceiling -- declares itself with the shared `inProcessOnly` gate
 (`apps/cli/test/sftpBackendGate.ts`) instead of `test`, and the file states
 above it what the native backend cannot do. The gate reads
-`PSILINK_SFTP_BACKEND` once at module load, so every case in a file sees the
+`ALCOVE_SFTP_BACKEND` once at module load, so every case in a file sees the
 same answer. Reach for it only where a real `sshd` exposes no control for the
 state under test: a behavior both backends show belongs in the
 backend-agnostic project above.
@@ -323,12 +323,12 @@ Some of these specs drive the built production server at
 Without that build the project fails at setup, naming the missing path and the
 build command, rather than reporting a pass with those specs quietly skipped.
 
-For a dev-server-only run, set `PSILINK_ALLOW_MISSING_WEB_BUILD=1`:
+For a dev-server-only run, set `ALCOVE_ALLOW_MISSING_WEB_BUILD=1`:
 the built-server specs report as skipped and the run passes. That is the one
 opt-out, and it is the only way an absent build is not an error.
 
 ```sh
-PSILINK_ALLOW_MISSING_WEB_BUILD=1 npm run test:integration -w apps/web
+ALCOVE_ALLOW_MISSING_WEB_BUILD=1 npm run test:integration -w apps/web
 ```
 
 The dev-server-backed specs (`signalingSurface`, `securityHeaders`) run either
@@ -383,9 +383,9 @@ takes the first.
 
 ## Cross-runtime interop suite
 
-The CLI and the web app share no code but `@psilink/core`, and their own suites
+The CLI and the web app share no code but `@alcove/core`, and their own suites
 never meet: each drives both sides of an exchange with itself. The `interop`
-project is the one place a real `psilink` process and a party assembled from the
+project is the one place a real `alcove` process and a party assembled from the
 web app's own exchange modules complete a live exchange together, in both
 invitation directions, over one file-drop directory.
 
@@ -400,8 +400,8 @@ already drives it. The suite skips itself when `apps/cli/dist/` is absent rather
 than failing on a tree that has not built it.
 
 Not every file in the project is an exchange. `consoleExportParity.test.ts`
-spawns the built `psilink` only to WRITE what it compares against -- a
-configuration `psilink invite` or `psilink accept` wrote, opened in the console,
+spawns the built `alcove` only to WRITE what it compares against -- a
+configuration `alcove invite` or `alcove accept` wrote, opened in the console,
 run and handed back -- and it sits here for the reason the exchanges do: the
 comparison is against the real program's own bytes, and a unit test neither
 builds the CLI nor spawns it. What the console's hand-off composes without the
@@ -435,7 +435,7 @@ either runtime, and each workflow's path filter sees only its own.
 The interop suite above meets a CLI party over a file-drop directory, which is
 the only transport a Node host can stand up on its own. The `live-webrtc`
 project is where the two implementations meet over the transport they actually
-share: a real `psilink` process and a real browser peer, in Chromium, complete
+share: a real `alcove` process and a real browser peer, in Chromium, complete
 one WebRTC PSI exchange through the standalone signaling broker.
 
 ```sh
@@ -462,7 +462,7 @@ own page's origin instead.
 
 A cross-origin broker is what lets the leg answer whether that broker needs a
 CORS header for the browser peer. It does not: PeerJS asks the broker for an id
-over HTTP only when constructed without one, and psilink always supplies the id
+over HTTP only when constructed without one, and Alcove always supplies the id
 derived from the invitation secret, so nothing but the signaling WebSocket
 crosses, and CORS does not govern a WebSocket. The leg holds that as a check
 rather than as a note here.
@@ -517,7 +517,7 @@ every workspace config and in the root `vitest.config.mts` as well, since
 reporters belong to the config that starts a run rather than to a project it
 reaches.
 
-### A stale `@psilink/core` dist fails the run
+### A stale `@alcove/core` dist fails the run
 
 The apps import the built package, never `packages/core/src`, so a run whose
 `dist/` is older than the sources it was built from exercises yesterday's
@@ -530,7 +530,7 @@ older fails the run, naming the file that outran it and the rebuild:
 npm run build -w packages/core
 ```
 
-Set `PSILINK_ALLOW_STALE_CORE_DIST=1` to run against the dist as it stands.
+Set `ALCOVE_ALLOW_STALE_CORE_DIST=1` to run against the dist as it stands.
 `packages/core`'s own suite has no such guard: `pretest` rebuilds, and those
 tests import `src`. A run that selects no app project pays nothing either --
 `npm run test:scripts` needs no build and never asks for one.
@@ -543,7 +543,7 @@ a source since reverted to identical bytes.
 
 Some legs need a tool the repository does not ship. The web signaling suites and
 the CLI's live one-command acceptance need a self-signed loopback certificate,
-which Node cannot issue, so `@psilink/testkit/loopbackTlsCert` shells out to
+which Node cannot issue, so `@alcove/testkit/loopbackTlsCert` shells out to
 `openssl` and those legs skip where it cannot mint one (no `openssl`, or a
 LibreSSL one that takes the flags differently).
 
@@ -553,15 +553,15 @@ run continues, with the missing prerequisite, the coverage it costs, and how to
 supply it named on the console. Under `CI`, the run fails instead: a runner is
 provisioned to a spec, so a prerequisite absent there is a defect in the image
 or the workflow rather than a property of somebody's laptop. Set
-`PSILINK_ALLOW_MISSING_TEST_PREREQUISITES=1` to skip those legs.
+`ALCOVE_ALLOW_MISSING_TEST_PREREQUISITES=1` to skip those legs.
 
 A suite that needs a new prerequisite adds it to `webTestPrerequisites()` beside
 the certificate. The CLI states three of its own the same way but per leg, since
 the legs that must have them are named individually:
-`PSILINK_REQUIRE_WORKER_BUILD=1` on the leg that builds the CLI worker bundle,
-`PSILINK_SFTP_CHROOT_REQUIRED=1` on the chroot profile, and the one-command
+`ALCOVE_REQUIRE_WORKER_BUILD=1` on the leg that builds the CLI worker bundle,
+`ALCOVE_SFTP_CHROOT_REQUIRED=1` on the chroot profile, and the one-command
 acceptance leg's own `openssl`, which it mints its TLS front's certificate with.
-That leg reads `CI` and the same `PSILINK_ALLOW_MISSING_TEST_PREREQUISITES`
+That leg reads `CI` and the same `ALCOVE_ALLOW_MISSING_TEST_PREREQUISITES`
 opt-out as the web gate, so an operator whose machine has no `openssl` sets one
 variable for both.
 
@@ -649,8 +649,8 @@ splits. A helper used across a workspace's own test tree lives in that
 workspace's test tree -- `packages/core/test/utils/`, `apps/cli/test/`,
 `apps/web/test/utils/` are the three today. A helper more than one workspace
 needs takes one of the two channels documented in
-[Shared test material](#shared-test-material) below -- `@psilink/core/testing`
-or `@psilink/testkit` -- whose admission rule lives there, not here; see also
+[Shared test material](#shared-test-material) below -- `@alcove/core/testing`
+or `@alcove/testkit` -- whose admission rule lives there, not here; see also
 [cross-workspace-test-material.md](notes/cross-workspace-test-material.md).
 
 ### Directory layout
@@ -670,12 +670,12 @@ included, for as long as no workspace outside its own imports it.
 A helper that more than one workspace's test tree needs has two channels, and
 which one it takes is decided by what it imports, not by what it is about.
 
-`@psilink/core/testing`, whose subjects live in `packages/core/src`, is the
+`@alcove/core/testing`, whose subjects live in `packages/core/src`, is the
 channel for a helper that needs nothing `packages/core` does not already declare
 in its own `dependencies`. Everything it holds is built into `dist/testing.*`
-and published with `@psilink/core`, so a fixture put there ships to consumers.
+and published with `@alcove/core`, so a fixture put there ships to consumers.
 
-`@psilink/testkit` is the channel for a helper that cannot meet that condition:
+`@alcove/testkit` is the channel for a helper that cannot meet that condition:
 a private, never-published workspace with no build and no `dist`, whose
 `exports` map points at its `./src/*.ts` and which is therefore consumed as raw
 TypeScript and typechecked inside each consumer's own program. It may import
@@ -686,8 +686,8 @@ that build or is inlined into the package core publishes.
 
 Its admission rule, which is narrow on purpose: material goes in only when a
 second workspace's test tree needs it AND it cannot take the
-`@psilink/core/testing` channel, and it is exported one explicit subpath at a
-time. Nothing moves in for tidiness, and the existing `@psilink/core/testing`
+`@alcove/core/testing` channel, and it is exported one explicit subpath at a
+time. Nothing moves in for tidiness, and the existing `@alcove/core/testing`
 subjects stay where they are. Its one subject today is the WebRTC inbound frame
 fixture set, which both apps' transports are held to and which is built with the
 real `peerjs-js-binarypack` packer (a devDependency of `packages/core`, not a
@@ -695,7 +695,7 @@ dependency).
 
 Anything a single workspace needs stays in that workspace's own test tree,
 whichever channel it would qualify for. The decision, the alternatives measured
-against it, and where each current `@psilink/core/testing` subject stands are in
+against it, and where each current `@alcove/core/testing` subject stands are in
 [cross-workspace-test-material.md](notes/cross-workspace-test-material.md).
 
 ### Checked-in vectors
@@ -802,13 +802,13 @@ icacls $f
 
 ```powershell
 # Grant another principal read on the key file, defeating owner-only.
-icacls .psilink.key /grant "Guests:(R)"
+icacls .alcove.key /grant "Guests:(R)"
 ```
 
-Run a command that loads the key file (for example `psilink exchange`) and confirm it logs a warning that the file grants access to other users and should be restricted to owner-only. To confirm the `icacls` fallback tier (used where `Get-Acl` cannot run, such as a Nano Server container or a constrained-language environment), repeat with PowerShell unavailable on `PATH`; the warning must still fire. Restore owner-only afterward:
+Run a command that loads the key file (for example `alcove exchange`) and confirm it logs a warning that the file grants access to other users and should be restricted to owner-only. To confirm the `icacls` fallback tier (used where `Get-Acl` cannot run, such as a Nano Server container or a constrained-language environment), repeat with PowerShell unavailable on `PATH`; the warning must still fire. Restore owner-only afterward:
 
 ```powershell
-icacls .psilink.key /inheritance:r /grant:r "$me:(M)"
+icacls .alcove.key /inheritance:r /grant:r "$me:(M)"
 ```
 
 A clean load emits no such warning, so absence of the warning after restoring the ACL confirms the check clears a correctly-narrowed file.
@@ -883,7 +883,7 @@ core build). Stryker is not a repository dependency by design -- it drags in
 a second copy of Vitest and its own TypeScript -- so
 `scripts/stryker-security.mjs` installs it into a private prefix under the work
 directory: `$RUNNER_TEMP` in CI, the system temp directory locally, and
-`PSILINK_STRYKER_WORK_DIR` overrides both. The HTML and JSON reports are written
+`ALCOVE_STRYKER_WORK_DIR` overrides both. The HTML and JSON reports are written
 there too, so nothing lands in the working tree; the nightly workflow
 ([`.github/workflows/nightly_mutation.yaml`](../.github/workflows/nightly_mutation.yaml))
 checks out `staging` explicitly and uploads both as a run artifact.

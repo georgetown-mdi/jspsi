@@ -121,7 +121,7 @@ describe("block-over-budget-pr-title hook", () => {
     expect(budget).toBe(UNNUMBERED_BUDGET + 1);
     expectAllowed([
       `gh pr edit 928 --title "${title(budget)}"`,
-      `gh pr edit https://github.com/georgetown-mdi/jspsi/pull/928 --title "${title(budget)}"`,
+      `gh pr edit https://github.com/georgetown-mdi/alcove/pull/928 --title "${title(budget)}"`,
     ]);
     expectBlocked([`gh pr edit 928 --title "${title(budget + 1)}"`]);
     expect(verdict(`gh pr edit 928 --title "${title(80)}"`).stderr).toContain(

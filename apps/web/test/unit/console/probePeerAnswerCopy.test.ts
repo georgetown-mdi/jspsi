@@ -14,7 +14,7 @@ describe("the probe's peer-answer copy names what answered", () => {
       excerpt: "HTTP/1.1 403 Forbidden",
     });
     expect(copy.message).toContain("HTTP response");
-    // The excerpt is attributed to the peer rather than presented as psilink's
+    // The excerpt is attributed to the peer rather than presented as Alcove's
     // own reading of the server, and it is handed over as its own fragment for
     // the alert to frame rather than appended to the sentence.
     expect(copy.message).toContain("The first bytes it sent are shown below");

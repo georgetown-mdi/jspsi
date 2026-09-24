@@ -123,9 +123,7 @@ describe("the linkage-compare chokepoint ban", { timeout: 60_000 }, () => {
         `${filePath}: a type-aware rule survived the strip`,
       ).toEqual([]);
       const [, options] = config.rules["no-restricted-imports"] ?? [];
-      const core = options?.paths?.find(
-        (path) => path.name === "@psilink/core",
-      );
+      const core = options?.paths?.find((path) => path.name === "@alcove/core");
       expect(
         core?.importNames,
         `${filePath}: the resolved no-restricted-imports options do not match the expected ban, so linting it reports zero however the import is written`,
@@ -136,7 +134,7 @@ describe("the linkage-compare chokepoint ban", { timeout: 60_000 }, () => {
   for (const name of BANNED_NAMES) {
     it(`refuses '${name}' imported from core in apps/web/src`, async () => {
       expect(
-        await importHits(WEB_SRC, `import { ${name} } from "@psilink/core";\n`),
+        await importHits(WEB_SRC, `import { ${name} } from "@alcove/core";\n`),
       ).not.toHaveLength(0);
     });
 
@@ -144,17 +142,14 @@ describe("the linkage-compare chokepoint ban", { timeout: 60_000 }, () => {
       expect(
         await importHits(
           CHOKEPOINT,
-          `import { ${name} } from "@psilink/core";\n`,
+          `import { ${name} } from "@alcove/core";\n`,
         ),
       ).toHaveLength(0);
     });
 
     it(`accepts '${name}' in a test file`, async () => {
       expect(
-        await importHits(
-          WEB_TEST,
-          `import { ${name} } from "@psilink/core";\n`,
-        ),
+        await importHits(WEB_TEST, `import { ${name} } from "@alcove/core";\n`),
       ).toHaveLength(0);
     });
   }
@@ -165,11 +160,11 @@ describe("the linkage-compare chokepoint ban", { timeout: 60_000 }, () => {
   for (const [shape, source] of [
     [
       "a renamed import",
-      'import { isOptInLinkageKey as p } from "@psilink/core";',
+      'import { isOptInLinkageKey as p } from "@alcove/core";',
     ],
-    ["a re-export", 'export { isOptInLinkageKey } from "@psilink/core";'],
-    ["a namespace import", 'import * as core from "@psilink/core";'],
-    ["a blanket re-export", 'export * from "@psilink/core";'],
+    ["a re-export", 'export { isOptInLinkageKey } from "@alcove/core";'],
+    ["a namespace import", 'import * as core from "@alcove/core";'],
+    ["a blanket re-export", 'export * from "@alcove/core";'],
   ]) {
     it(`refuses ${shape} in apps/web/src`, async () => {
       expect(await importHits(WEB_SRC, `${source}\n`)).not.toHaveLength(0);
@@ -180,7 +175,7 @@ describe("the linkage-compare chokepoint ban", { timeout: 60_000 }, () => {
     expect(
       await importHits(
         WEB_SRC,
-        'import { canonicalString } from "@psilink/core";\n',
+        'import { canonicalString } from "@alcove/core";\n',
       ),
     ).toHaveLength(0);
   });

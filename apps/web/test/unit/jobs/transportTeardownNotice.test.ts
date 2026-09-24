@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   TEARDOWN_LEFTOVER_FILES_CLAUSE,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   createServerJobExchangeDriver,

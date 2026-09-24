@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { StandardizedField } from "@psilink/core";
+import { StandardizedField } from "@alcove/core";
 
 import {
   NON_EMPTY_WORKER_CHAR_THRESHOLD,
@@ -19,7 +19,7 @@ import type {
   AggregateWorker,
 } from "../../../src/psi/workers/nonEmptyAggregateController.js";
 
-import type { CSVRow, Standardization } from "@psilink/core";
+import type { CSVRow, Standardization } from "@alcove/core";
 
 afterEach(() => {
   vi.restoreAllMocks();

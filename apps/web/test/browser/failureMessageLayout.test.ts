@@ -14,7 +14,7 @@ import {
   joinErrorCauseChain,
   partnerOriginText,
   replaceControlCharactersForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   FailureAlert,

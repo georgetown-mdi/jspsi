@@ -13,8 +13,8 @@ import {
   generateSigningIdentity,
   computeCertificateFingerprint,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
-import type { SigningConfig, SigningIdentity } from "@psilink/core";
+} from "@alcove/core";
+import type { SigningConfig, SigningIdentity } from "@alcove/core";
 
 import { resolveSigningPersist } from "../../../src/commands/exchange";
 import { saveSigningIdentity } from "../../../src/signingIdentityFile";
@@ -24,10 +24,10 @@ let dir: string;
 /** The configuration file an exchange would have been given: the only file a
  * freshly adopted partner fingerprint is written into, and unread by every
  * refusal below. */
-const configPath = (): string => path.join(dir, "psilink.yaml");
+const configPath = (): string => path.join(dir, "alcove.yaml");
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-signing-test-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-signing-test-"));
 });
 
 afterEach(() => {
@@ -121,7 +121,7 @@ test("a long configured path leaves the remedy inside the display cap", async ()
   const identityFile = path.join(
     dir,
     ...Array.from({ length: 5 }, () => "d".repeat(100)),
-    "psilink-signing-identity.json",
+    "alcove-signing-identity.json",
   );
   expect(identityFile.length).toBeGreaterThan(
     COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH / 2,
@@ -149,7 +149,7 @@ test.skipIf(process.platform === "win32")(
     // nor anything beside it. verify-receipt's half of the same claim is pinned in
     // verifyReceipt.test.ts; this is the exchange half.
     const mount = fs.mkdtempSync(path.join(dir, "mount-"));
-    const identityPath = path.join(mount, "psilink-signing-identity.json");
+    const identityPath = path.join(mount, "alcove-signing-identity.json");
     saveSigningIdentity(identityPath, identity, { exclusive: true });
     const listing = fs.readdirSync(mount).sort();
     const bytes = fs.readFileSync(identityPath, "utf8");
@@ -198,12 +198,12 @@ test("the refusal names both spellings, a mounted example, and the unsigned exit
   );
   expect(rendered).toContain("signing.mode: certificate");
   expect(rendered).toContain("The run reads it and writes nothing to it");
-  // Why psilink leaves the location to the operator is contributor-tier, kept in
+  // Why Alcove leaves the location to the operator is contributor-tier, kept in
   // the constant's JSDoc rather than spent on the terminal.
   expect(rendered).not.toContain("yours to decide");
   expect(rendered).toContain("signing.identity_file");
   expect(rendered).toContain("--identity-file");
-  expect(rendered).toContain("/run/signing/psilink-signing-identity.json");
+  expect(rendered).toContain("/run/signing/alcove-signing-identity.json");
   expect(rendered).toContain("read-only mount");
   expect(rendered).toContain('signing.mode to "none"');
   // Read at the sink that caps a composed link, so the whole remedy is what the
@@ -214,7 +214,7 @@ test("the refusal names both spellings, a mounted example, and the unsigned exit
 test("the refusal names no path of its own beyond the illustrative one", async () => {
   // A message that guessed at a location -- a home directory, a working
   // directory -- would reinstate the default this refusal exists to remove, and
-  // would send the operator to a path psilink does not read.
+  // would send the operator to a path Alcove does not read.
   const config: SigningConfig = { mode: "certificate" };
   const message = await resolveSigningPersist(
     config,
@@ -225,7 +225,7 @@ test("the refusal names no path of its own beyond the illustrative one", async (
     (err: unknown) => (err as Error).message,
   );
   const paths = new Set(message.match(/(~|\.)?\/[\w./-]+/g) ?? []);
-  expect([...paths]).toEqual(["/run/signing/psilink-signing-identity.json"]);
+  expect([...paths]).toEqual(["/run/signing/alcove-signing-identity.json"]);
   expect(message).not.toContain(os.homedir());
 });
 
@@ -402,7 +402,7 @@ test("a control-character label reaches the operator escaped, once", async () =>
 
 // --- a bound label the agreed terms cannot state ------------------------------
 // The certificate schema admits a label holding a control or text-direction
-// character or private key material, and `psilink fingerprint` refuses to bind
+// character or private key material, and `alcove fingerprint` refuses to bind
 // a new one, so a file written before that check is how one still reaches this
 // boundary. Its holder cannot author linkage_terms.identity to match it -- the
 // terms refuse every one of these rules -- so the remedy the divergence refusal
@@ -437,7 +437,7 @@ test("a bound label the terms cannot state is refused with the re-key exit", asy
       (err: unknown) => sanitizeErrorForDisplay(err),
     );
     expect(rendered).toContain("the linkage terms cannot state");
-    expect(rendered).toContain("psilink fingerprint --force --identity");
+    expect(rendered).toContain("alcove fingerprint --force --identity");
     expect(rendered).toContain("re-pin the new fingerprint");
     // The config edit the terms make impossible is not among the remedies.
     expect(rendered).not.toContain("set linkage_terms.identity to the bound");

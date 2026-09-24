@@ -39,7 +39,7 @@ import type { ZodType } from "zod";
  * reader rejects any other value rather than migrating it, the
  * reader-rejects-unknown rule the record and the accounting of disclosures
  * follow (see docs/spec/EXCHANGE_RECORD.md). */
-export const PARKED_RESULTS_VERSION = "psilink-parked-results/v1";
+export const PARKED_RESULTS_VERSION = "alcove-parked-results/v2";
 
 /** How long a scheduled run's results stay in this browser, counted from the run
  * itself. The surface states this number and the store enforces exactly it (see
@@ -297,5 +297,5 @@ function resultsFileLabelSlug(label: string): string {
 export function runResultsFileName(label: string, runAt: string): string {
   const slug = resultsFileLabelSlug(label);
   const stamp = recordFileStamp(runAt);
-  return `psilink-results-${slug === "" ? "" : `${slug}-`}${stamp}.csv`;
+  return `alcove-results-${slug === "" ? "" : `${slug}-`}${stamp}.csv`;
 }

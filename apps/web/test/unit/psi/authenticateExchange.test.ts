@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ConnectionError, runKex } from "@psilink/core";
-import { createMessagePipe } from "@psilink/core/testing";
+import { ConnectionError, runKex } from "@alcove/core";
+import { createMessagePipe } from "@alcove/core/testing";
 
 import { authenticateExchange } from "../../../src/psi/authenticateExchange.js";
 
-import type { MessageConnection } from "@psilink/core";
+import type { MessageConnection } from "@alcove/core";
 
 /** A MessageConnection whose `send` resolves and whose `receive` rejects with
  * `error`. As the initiator, the handshake sends its first frame then awaits a
@@ -287,8 +287,8 @@ describe("authenticateExchange", () => {
         "during the key-exchange round-trip",
       );
       expect(
-        (reason as { psilinkRecoveryHintEmitted?: unknown })
-          .psilinkRecoveryHintEmitted,
+        (reason as { alcoveRecoveryHintEmitted?: unknown })
+          .alcoveRecoveryHintEmitted,
       ).toBe(true);
     }
   });

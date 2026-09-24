@@ -35,8 +35,8 @@ import type { ReceiptsDraft } from "@psi/receiptsModel";
  * aligned set core's regex requires. */
 const FINGERPRINT = "B".repeat(42) + "A";
 
-const IDENTITY_FILE = ".psilink-signing-identity.json";
-const CERTIFICATE_FILE = "psilink-certificate.json";
+const IDENTITY_FILE = ".alcove-signing-identity.json";
+const CERTIFICATE_FILE = "alcove-certificate.json";
 
 /** The exchange's `linkage_terms.identity`, the one value the request holds. */
 const IDENTITY = "Dana Okafor, Riverside Health";
@@ -165,8 +165,8 @@ let latestDraft: ReceiptsDraft = RECEIPTS_DEFAULT;
  * identity is not refused on any layout. */
 const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
-  locator: "psilink",
-  folderName: "psilink",
+  locator: "alcove",
+  folderName: "alcove",
   sharesDataRoot: true,
   sharesDataRootUncertain: false,
 };
@@ -216,7 +216,7 @@ const createButton = () =>
   page.getByRole("button", { name: "Create or show my fingerprint" });
 
 /** The file the secrets browse offers, and the one a test picks. */
-const PICKED_IDENTITY = "psilink-signing-identity.json";
+const PICKED_IDENTITY = "alcove-signing-identity.json";
 
 /** A picked file whose name holds a right-to-left override, which the browse
  * admits (it bars control characters and separators, not this) and the console
@@ -477,7 +477,7 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
     await expect
       .element(page.getByText("There is no signing identity at the file"))
       .toBeInTheDocument();
-    expect(app.container.textContent).toContain("psilink fingerprint");
+    expect(app.container.textContent).toContain("alcove fingerprint");
     expect(latestDraft.ownFingerprint).toBeUndefined();
   });
 
@@ -622,7 +622,7 @@ describe("ReceiptsCard: a failed request", () => {
       .element(page.getByText(REFUSED_DEFAULT, { exact: false }))
       .toBeInTheDocument();
     expect(app.container.textContent).toContain(
-      "running 'psilink fingerprint' against the same folder",
+      "running 'alcove fingerprint' against the same folder",
     );
 
     await createButton().click();
@@ -673,14 +673,14 @@ describe("ReceiptsCard: a failed request", () => {
       "Check that file at the location you picked, or pick another one.",
     );
     expect(app.container.textContent).toContain(
-      "'psilink fingerprint --identity-file' pointed at that file",
+      "'alcove fingerprint --identity-file' pointed at that file",
     );
     expect(app.container.textContent).not.toContain("writable");
-    // The psilink.yaml half stays: the child's working directory is the data
+    // The alcove.yaml half stays: the child's working directory is the data
     // root whatever the identity's location, so that file is still the one it
     // can read.
     expect(app.container.textContent).toContain(
-      "any psilink.yaml in the folder you mounted is valid YAML",
+      "any alcove.yaml in the folder you mounted is valid YAML",
     );
 
     await showButton.click();

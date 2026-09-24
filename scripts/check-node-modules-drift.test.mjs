@@ -342,7 +342,7 @@ describe("fileDependencyIntegrity", () => {
   it("ignores a workspace's own local file: link, which has no integrity", () => {
     const lock = {
       packages: {
-        "node_modules/@psilink/core": { resolved: "packages/core", link: true },
+        "node_modules/@alcove/core": { resolved: "packages/core", link: true },
       },
     };
     expect(fileDependencyIntegrity(dir, lock)).toEqual(nothingToCompare);

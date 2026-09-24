@@ -39,10 +39,10 @@ import {
   generateSigningIdentity,
 } from "../../dist/core.esm.js";
 
-const CERTIFICATE_VERSION = "psilink-signing-cert/v2";
-const IDENTITY_VERSION = "psilink-signing-identity/v2";
+const CERTIFICATE_VERSION = "alcove-signing-cert/v3";
+const IDENTITY_VERSION = "alcove-signing-identity/v3";
 const ALGORITHM = "ecdsa-p256-sha256";
-const SIGNATURE_DOMAIN = "psilink-signing-cert-signature/v1";
+const SIGNATURE_DOMAIN = "alcove-signing-cert-signature/v2";
 
 const toBase64Url = (bytes) => Buffer.from(bytes).toString("base64url");
 
@@ -72,7 +72,7 @@ function signatureInput(body) {
  * openssl's own parse rather than from a DER decoder written here.
  */
 function signWithOpenssl(jwk, message) {
-  const dir = mkdtempSync(join(tmpdir(), "psilink-vectors-"));
+  const dir = mkdtempSync(join(tmpdir(), "alcove-vectors-"));
   const keyPath = join(dir, "key.pem");
   const msgPath = join(dir, "message.bin");
   const sigPath = join(dir, "signature.der");

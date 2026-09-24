@@ -7,14 +7,14 @@ import {
   redactAndRenderOperatorSuppliedText,
   redactAndSanitizeForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ExchangeDataSpec,
   Metadata,
   Output,
   OutboundPayloadConsentConfirmationRequired,
   getLogger,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { persistOutboundPayloadConsent } from "./config";
 import {

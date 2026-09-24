@@ -4,7 +4,7 @@ import { intentFor } from "@psi/jobClient/serverJobExchangeDriver";
 import { inviterServerJobConfig } from "@exchange/useInviterExchange";
 import { jobExchangeIntentSchema } from "@jobs/intentSchemas";
 
-import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+import type { LinkageTerms, Metadata, Standardization } from "@alcove/core";
 
 // The terms embedded in the minted token: this party is the identity, it SENDS
 // `program_code` and requests nothing back. The inviter's server-job config runs

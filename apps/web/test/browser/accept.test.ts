@@ -19,8 +19,8 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   sanitizeForDisplay,
-} from "@psilink/core";
-import { minimalPreparedExchange } from "@psilink/core/testing";
+} from "@alcove/core";
+import { minimalPreparedExchange } from "@alcove/core/testing";
 
 import {
   acceptorColumnsEditorState,
@@ -52,7 +52,7 @@ import type {
   InvitationToken,
   LinkageTerms,
   PreparedExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // Capture what the router boundary was navigated to, so the lobby paste test
 // can assert the target and hash.
@@ -555,7 +555,7 @@ describe("acceptor screen: review terms", () => {
       .toBeInTheDocument();
     // The review-only unverified-identity note travels with the terms.
     await expect
-      .element(page.getByText("psilink has not verified it", { exact: false }))
+      .element(page.getByText("Alcove has not verified it", { exact: false }))
       .toBeInTheDocument();
 
     // Every tier is always-visible at the consent decision point, unaided.
@@ -779,7 +779,7 @@ describe("acceptor screen: consent-step legal-agreement display", () => {
     );
     expect(fieldset?.textContent).toContain("MOU-2025-0042");
     // The purpose keeps its provenance marker: partner-attested free text,
-    // never presented as psilink-endorsed (the InvitationTerms convention).
+    // never presented as alcove-endorsed (the InvitationTerms convention).
     expect(fieldset?.textContent).toContain(
       "Stated purpose of the disclosure: Program evaluation",
     );
@@ -1637,7 +1637,7 @@ describe("acceptor columns step: the send summary is gated on the inviting party
   // The acceptor's partner IS the inviting party, so the fact is the invitation's own
   // expectsOutput -- the same fact the consent screen's outbound block reads
   // (apps/web/test/browser/invitationTerms.test.ts pins it there), rendering the same
-  // sentence from @psilink/core.
+  // sentence from @alcove/core.
   const noResultForInviter: LinkageTerms = {
     ...acceptorTerms,
     output: { expectsOutput: false, shareWithPartner: true },
@@ -2006,9 +2006,9 @@ describe("acceptor screen: run and completion", () => {
       },
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
-        recordFileName: "psilink-record-2026-07-08T14-32.json",
+        recordFileName: "alcove-record-2026-07-08T14-32.json",
         keysUrl: URL.createObjectURL(new Blob(["{}"])),
-        keysFileName: "psilink-record-2026-07-08T14-32.keys.json",
+        keysFileName: "alcove-record-2026-07-08T14-32.keys.json",
       },
     });
 
@@ -2041,12 +2041,12 @@ describe("acceptor screen: run and completion", () => {
     );
     expect(links.map((link) => link.textContent)).toEqual([
       "results.csv",
-      "psilink-record-2026-07-08T14-32.json",
-      "psilink-record-2026-07-08T14-32.keys.json",
+      "alcove-record-2026-07-08T14-32.json",
+      "alcove-record-2026-07-08T14-32.keys.json",
     ]);
     expect(links[2].getAttribute("aria-label")).toBe(
       "Download verification keys (keep private): " +
-        "psilink-record-2026-07-08T14-32.keys.json",
+        "alcove-record-2026-07-08T14-32.keys.json",
     );
 
     // The timeline finishes whole (nothing current), and the ledger becomes
@@ -2093,9 +2093,9 @@ describe("acceptor screen: run and completion", () => {
         matchedRecordCount: 1847,
         record: {
           recordUrl: URL.createObjectURL(new Blob(["{}"])),
-          recordFileName: "psilink-record-2026-07-08T14-32.json",
+          recordFileName: "alcove-record-2026-07-08T14-32.json",
           keysUrl: URL.createObjectURL(new Blob(["{}"])),
-          keysFileName: "psilink-record-2026-07-08T14-32.keys.json",
+          keysFileName: "alcove-record-2026-07-08T14-32.keys.json",
         },
       });
       await expect
@@ -2170,9 +2170,9 @@ describe("acceptor screen: run and completion", () => {
       matchedRecordCount: 12,
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
-        recordFileName: "psilink-record.json",
+        recordFileName: "alcove-record.json",
         keysUrl: URL.createObjectURL(new Blob(["{}"])),
-        keysFileName: "psilink-record.keys.json",
+        keysFileName: "alcove-record.keys.json",
       },
     });
 
@@ -2200,9 +2200,9 @@ describe("acceptor screen: run and completion", () => {
       kind: "withheld" as const,
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
-        recordFileName: "psilink-record-x.json",
+        recordFileName: "alcove-record-x.json",
         keysUrl: URL.createObjectURL(new Blob(["{}"])),
-        keysFileName: "psilink-record-x.keys.json",
+        keysFileName: "alcove-record-x.keys.json",
       },
     });
 
@@ -2221,8 +2221,8 @@ describe("acceptor screen: run and completion", () => {
       document.querySelectorAll<HTMLAnchorElement>("a[download]"),
     ).map((link) => link.textContent);
     expect(links).toEqual([
-      "psilink-record-x.json",
-      "psilink-record-x.keys.json",
+      "alcove-record-x.json",
+      "alcove-record-x.keys.json",
     ]);
     // The settled receive row reports the withheld caveat.
     expect(
@@ -2240,9 +2240,9 @@ describe("acceptor screen: run and completion", () => {
       countReportedByPartner: false,
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
-        recordFileName: "psilink-record-x.json",
+        recordFileName: "alcove-record-x.json",
         keysUrl: URL.createObjectURL(new Blob(["{}"])),
-        keysFileName: "psilink-record-x.keys.json",
+        keysFileName: "alcove-record-x.keys.json",
       },
     });
 
@@ -2267,14 +2267,14 @@ describe("acceptor screen: run and completion", () => {
     // And the count it computed itself has no partner caveat, in the inset or
     // in the ledger's condensed restatement of it.
     expect(document.body.textContent).not.toContain(
-      "psilink does not check a count it is sent",
+      "Alcove does not check a count it is sent",
     );
     const links = Array.from(
       document.querySelectorAll<HTMLAnchorElement>("a[download]"),
     ).map((link) => link.textContent);
     expect(links).toEqual([
-      "psilink-record-x.json",
-      "psilink-record-x.keys.json",
+      "alcove-record-x.json",
+      "alcove-record-x.keys.json",
     ]);
     const ledger = document.querySelector(
       'aside[aria-label="This exchange"]',
@@ -2304,7 +2304,7 @@ describe("acceptor screen: run and completion", () => {
     await expect
       .element(
         page.getByText(
-          "Your partner ran the match and sent you this number. psilink does " +
+          "Your partner ran the match and sent you this number. Alcove does " +
             "not check a count it is sent against a run of its own, so the " +
             "figure is your partner's word for it.",
         ),
@@ -2411,7 +2411,7 @@ describe("acceptor screen: run and completion", () => {
         new Error(
           "shared secret expired at 2026-07-08T19:32:00.000Z; obtain a new invitation",
         ),
-        { psilinkRecoveryHintEmitted: true },
+        { alcoveRecoveryHintEmitted: true },
       ),
     });
 

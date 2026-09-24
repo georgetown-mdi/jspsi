@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Arguments } from "yargs";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
-import { generateSigningIdentity, setDiagnosticSink } from "@psilink/core";
+import { generateSigningIdentity, setDiagnosticSink } from "@alcove/core";
 
 import { handler } from "../../../src/commands/fingerprint";
 import { saveSigningIdentity } from "../../../src/signingIdentityFile";
@@ -26,7 +26,7 @@ let identityPath: string;
 snapshotDiagnosticSinkAndLevel();
 
 beforeEach(async () => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loglevel-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-loglevel-"));
   identityPath = path.join(dir, "signing-identity.json");
   saveSigningIdentity(
     identityPath,
@@ -53,7 +53,7 @@ async function runFingerprint(
 ): Promise<{ result: string; stderr: string }> {
   const argv = {
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     "identity-file": identityPath,
     force: false,
     ...extra,
@@ -68,7 +68,7 @@ async function runFingerprint(
   });
   const cwd = process.cwd();
   try {
-    process.chdir(dir); // hermetic: no ambient psilink.yaml is consulted
+    process.chdir(dir); // hermetic: no ambient alcove.yaml is consulted
     await handler(argv);
   } finally {
     process.chdir(cwd);

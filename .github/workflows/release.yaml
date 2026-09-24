@@ -13,7 +13,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      # Pins Node, installs from the lockfile, and builds @psilink/core.
+      # Pins Node, installs from the lockfile, and builds @alcove/core.
       # Uncached: this job is the gate the publish job below depends on, so what
       # it tests is an install of the lockfile rather than a cache entry any run
       # in the repository could have written.
@@ -80,7 +80,7 @@ jobs:
         run: sha256sum -c lib/openmined-psi.js-*.tgz.sha256
 
       # The check is dependency-free, so a plain pinned Node suffices -- no npm
-      # ci or @psilink/core build (the ./.github/actions/setup prologue) needed.
+      # ci or @alcove/core build (the ./.github/actions/setup prologue) needed.
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
@@ -104,7 +104,7 @@ jobs:
       # disagree hands the partner a `docker run` line for a different build.
       - name: Check the release version against the pushed tag
         env:
-          PSILINK_TAG: ${{ github.ref_name }}
+          ALCOVE_TAG: ${{ github.ref_name }}
         run: npm run check:release-version
 
       - name: Set up QEMU
@@ -144,7 +144,7 @@ jobs:
           context: .
           load: true
           push: false
-          tags: psi-link:release-candidate
+          tags: alcove:release-candidate
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -170,7 +170,7 @@ jobs:
           file: Dockerfile.fips
           load: true
           push: false
-          tags: psi-link:fips-release-candidate
+          tags: alcove:fips-release-candidate
           cache-from: type=gha,scope=fips
           cache-to: type=gha,mode=max,scope=fips
 
@@ -194,7 +194,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
-          image-ref: psi-link:release-candidate
+          image-ref: alcove:release-candidate
           scanners: vuln
           vuln-type: os,library
           severity: HIGH,CRITICAL
@@ -210,7 +210,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
-          image-ref: psi-link:fips-release-candidate
+          image-ref: alcove:fips-release-candidate
           scanners: vuln
           vuln-type: os,library
           severity: HIGH,CRITICAL
@@ -259,7 +259,7 @@ jobs:
       # module? This runs the copy INSIDE the image -- the same file the
       # variant's entrypoint runs at every container start -- against the amd64
       # candidate loaded above, and it fails unless fips.so is mapped into the
-      # process, the five psilink call shapes (AES-256-GCM, HKDF-SHA-256,
+      # process, the five Alcove call shapes (AES-256-GCM, HKDF-SHA-256,
       # HMAC-SHA-256, SHA-256, P-256 ECDH) all succeed, and both an MD5 digest
       # and a below-minimum RSA keygen -- which no FIPS provider serves -- fail
       # beside them. docs/COMPLIANCE.md frames that engagement as measured
@@ -282,7 +282,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm --entrypoint node \
-            psi-link:fips-release-candidate /app/fips-probe/image-engagement.mjs
+            alcove:fips-release-candidate /app/fips-probe/image-engagement.mjs
 
       - name: Extract image metadata
         id: meta
@@ -304,16 +304,16 @@ jobs:
       - name: Derive the FIPS variant's tags
         id: fips_meta
         env:
-          PSILINK_TAG: ${{ github.ref_name }}
+          ALCOVE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          version="${PSILINK_TAG#v}"
+          version="${ALCOVE_TAG#v}"
           {
-            echo "tags<<PSILINK_FIPS_TAGS"
+            echo "tags<<ALCOVE_FIPS_TAGS"
             echo "ghcr.io/georgetown-mdi/alcove:${version}-fips"
             echo "ghcr.io/georgetown-mdi/alcove:${version%.*}-fips"
             echo "ghcr.io/georgetown-mdi/alcove:latest-fips"
-            echo "PSILINK_FIPS_TAGS"
+            echo "ALCOVE_FIPS_TAGS"
           } >>"$GITHUB_OUTPUT"
 
       # Ahead of the first push rather than after the last one: every step after
@@ -378,7 +378,7 @@ jobs:
         run: |
           set -euo pipefail
           cosign verify \
-            --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+            --certificate-identity-regexp '^https://github\.com/georgetown-mdi/alcove/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             ghcr.io/georgetown-mdi/alcove@${{ steps.build.outputs.digest }}
 
@@ -424,7 +424,7 @@ jobs:
         run: |
           set -euo pipefail
           cosign verify \
-            --certificate-identity-regexp '^https://github\.com/georgetown-mdi/jspsi/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
+            --certificate-identity-regexp '^https://github\.com/georgetown-mdi/alcove/\.github/workflows/release\.yaml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             ghcr.io/georgetown-mdi/alcove@${{ steps.build_fips.outputs.digest }}
 
@@ -451,10 +451,10 @@ jobs:
 
       - name: Stamp the launchers with the signed digest
         env:
-          PSILINK_DIGEST: ${{ needs.publish.outputs.digest }}
+          ALCOVE_DIGEST: ${{ needs.publish.outputs.digest }}
         run: |
           set -euo pipefail
-          PSILINK_PLACEHOLDER='@@PSILINK_IMAGE_DIGEST@@'
+          ALCOVE_PLACEHOLDER='@@ALCOVE_IMAGE_DIGEST@@'
           mkdir -p launcher-assets
 
           # A whole-line replacement, guarded on both sides. A launcher that no
@@ -475,34 +475,34 @@ jobs:
               "$source_file" >"launcher-assets/$(basename "$source_file")"
           }
 
-          stamp support/windows-network-filedrop/start-psilink.sh \
-            "PSILINK_IMAGE_DIGEST='@@PSILINK_IMAGE_DIGEST@@'" \
-            "PSILINK_IMAGE_DIGEST='${PSILINK_DIGEST}'"
-          stamp support/windows-network-filedrop/Start-Psilink.ps1 \
-            "\$PsilinkImageDigest = '@@PSILINK_IMAGE_DIGEST@@'" \
-            "\$PsilinkImageDigest = '${PSILINK_DIGEST}'"
+          stamp support/windows-network-filedrop/start-alcove.sh \
+            "ALCOVE_IMAGE_DIGEST='@@ALCOVE_IMAGE_DIGEST@@'" \
+            "ALCOVE_IMAGE_DIGEST='${ALCOVE_DIGEST}'"
+          stamp support/windows-network-filedrop/Start-Alcove.ps1 \
+            "\$AlcoveImageDigest = '@@ALCOVE_IMAGE_DIGEST@@'" \
+            "\$AlcoveImageDigest = '${ALCOVE_DIGEST}'"
 
-          # Start-Psilink.ps1 dot-sources this one for its path resolution, so
+          # Start-Alcove.ps1 dot-sources this one for its path resolution, so
           # the three travel as a unit. It carries no stamp of its own.
-          cp support/windows-network-filedrop/Setup-PsilinkFileDrop.ps1 launcher-assets/
+          cp support/windows-network-filedrop/Setup-AlcoveFileDrop.ps1 launcher-assets/
 
-          if grep -R -l -F -- "${PSILINK_PLACEHOLDER}" launcher-assets; then
+          if grep -R -l -F -- "${ALCOVE_PLACEHOLDER}" launcher-assets; then
             echo "::error::a stamped launcher still carries the placeholder" >&2
             exit 1
           fi
-          grep -F -- "${PSILINK_DIGEST}" launcher-assets/start-psilink.sh >/dev/null
-          grep -F -- "${PSILINK_DIGEST}" launcher-assets/Start-Psilink.ps1 >/dev/null
+          grep -F -- "${ALCOVE_DIGEST}" launcher-assets/start-alcove.sh >/dev/null
+          grep -F -- "${ALCOVE_DIGEST}" launcher-assets/Start-Alcove.ps1 >/dev/null
 
       # A draft rather than a published release: the maintainer's own checklist
       # step still writes the notes and attaches the SBOM (docs/RELEASES.md).
       - name: Attach the launchers to the release
         env:
           GH_TOKEN: ${{ github.token }}
-          PSILINK_TAG: ${{ github.ref_name }}
+          ALCOVE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if ! gh release view "$PSILINK_TAG" >/dev/null 2>&1; then
-            gh release create "$PSILINK_TAG" --draft --verify-tag \
-              --title "PSI-Link $PSILINK_TAG" --notes ''
+          if ! gh release view "$ALCOVE_TAG" >/dev/null 2>&1; then
+            gh release create "$ALCOVE_TAG" --draft --verify-tag \
+              --title "Alcove $ALCOVE_TAG" --notes ''
           fi
-          gh release upload "$PSILINK_TAG" launcher-assets/* --clobber
+          gh release upload "$ALCOVE_TAG" launcher-assets/* --clobber

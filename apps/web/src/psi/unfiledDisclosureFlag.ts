@@ -24,19 +24,19 @@
  * still runs, unlocked, and the loss that admits is stated with the limit above.
  */
 
-import { getLogger, parseBoundedJson } from "@psilink/core";
+import { getLogger, parseBoundedJson } from "@alcove/core";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
 const log = getLogger("unfiledDisclosureFlag");
 
 /** The localStorage key the flagged exchange ids are written under. */
-const STORAGE_KEY = "psilink-unfiled-disclosure";
+const STORAGE_KEY = "alcove-unfiled-disclosure";
 
 /** The Web Locks name held across a write's read and its write back. Namespaced
  * like every other lock this app takes, so it collides with no other same-origin
  * name. */
-const WRITE_LOCK_NAME = "psilink-unfiled-disclosure-write";
+const WRITE_LOCK_NAME = "alcove-unfiled-disclosure-write";
 
 /** The stored value's schema version; a value under any other version is treated
  * as absent (a forward- or backward-incompatible value is discarded, not

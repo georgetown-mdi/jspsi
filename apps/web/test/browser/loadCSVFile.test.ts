@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import Papa from "papaparse";
 
-import { loadCSVFile } from "@psilink/core";
+import { loadCSVFile } from "@alcove/core";
 
 // Pin the no-silent-truncation invariant directly. loadCSVFile parses inline
 // (not `worker: true`; see file.ts), but PapaParse still streams a local File in

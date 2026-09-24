@@ -237,9 +237,9 @@ const noUnmarkedOperatorPath = [
 // werift is loaded at the point of use (the deferred import in
 // apps/cli/src/connection/webrtc/weriftPeer.ts), never statically: the CLI
 // bundles to one CommonJS file whose external requires all run at startup, so
-// a static load puts werift's cost on every invocation -- `psilink --version`
+// a static load puts werift's cost on every invocation -- `alcove --version`
 // included -- for a channel most runs never open. Measured on the built
-// bundle: `psilink --version` fell from about 551 ms to about 250 ms once the
+// bundle: `alcove --version` fell from about 551 ms to about 250 ms once the
 // import was deferred, roughly 0.3 s; re-measuring this tree's built bundle
 // with a static import restored reproduces the same roughly 0.3 s delta.
 // Type-only imports and re-exports carry no runtime cost and are exempt. A
@@ -360,8 +360,8 @@ export default tseslint.config(
     },
   },
   {
-    // Force all parsing of operator config and credential files (psilink.yaml,
-    // .psilink.key, the signing identity) through the single hardened chokepoint.
+    // Force all parsing of operator config and credential files (alcove.yaml,
+    // .alcove.key, the signing identity) through the single hardened chokepoint.
     // The chokepoint now lives in packages/core/src/sensitiveFile.ts (promoted
     // from the CLI); apps/cli/src/sensitiveFile.ts is a thin re-export the CLI
     // call sites import. The raw parsers leak source bytes -- a credential -- into
@@ -562,7 +562,7 @@ export default tseslint.config(
   },
   {
     // The signaling broker's share of the three bans above. It reaches their
-    // chokepoints through the `@psilink/core` dependency this workspace already
+    // chokepoints through the `@alcove/core` dependency this workspace already
     // declares (packages/peerjs-broker/package.json), so unlike the core and CLI
     // blocks it carves out no exemption of its own: it owns no chokepoint.
     //
@@ -591,7 +591,7 @@ export default tseslint.config(
           selector:
             "CallExpression[callee.object.name='YAML'][callee.property.name=/^(parse|parseDocument|parseAllDocuments)$/]",
           message:
-            "Parse operator/credential files through @psilink/core (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and the warning channel. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
+            "Parse operator/credential files through @alcove/core (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and the warning channel. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
         ...noRawErrorAtDisplaySink,
         ...noDisplayableAsErrorArgument,
@@ -599,7 +599,7 @@ export default tseslint.config(
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
       //
-      // The `@psilink/core` entry beside it holds this workspace to the
+      // The `@alcove/core` entry beside it holds this workspace to the
       // `./untrusted-text` subpath. The broker is a network-facing process, so
       // its runtime closure is the set of packages an advisory can force a
       // redeploy of it over; the package root reaches every dependency core
@@ -615,12 +615,12 @@ export default tseslint.config(
               name: "yaml",
               importNames: ["parse", "parseDocument", "parseAllDocuments"],
               message:
-                "Parse operator/credential files through @psilink/core; do not import yaml's raw parsers directly.",
+                "Parse operator/credential files through @alcove/core; do not import yaml's raw parsers directly.",
             },
             {
-              name: "@psilink/core",
+              name: "@alcove/core",
               message:
-                "Import the helpers this workspace uses from @psilink/core/untrusted-text; the package root pulls core's whole dependency set into a network-facing process's runtime closure. A helper the subpath lacks is added to packages/core/src/untrustedText.ts.",
+                "Import the helpers this workspace uses from @alcove/core/untrusted-text; the package root pulls core's whole dependency set into a network-facing process's runtime closure. A helper the subpath lacks is added to packages/core/src/untrustedText.ts.",
             },
           ],
           patterns: crossWorkspaceImportBans.packages,
@@ -635,7 +635,7 @@ export default tseslint.config(
           object: "JSON",
           property: "parse",
           message:
-            "Parse a peer's signaling frame through @psilink/core's parseBoundedJson; it structurally bounds the body before JSON.parse so a pathological object/array cannot abort the broker every peer shares. A trusted parse: eslint-disable-next-line with a one-line justification.",
+            "Parse a peer's signaling frame through @alcove/core's parseBoundedJson; it structurally bounds the body before JSON.parse so a pathological object/array cannot abort the broker every peer shares. A trusted parse: eslint-disable-next-line with a one-line justification.",
         },
       ],
     },

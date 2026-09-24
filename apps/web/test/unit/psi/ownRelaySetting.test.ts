@@ -10,7 +10,7 @@ import {
 
 import type { RelayLocator } from "@psi/transport/rendezvous";
 
-const STORAGE_KEY = "psilink-own-relay";
+const STORAGE_KEY = "alcove-own-relay";
 
 /** A localStorage stand-in over a Map, returned so a test reads what was
  * written. */

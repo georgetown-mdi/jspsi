@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   fetchMountedConfiguration,

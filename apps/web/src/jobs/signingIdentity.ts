@@ -7,7 +7,7 @@ import {
   parseCertificate,
   parseSensitiveJson,
   recordedVersionMatches,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   WORKDIR_MODE,
@@ -43,7 +43,7 @@ import type { JobSigningIdentityLocation } from "./intentSchemas";
  * picker. Lives in the mount, not a job workdir, since the identity
  * outlives any one job.
  */
-export const SIGNING_IDENTITY_FILE_NAME = ".psilink-signing-identity.json";
+export const SIGNING_IDENTITY_FILE_NAME = ".alcove-signing-identity.json";
 
 /**
  * The exported certificate's name in the same mount. The PUBLIC half only: the
@@ -51,7 +51,7 @@ export const SIGNING_IDENTITY_FILE_NAME = ".psilink-signing-identity.json";
  * and the export is not dot-prefixed because it is the artifact the operator is
  * meant to find and hand to their partner.
  */
-export const SIGNING_CERTIFICATE_FILE_NAME = "psilink-certificate.json";
+export const SIGNING_CERTIFICATE_FILE_NAME = "alcove-certificate.json";
 
 /**
  * A fixed-name file's absolute path in the console's mounted data root,
@@ -145,7 +145,7 @@ export function signingIdentityTargetExists(identityPath: string): boolean {
  * The document holds that key, so it is parsed through the sensitive-file
  * chokepoint, which reports path-only.
  *
- * Both loaders are driven over one set of documents (`@psilink/core/testing`,
+ * Both loaders are driven over one set of documents (`@alcove/core/testing`,
  * this leg `apps/web/test/unit/jobs/boundIdentityParity.test.ts`), so a
  * document the CLI comes to refuse is not left reported here as a name.
  */
@@ -268,7 +268,7 @@ const FINGERPRINT_SIGKILL_GRACE_MS = 5_000;
  *   and every path is server-composed, so the cause is a condition in the
  *   console's mounted working directory (an unreadable or unparsable
  *   identity file, a create/delete race, a failed certificate-export
- *   write, or a malformed default `psilink.yaml`; see
+ *   write, or a malformed default `alcove.yaml`; see
  *   {@link runSigningFingerprint}) -- not distinguishable here since stderr
  *   is discarded, so all are reported as one category.
  * - `syncing`: no child ran. Creating the identity would have written the
@@ -340,7 +340,7 @@ export function reconcileFingerprintExit(
  * value-bearing flag is a single `--flag=value` token so a `-`-leading
  * label cannot be misparsed by yargs as its own flag.
  *
- * No `--config-file`: the CLI falls back to `./psilink.yaml` relative to
+ * No `--config-file`: the CLI falls back to `./alcove.yaml` relative to
  * the child's cwd, bounded by the pinned `cwd` ({@link runSigningFingerprint}).
  * No `--force`.
  *
@@ -378,7 +378,7 @@ export function fingerprintArgv(args: {
  *
  * The child's cwd is `dataRoot` rather than inherited, and rather than the
  * identity's own directory: an inherited cwd would let an unmounted
- * `psilink.yaml` decide the CLI's default config lookup, and the identity's
+ * `alcove.yaml` decide the CLI's default config lookup, and the identity's
  * directory is the operator's secrets mount whenever they configured a
  * location of their own, which would make a document there the child's
  * config. The data root is created if missing, owner-only.

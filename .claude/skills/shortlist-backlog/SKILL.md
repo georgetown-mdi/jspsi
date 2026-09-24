@@ -1,7 +1,7 @@
 ---
 name: shortlist-backlog
-description: Pick what to work on next from the psilink project boards without pulling board listings and issue bodies into the calling session -- one Sonnet agent scans boards 9 and 10 and returns a prioritized shortlist of candidate issues. Use at the start of an orchestration session or whenever choosing the next issue(s), e.g. "what should we pick up next", "shortlist the backlog", "triage candidates for the next batch".
-compatibility: Requires Node.js, gh auth, and the .claude/scripts board scripts in the psilink repository.
+description: Pick what to work on next from the Alcove project boards without pulling board listings and issue bodies into the calling session -- one Sonnet agent scans boards 9 and 10 and returns a prioritized shortlist of candidate issues. Use at the start of an orchestration session or whenever choosing the next issue(s), e.g. "what should we pick up next", "shortlist the backlog", "triage candidates for the next batch".
+compatibility: Requires Node.js, gh auth, and the .claude/scripts board scripts in the Alcove repository.
 ---
 
 # Shortlist the backlog
@@ -22,7 +22,7 @@ Spawn ONE read-only `general-purpose` agent with `model: "sonnet"` (every
 spawn passes an explicit model) and this prompt:
 
 ```
-Read-only backlog triage for psilink (cwd: the repo root). Do not edit any
+Read-only backlog triage for alcove (cwd: the repo root). Do not edit any
 file or board item.
 
 Scan the two GitHub project boards with the repo scripts (run any with no

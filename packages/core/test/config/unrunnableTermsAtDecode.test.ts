@@ -155,7 +155,7 @@ test("a candidate set under the count-only algorithm is refused at the decode", 
 test("a candidate set under a strategy off the allowlist is refused at the parse", () => {
   // Both shipped strategies resolve a candidate set, so the allowlist half is
   // driven by standing one of them down, as the round's own gate is driven
-  // (psiLink.test.ts). It is the entry a strategy added later starts from.
+  // (link.test.ts). It is the entry a strategy added later starts from.
   const shipped = CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade;
   CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade = false;
   try {

@@ -8,7 +8,7 @@ import {
   MIN_CHUNK_RESIDENT_BYTES,
   describeFrameStructureRefusal,
   scanFrameStructure,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { classifyInboundValue, concatChunks, unpackFrame } from "./peerjsWire";
 
@@ -20,7 +20,7 @@ import { classifyInboundValue, concatChunks, unpackFrame } from "./peerjsWire";
  * inbound bound"); the web half wraps PeerJS's own reassembly internals
  * (apps/web/src/psi/transport/boundedReassembly.ts). Both enforce the SAME
  * constants and the SAME BinaryPack structural pre-scan, which is why those
- * live once in `@psilink/core` (connection/binaryPackBounds.ts) rather than
+ * live once in `@alcove/core` (connection/binaryPackBounds.ts) rather than
  * beside either transport.
  *
  * Where this differs from the web half, and why: the CLI owns its reassembler

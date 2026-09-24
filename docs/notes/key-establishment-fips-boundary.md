@@ -110,7 +110,7 @@ In the order the reasons matter.
 
 **1. WebCrypto exposes no SP 800-56C two-step KDA service.** `crypto.subtle`
 offers ECDH, HKDF (RFC 5869), HMAC, SHA-2, and AES-GCM. There is no API by
-which psilink could invoke a module's `KDA TwoStep` service, so the rejected
+which Alcove could invoke a module's `KDA TwoStep` service, so the rejected
 option's two-step derivation would be hand-composed in JavaScript from HMAC
 calls regardless -- while naming a module service that never runs. This is the
 decisive point: the rejected option's central advantage does not survive
@@ -226,7 +226,7 @@ parameter ranges are in
 **The composition disclosure is required on either path**, and it outlives the
 migration: a protocol composed in JavaScript above primitive calls yields
 validated primitives, never a validated protocol. CMVP validates modules, not
-protocols; there is no certificate under which psilink's handshake is the
+protocols; there is no certificate under which Alcove's handshake is the
 validated artifact. Migrating the curve is what lets each operation sit inside a
 boundary; it does not put the composition inside one, and no wording makes it do
 so.

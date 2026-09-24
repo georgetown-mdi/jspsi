@@ -316,7 +316,7 @@ test("decodeInvitation refuses a transform pattern declared as an object", async
 test("decodeInvitation normalizes snake_case transform.params keys to camelCase", async () => {
   // A hand-crafted token can hold snake_case params (the params record is
   // z.unknown() content with no key-form constraint). The decode chokepoint folds
-  // them to camelCase, so a third-party token converges with a psilink-minted one
+  // them to camelCase, so a third-party token converges with an alcove-minted one
   // and the standardization runtime (which reads params.inputFormat) sees them.
   const token = {
     ...baseToken,
@@ -585,7 +585,7 @@ test("decodeInvitation refuses a name-class character in the disclosed set", asy
   // The token's disclosed column list names the columns the acceptor will
   // receive, and an acceptance writes it into that operator's configuration as
   // `expected_payload_columns` -- a file read by the operator's editor and by
-  // tooling that is not psilink, where no display escaping of ours stands. So
+  // tooling that is not Alcove, where no display escaping of ours stands. So
   // the list holds the same name shape the terms' own payload names do, at
   // decode, before the token reaches a consent surface. A tab, a C1 control,
   // and a bidi override, written as escapes.
@@ -732,7 +732,7 @@ test("a disclosed column beside an empty send decodes where the partner gets no 
   // The control the output gate exists for, measured against the mint rule
   // itself: assertPayloadSendDisclosed admits an empty `payload.send` beside
   // disclosing metadata when `shareWithPartner` is false, since the run then
-  // transmits no column at all, so a psilink mint stamps exactly this pair and
+  // transmits no column at all, so an Alcove mint stamps exactly this pair and
   // decode must keep taking it.
   const decoded = await decodeInvitation(
     await encodeRaw({
@@ -1056,7 +1056,7 @@ const CHANNEL_SHAPES: Record<
       channel: "webrtc",
       host: "signal.example",
       port: 9000,
-      path: "/psilink",
+      path: "/alcove",
     },
   },
   sftp: {
@@ -1312,7 +1312,7 @@ test.each(splitRetainEndpoints)(
 test.each(splitRetainEndpoints)(
   "encodeInvitation refuses to mint a split $name endpoint with no retain declaration",
   async ({ endpoint }) => {
-    // The mint-only half of the asymmetry: psilink never EMITS a rendezvous whose
+    // The mint-only half of the asymmetry: Alcove never EMITS a rendezvous whose
     // permanent transcript is readable from the locator's shape alone, since any
     // artifact composed from the declaration -- an accept kit's file-handling
     // disclosure -- would then state nothing. Held at this one call site rather
@@ -1328,7 +1328,7 @@ test.each(splitRetainEndpoints)(
   "the same undeclared split $name token still decodes and summarizes as retaining",
   async ({ endpoint }) => {
     // The decode half of the very shape the mint above refuses: a foreign or
-    // older implementation may emit it, psilink handles it correctly today, and
+    // older implementation may emit it, Alcove handles it correctly today, and
     // tightening the shared schema would reject it on a public protocol surface
     // for nothing. Absence stays "nothing declared" rather than a contradicted
     // negative, so neither the mint rule nor the false-declaration refusal may
@@ -2007,7 +2007,7 @@ test("decodes a large but legitimate invitation at the upper end of real size", 
       channel: "webrtc",
       host: "h".repeat(MAX_ENDPOINT_HOST_LENGTH),
       port: 9000,
-      path: "/psilink",
+      path: "/alcove",
     },
   };
   const decoded = await decodeInvitation(await encodeInvitation(token));

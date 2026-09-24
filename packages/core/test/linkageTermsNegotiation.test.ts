@@ -765,7 +765,7 @@ test("a partner reference with an ANSI/control sequence is neutralized", () => {
   expect(msg).toBeDefined();
   // The raw ESC is gone (no terminal injection); it survives as the display
   // boundary's own visible marker rather than as the escape's `\xHH`, which is
-  // what a control character psilink itself composed renders to.
+  // what a control character Alcove itself composed renders to.
   expect(rendered(msg!)).not.toContain("\x1b");
   expect(rendered(msg!)).not.toContain("\\x1b");
   expect(rendered(msg!)).toContain(controlCharacterMarker(0x1b));
@@ -1185,7 +1185,7 @@ test.each([
     // The schema's own floor and ceiling on a party identity, applied where the
     // control-character rule already is. Substituted unchecked, either value fails
     // the re-check at the end of the derivation instead, whose account is the
-    // invitation's -- so the operator would be told psilink cannot accept its
+    // invitation's -- so the operator would be told Alcove cannot accept its
     // partner's invitation over a name it supplied itself.
     let thrown: unknown;
     try {

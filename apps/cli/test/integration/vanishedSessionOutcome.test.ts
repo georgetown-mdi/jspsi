@@ -8,8 +8,8 @@ import {
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
   TransportOperationStalledError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+} from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { SFTP_HEARTBEAT_INTERVAL_MS } from "../../src/connection/sftpHeartbeat";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
@@ -206,7 +206,7 @@ async function dialSecondConnection(
   return {
     bytesFromServer: () => received,
     sendIdentification: () => {
-      socket.write("SSH-2.0-psilinkprobe\r\n");
+      socket.write("SSH-2.0-alcoveprobe\r\n");
     },
     close: () => socket.destroy(),
   };

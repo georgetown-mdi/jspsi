@@ -12,7 +12,7 @@ import {
 } from "./eslint-strip-type-aware-layer.mjs";
 
 // Coverage of the two bans that hold every diagnostic line to a NAMED logger
-// built through @psilink/core's getLogger: the emit selector shared by both
+// built through @alcove/core's getLogger: the emit selector shared by both
 // config files (noBareRootLoglevelEmit in eslint.boundaries.mjs, applied to
 // packages/core/src, apps/cli/src and apps/web's src/ and server/), and the
 // import ban apps/web adds beside it, which refuses loglevel's default export --
@@ -227,7 +227,7 @@ describe("the bare-root-logger bans", { timeout: 60_000 }, () => {
     ],
     [
       "a reach into the other app",
-      'import { protocol } from "psilink";\nexport const p = protocol;\n',
+      'import { protocol } from "alcove";\nexport const p = protocol;\n',
     ],
   ]) {
     it(`refuses ${shape} in the server tree`, async () => {
@@ -251,7 +251,7 @@ describe("the bare-root-logger bans", { timeout: 60_000 }, () => {
 
   it("leaves a named logger's emit alone", async () => {
     const source =
-      'import { getLogger } from "@psilink/core";\nconst log = getLogger("probe");\nlog.warn("x");\n';
+      'import { getLogger } from "@alcove/core";\nconst log = getLogger("probe");\nlog.warn("x");\n';
     for (const filePath of [...WEB_BANNED, CORE_SRC, CLI_SRC]) {
       expect(
         await emitHits(filePath, source),

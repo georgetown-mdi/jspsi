@@ -12,7 +12,7 @@ Two implementations speak this wire and must agree on every line of it: the web
 app, which runs the PeerJS client in the browser (`apps/web/src/psi/`), and the
 CLI, which drives werift's `RTCPeerConnection` directly and hand-writes both the
 broker client and the framing (`apps/cli/src/connection/webrtc/`). None of it is
-psilink's own protocol to define -- it is PeerJS 1.5.5's, measured on the wire
+Alcove's own protocol to define -- it is PeerJS 1.5.5's, measured on the wire
 and recorded here because a second implementation has to match it exactly. The
 library choice and the alternatives weighed are in
 [cli-webrtc-stack.md](../notes/cli-webrtc-stack.md); the internal assumptions that
@@ -82,7 +82,7 @@ page it was served over and the CLI has no page for:
 
 Those defaults are one implementation's, not the wire's: a browser peer resolves
 an absent `path` to the web app's own broker mount (`/api/`) rather than to `/`.
-An invitation endpoint therefore holds the mount point resolved -- `psilink
+An invitation endpoint therefore holds the mount point resolved -- `alcove
 invite` records the path it will itself dial, `/` included, even where the
 `ws:`/`wss:` URL wrote none -- so a locator crossing between the two
 applications leaves no field for the consumer to fill in the mount point from a
@@ -118,7 +118,7 @@ against the configured host once more before the socket is constructed, so an
 address naming another authority opens nothing.
 
 The browser acceptor applies the same two delimiter rules -- one
-implementation, shared from `@psilink/core` -- to the `host` and `path` of the
+implementation, shared from `@alcove/core` -- to the `host` and `path` of the
 invitation endpoint it dials, and refuses before it constructs a peer. It needs
 them for a different reason than the CLI: the PeerJS client assembles its
 address by concatenating scheme, `host`, `:`, `port`, `path` and `peerjs?key=`,
@@ -222,7 +222,7 @@ in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#webrtc-data-channel-inbound-bound).
 
 ### Outbound encoding
 
-Both parties encode an outbound frame with psilink's own BinaryPack encoder
+Both parties encode an outbound frame with Alcove's own BinaryPack encoder
 (`encodeBinaryPackValue`, `packages/core/src/connection/binaryPackEncode.ts`)
 rather than with `peerjs-js-binarypack`'s `pack`. It walks a frame's arrays and
 objects with an explicit stack, so a frame's element count is bounded by memory;
@@ -234,7 +234,7 @@ buffering in place
 (`apps/web/src/psi/transport/iterativePacking.ts`).
 
 The wire is unchanged. The encoder emits the bytes the pinned packer emits,
-marker for marker, for every value kind psilink sends:
+marker for marker, for every value kind Alcove sends:
 
 - null and undefined (`0xc0`), booleans (`0xc2`/`0xc3`).
 - Integers on the packer's own ladder -- fixint, then the first unsigned or

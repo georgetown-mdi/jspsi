@@ -10,7 +10,7 @@ import { createElement } from "react";
 // the isolation below is measured on the styles that ship.
 import "@mantine/core/styles.css";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import {
   demotionNotice,
@@ -33,7 +33,7 @@ import { createAppMount } from "./renderApp";
 import { visualOrderWithin } from "./visualOrder";
 
 import type { AcquiredCsv } from "@psi/inviterEditor";
-import type { Metadata } from "@psilink/core";
+import type { Metadata } from "@alcove/core";
 
 // The inviter's step 2 states what the partner will receive in two voices at
 // once -- the chip list a sighted operator reads and the live region a screen

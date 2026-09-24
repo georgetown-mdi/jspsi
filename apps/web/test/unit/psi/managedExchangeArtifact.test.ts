@@ -4,7 +4,7 @@ import {
   getDefaultLinkageTerms,
   parseExchangeSpec,
   parseSensitiveYaml,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
@@ -27,7 +27,7 @@ import type {
   NewManagedExchange,
   RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 /** A record built from `fields` and narrowed to the runnable shape: every fixture
  * here is built with a shared secret, and the export paths take the record type
@@ -209,7 +209,7 @@ describe("CLI separability", () => {
       newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
     );
     const artifact = encodeManagedExchangeArtifact(record);
-    // The embedded half is valid psilink.yaml text: parse it through the CLI's own
+    // The embedded half is valid alcove.yaml text: parse it through the CLI's own
     // exchange-file parse path.
     const parsed = parseExchangeSpec(
       parseSensitiveYaml(artifact.exchangeDocument, "test"),
@@ -220,12 +220,12 @@ describe("CLI separability", () => {
     expect(artifact.exchangeDocument).not.toContain(record.sharedSecret);
   });
 
-  test("the key block is a lift-out .psilink.key: exact CLI field names, camelCase", () => {
+  test("the key block is a lift-out .alcove.key: exact CLI field names, camelCase", () => {
     const record = runnableRecord(
       newExchange({ expires: "2026-04-06T14:00:00.000Z" }),
     );
     const artifact = encodeManagedExchangeArtifact(record);
-    // The .psilink.key file the CLI reads is camelCase JSON (sharedSecret, expires),
+    // The .alcove.key file the CLI reads is camelCase JSON (sharedSecret, expires),
     // parsed without a snake_case conversion, so the key block's JSON keys must be
     // exactly those names -- the block lifts out verbatim into a valid key file with
     // no renaming. Pin the literal key names, not just the values.
@@ -353,18 +353,18 @@ describe("rejection of malformed or tampered imports", () => {
 
   test("an unrecognized artifactVersion is rejected", () => {
     const artifact = JSON.parse(goodBytes());
-    artifact.artifactVersion = "psilink-managed-exchange-backup/v3";
+    artifact.artifactVersion = "alcove-managed-exchange-backup/v4";
     expect(() =>
       parseManagedExchangeArtifact(JSON.stringify(artifact)),
     ).toThrow();
   });
 
   test("an artifact written under the previous version is refused whole", () => {
-    // A v1 file predates the operator's answer to a standing condition. The
+    // A v2 file predates the operator's answer to a standing condition. The
     // version is what this build reads it on, so an older file is refused entire
     // rather than imported as a record, exactly as an older stored record is.
     const artifact = JSON.parse(goodBytes());
-    artifact.artifactVersion = "psilink-managed-exchange-backup/v1";
+    artifact.artifactVersion = "alcove-managed-exchange-backup/v2";
     expect(() =>
       importManagedExchangeArtifact(JSON.stringify(artifact)),
     ).toThrow();

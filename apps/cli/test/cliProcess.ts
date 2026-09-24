@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { stopChild } from "./stopChild";
 
 /**
- * Runs `psilink` as a child process -- the command line an operator types, from
+ * Runs `alcove` as a child process -- the command line an operator types, from
  * its own argv to its own exit code -- rather than calling the exported handler
  * directly: only a real process exposes `process.exit`'s exit code, the
  * `accept` confirmation prompt on stdin, and startup environment such as the
@@ -46,7 +46,7 @@ export interface RunningCli {
 }
 
 /**
- * Spawn one `psilink` invocation. `timeoutMs` kills a run that outlives it and
+ * Spawn one `alcove` invocation. `timeoutMs` kills a run that outlives it and
  * reports `timedOut`, so a stalled party fails its leg with a stated cause.
  *
  * `stdin`, when given, is written to the child and the pipe is left open: a

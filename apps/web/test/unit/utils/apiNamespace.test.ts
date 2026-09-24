@@ -178,7 +178,7 @@ describe("the /api refusal on a deployment without the job API", () => {
 describe("the /api refusal on a deployment with the job API enabled", () => {
   beforeEach(() => {
     vi.stubEnv("VITE_DEPLOYMENT_PROFILE", "console");
-    vi.stubEnv("JOB_DATA_ROOT", "/var/lib/psilink-jobs");
+    vi.stubEnv("JOB_DATA_ROOT", "/var/lib/alcove-jobs");
   });
 
   test.each([

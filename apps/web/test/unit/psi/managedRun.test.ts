@@ -5,7 +5,7 @@ import {
   OutboundDisclosureRefusalError,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -770,7 +770,7 @@ describe("remapLapsedRunFailure: a bound that lapses mid-run", () => {
   function taggedExpiryError(): Error {
     return Object.assign(
       new Error("shared secret expired during the key-exchange round-trip"),
-      { psilinkRecoveryHintEmitted: true },
+      { alcoveRecoveryHintEmitted: true },
     );
   }
 
@@ -809,7 +809,7 @@ describe("remapLapsedRunFailure: a bound that lapses mid-run", () => {
     // single-pass reply-cap safety check mid-data-exchange -- so a bound that lapses
     // during a long run satisfies the tag and the lapse alike, unlike the
     // handshake-time expiry the re-map exists for. Re-mapping it would report a
-    // defect in psilink as a benign expiry and offer a fresh invitation, which
+    // defect in Alcove as a benign expiry and offer a fresh invitation, which
     // cannot fix it.
     expect(
       remapLapsedRunFailure(

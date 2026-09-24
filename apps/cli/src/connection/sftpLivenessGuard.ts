@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import {
   redactAndSanitizeForDisplay,
   TransportOperationStalledError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { fittedCauseLink } from "./causeLink";
 
@@ -20,7 +20,7 @@ import { fittedCauseLink } from "./causeLink";
  * progress-based idle window ({@link createBoundedPutSource}), so a
  * large-but-progressing upload is not false-failed. Covers only this adapter: the
  * local-filesystem adapter has no per-operation bound here and relies on the
- * whole-exchange budget in `FileSyncConnection` (`@psilink/core`) instead.
+ * whole-exchange budget in `FileSyncConnection` (`@alcove/core`) instead.
  *
  * Also holds the non-fatal slow-operation warning
  * ({@link withSlowOperationWarning}) -- observability, not a control, layered
@@ -82,7 +82,7 @@ export function transportOperationStalledError(
  * Bound a server-driven SFTP operation by a wall-clock deadline: settles with
  * `promise`'s own result if it finishes first, otherwise rejects with
  * `makeError()` once `ms` elapses; the timer clears as soon as `promise` settles.
- * Differs from `@psilink/core`'s `withTimeout` in taking an error factory (not a
+ * Differs from `@alcove/core`'s `withTimeout` in taking an error factory (not a
  * message string) and rejecting with a typed
  * {@link TransportOperationStalledError} so the poll loop treats the stall as
  * terminal.
@@ -333,7 +333,7 @@ export function createBoundedPutSource(
  * has not yet settled emits a non-fatal slow-operation warning. Observability,
  * not a security control: it does nothing on a headless run with no human
  * watching (the whole-exchange liveness budget in `FileSyncConnection`
- * (`@psilink/core`) defends that run), and stays outside the terminal-error
+ * (`@alcove/core`) defends that run), and stays outside the terminal-error
  * paths so it can never affect correctness or the liveness gate. See
  * {@link withSlowOperationWarning}.
  *

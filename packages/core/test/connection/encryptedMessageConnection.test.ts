@@ -809,19 +809,19 @@ test("close() resolves even when the inner connection's close rejects", async ()
 test("deriveAeadKey known-answer vector pins the HKDF info string", async () => {
   // Expected bytes were computed independently with Node's
   // crypto.hkdfSync("sha256", ikm, salt, info, 32) where ikm is the session
-  // key, salt is 32 zero bytes, and info is "psilink-aead-v1:<context>". Any
+  // key, salt is 32 zero bytes, and info is "alcove-aead-v2:<context>". Any
   // accidental change to the prefix, the ":" delimiter, or a context label
   // changes these bytes and trips this test.
   const i2r = await deriveAeadKey(SESSION_KEY, "initiator-to-responder");
   expect(Array.from(i2r)).toEqual([
-    137, 48, 164, 66, 67, 154, 111, 145, 124, 252, 206, 143, 77, 18, 169, 80,
-    169, 54, 49, 126, 46, 92, 206, 175, 88, 60, 241, 55, 8, 118, 79, 166,
+    68, 67, 58, 27, 11, 188, 25, 110, 139, 219, 151, 164, 166, 153, 188, 78, 70,
+    133, 162, 214, 57, 52, 112, 98, 86, 224, 14, 104, 126, 251, 81, 109,
   ]);
 
   const r2i = await deriveAeadKey(SESSION_KEY, "responder-to-initiator");
   expect(Array.from(r2i)).toEqual([
-    42, 33, 161, 192, 230, 99, 145, 224, 60, 157, 36, 214, 24, 218, 4, 130, 114,
-    120, 214, 241, 174, 15, 75, 247, 125, 248, 205, 61, 11, 13, 123, 173,
+    203, 173, 80, 156, 206, 211, 11, 141, 218, 68, 192, 214, 189, 150, 121, 71,
+    13, 125, 171, 172, 166, 163, 102, 123, 252, 169, 202, 230, 138, 62, 143, 6,
   ]);
 
   // The two directions must derive distinct keys: identical keys would reuse a

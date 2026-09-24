@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { vi, test, expect, beforeEach, afterEach } from "vitest";
 import YAML from "yaml";
-import type { PreparedExchange } from "@psilink/core";
+import type { PreparedExchange } from "@alcove/core";
 
 import {
   denyDirectoryWrites,
@@ -112,7 +112,7 @@ async function waitForBothKeysRotated(
 }
 
 // Assert neither of runProtocol's two generic recovery-advisory lines was
-// logged. A tagged (psilinkRecoveryHintEmitted) error must suppress both, since
+// logged. A tagged (alcoveRecoveryHintEmitted) error must suppress both, since
 // each would contradict the error's own specific hint.
 function expectNoGenericRecoveryAdvisory(errors: readonly string[]): void {
   expect(errors.every((m) => !m.includes("key exchange was in progress"))).toBe(
@@ -199,8 +199,8 @@ vi.mock("../../src/transportTeardown", async (importActual) => {
   };
 });
 
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   return {
     ...actual,
     // Replace getLogger so that runProtocol's log.warn / log.error calls are
@@ -319,14 +319,14 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   operatorSuppliedSpans,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   AEAD_ENVELOPE_VERSION,
   MESSAGE_ENVELOPE_VERSION,
   MESSAGE_HEADER_BYTES,
   MESSAGE_TYPE_BINARY,
   minimalPreparedExchange,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 import type {
   AssociationTable,
   DualSignedRecord,
@@ -334,7 +334,7 @@ import type {
   PartnerPayload,
   ResolvedRunShape,
   VerificationKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   runProtocol,
   PEER_SILENCE_GUIDANCE,
@@ -436,7 +436,7 @@ function takeFd3Lines(): Array<Record<string, unknown>> {
 
 beforeEach(() => {
   exitCodeBeforeTest = process.exitCode;
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-proto-integ-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-proto-integ-"));
   dropDir = path.join(tmpDir, "drop");
   mockState.dropDir = dropDir;
   mockState.infos.length = 0;
@@ -643,7 +643,7 @@ test("creates the keyFilePath parent directory when it does not yet exist", asyn
     runProtocol({
       connection: {
         channel: "filedrop",
-        path: "/nonexistent-path-that-cannot-exist-psilink-test",
+        path: "/nonexistent-path-that-cannot-exist-alcove-test",
       },
       auth: {
         sharedSecret: TOKEN_A,
@@ -701,7 +701,7 @@ test("does not mutate the caller-supplied auth object when trimming whitespace f
     runProtocol({
       connection: {
         channel: "filedrop",
-        path: "/nonexistent-path-that-cannot-exist-psilink-test",
+        path: "/nonexistent-path-that-cannot-exist-alcove-test",
       },
       auth,
       prepared: minimalPrepared,
@@ -751,7 +751,7 @@ test("rejects and cleans up when conn.open() itself throws (opened=false cleanup
     runProtocol({
       connection: {
         channel: "filedrop",
-        path: "/nonexistent-path-that-cannot-exist-psilink-test",
+        path: "/nonexistent-path-that-cannot-exist-alcove-test",
       },
       auth: null,
       prepared: minimalPrepared,
@@ -1325,7 +1325,7 @@ test("tells a non-receiving party what the run's completion tells it too", async
 // --- Self-attested record persistence via runProtocol ------------------------
 
 const sampleRecord: ExchangeRecord = {
-  version: "psilink-exchange-record/v8",
+  version: "alcove-exchange-record/v9",
   outcome: "completed",
   certificateMismatchObserved: false,
   createdAt: "2026-01-02T03:04:05.000Z",
@@ -1351,7 +1351,7 @@ const sampleRecord: ExchangeRecord = {
   },
 };
 const sampleKeys: VerificationKeys = {
-  version: "psilink-exchange-keys/v1",
+  version: "alcove-exchange-keys/v2",
   salts: {
     localPayloadSent: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
     partnerPayloadReceived: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
@@ -1622,7 +1622,7 @@ test("a partner-shaped output-phase fault exits 69, not the local write-loss cod
   // failing to reach disk is stamped. The terminal event's `output` category
   // still covers it, since the exchange did complete and must not be re-run.
   const { buildOutputTable: coreBuildOutputTable } =
-    await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+    await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
   const payloadMissingAMatchedRow: PartnerPayload = {
     columns: ["dob"],
     rowIndices: [5],
@@ -1841,7 +1841,7 @@ test("caveats a count-only count the partner reported rather than computed", asy
     entry.includes("7 record(s) in common"),
   );
   expect(line).toContain("your partner reported 7 record(s) in common");
-  expect(line).toContain("psilink does not check a count it is sent");
+  expect(line).toContain("Alcove does not check a count it is sent");
   expect(line).toContain("no result file was written");
 }, 20_000);
 
@@ -1852,7 +1852,7 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
   // (assertSharedSecretReadyForHandshake) before opening any connection, so
   // each party trips the same check independently with no rendezvous I/O and
   // both reject deterministically with the "expired" hint. The error holds
-  // `psilinkRecoveryHintEmitted: true` (set in auth.ts), so the runProtocol
+  // `alcoveRecoveryHintEmitted: true` (set in auth.ts), so the runProtocol
   // catch must NOT log either generic advisory line - both would contradict
   // the specific "obtain a new invitation" message. Also verifies no token
   // rotation occurred: key file contents are unchanged after the failure.
@@ -2609,7 +2609,7 @@ const MISSING_RECEIPT_WARNING =
 
 function signingPersistFixture(
   receiptFile: string,
-  configPath = path.join(tmpDir, "psilink.yaml"),
+  configPath = path.join(tmpDir, "alcove.yaml"),
 ): SigningPersist {
   return {
     identity: signingIdentityFixture,
@@ -2658,8 +2658,8 @@ test("a first-contact pin is recorded and stated on both sinks, unattended", asy
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
   const certificateModeConfig =
     "# hand-authored\nsigning:\n  mode: certificate\n  identity_file: /run/id.json\n";
-  const configA = path.join(tmpDir, "psilink-a.yaml");
-  const configB = path.join(tmpDir, "psilink-b.yaml");
+  const configA = path.join(tmpDir, "alcove-a.yaml");
+  const configB = path.join(tmpDir, "alcove-b.yaml");
   fs.writeFileSync(configA, certificateModeConfig);
   fs.writeFileSync(configB, certificateModeConfig);
 
@@ -2751,7 +2751,7 @@ test("a completed signed run does not warn about a missing receipt", async () =>
 // signing-cert vectors' identities, reused here for a valid shape -- nothing
 // verifies them on the write path.
 const signedReceiptCertificate = {
-  version: "psilink-signing-cert/v2" as const,
+  version: "alcove-signing-cert/v3" as const,
   algorithm: "ecdsa-p256-sha256" as const,
   identity: "Party A",
   publicKey: {
@@ -2764,7 +2764,7 @@ const signedReceiptCertificate = {
     "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g",
 };
 const signedReceiptFixture: DualSignedRecord = {
-  version: "psilink-signed-receipt/v3",
+  version: "alcove-signed-receipt/v4",
   content: {
     termsHash: "dGVybXNIYXNo",
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",
@@ -3028,7 +3028,7 @@ test(
     expect(resultA.status).toBe("rejected");
     expect(resultB.status).toBe("rejected");
     expect(
-      fs.readdirSync(tmpDir).filter((f) => f.startsWith("psilink-record-")),
+      fs.readdirSync(tmpDir).filter((f) => f.startsWith("alcove-record-")),
     ).toHaveLength(0);
   },
 );
@@ -3313,7 +3313,7 @@ test("the warned run still completes", { timeout: 20_000 }, async () => {
 // in runProtocol that logs the recovery hint.
 
 test("runProtocol suppresses the generic advisory when a tagged error is wrapped via `cause`", async () => {
-  // The `psilinkRecoveryHintEmitted` tag is sometimes attached to an inner
+  // The `alcoveRecoveryHintEmitted` tag is sometimes attached to an inner
   // error that a later catch wraps with `new Error(..., { cause: innerErr })`.
   // The runProtocol catch walks the cause chain so the wrap does not lose the
   // suppression. This test simulates that wrap by having runExchange throw a
@@ -3326,7 +3326,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   async function waitForRotationThenThrowWrapped(): Promise<never> {
     await waitForBothKeysRotated(keyFileA, keyFileB);
     const inner = Object.assign(new Error("inner tagged failure"), {
-      psilinkRecoveryHintEmitted: true,
+      alcoveRecoveryHintEmitted: true,
     });
     throw new Error(`outer wrap: ${inner.message}`, { cause: inner });
   }
@@ -3377,8 +3377,8 @@ test("runProtocol marks the key-file path when the rotated token cannot be saved
   // test/unit/operatorPathMarks.test.ts.
   const keyFileA =
     process.platform === "win32"
-      ? path.join(tmpDir, "psilink", "a.key")
-      : path.join(tmpDir, "C:\\psilink\\a.key");
+      ? path.join(tmpDir, "alcove", "a.key")
+      : path.join(tmpDir, "C:\\alcove\\a.key");
   fs.mkdirSync(path.dirname(keyFileA), { recursive: true });
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -3426,7 +3426,7 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
   // reaches the catch with tokenRotated=true, where the generic "retry without
   // re-inviting" advisory would otherwise fire and contradict the error's own
   // terminal refusal. FrameSizeExceededError has a class-level
-  // psilinkRecoveryHintEmitted tag, so the hint-walker must suppress the generic
+  // alcoveRecoveryHintEmitted tag, so the hint-walker must suppress the generic
   // advisory -- this pins that the class tag is honored end to end, not just the
   // Object.assign tags the other tests cover.
   const keyFileA = path.join(tmpDir, "a.key");
@@ -3481,7 +3481,7 @@ test("runProtocol suppresses the generic advisory for the reply-cap internal fau
   // generic "retry without re-inviting" advisory does fire -- and its own
   // message prescribes the opposite: report the fault, because a retry
   // rebuilds the same reply and refuses it again. InternalConsistencyError
-  // has the class-level psilinkRecoveryHintEmitted tag, so the hint-walker
+  // has the class-level alcoveRecoveryHintEmitted tag, so the hint-walker
   // suppresses the generic advisory and leaves the operator the fault's own
   // remedy alone.
   const keyFileA = path.join(tmpDir, "a.key");
@@ -3664,7 +3664,7 @@ test.skipIf(process.platform === "win32")(
     // but the updated token could not be saved...". The generic authStarted
     // advisory ("the partner may have already derived...while this side did
     // not") contradicts this: it understates a definite local rotation. The
-    // wrapped error sets `psilinkRecoveryHintEmitted: true` to suppress it.
+    // wrapped error sets `alcoveRecoveryHintEmitted: true` to suppress it.
     //
     // To force saveKeyFile to fail AFTER the key exchange rotates (not at the
     // pre-flight in runProtocol), this uses a keyFilePath pre-flight accepts (a
@@ -4355,7 +4355,7 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
   // A distinctive cleartext probe; if it ever crossed the wire in cleartext the
   // raw-bytes substring check below would catch it. It rides the encrypted
   // channel, so it must never appear in any written frame.
-  const CANARY = "PSILINK_CLEARTEXT_CANARY_!do-not-leak!";
+  const CANARY = "ALCOVE_CLEARTEXT_CANARY_!do-not-leak!";
 
   // Capture every byte the transport writes, at write time, before the peer's
   // poller can consume and delete the file (reading the directory afterwards
@@ -4620,7 +4620,7 @@ test("runProtocol's recovery hint does not promise a clean retry when the post-h
   // then the post-handshake persistence hook throws (so the config the bootstrap
   // callers write is NOT on disk), and the data exchange then also fails. The
   // catch must not tell the user to "retry the exchange without re-inviting" --
-  // `psilink exchange` would have no config to run against -- but instead point
+  // `alcove exchange` would have no config to run against -- but instead point
   // at the failed persistence step.
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
@@ -4676,7 +4676,7 @@ test("runProtocol's recovery hint does not promise a clean retry when the post-h
   expect(
     mockState.errors.some((m) => m.includes("nothing to run against")),
   ).toBe(true);
-  // ...and the clean-retry advisory -- which would point `psilink exchange` at a
+  // ...and the clean-retry advisory -- which would point `alcove exchange` at a
   // config that was never written -- is suppressed on both sides.
   expect(
     mockState.errors.some((m) =>
@@ -5120,7 +5120,7 @@ test("a main-try failure under --event-stream emits exactly one terminal error e
       runProtocol({
         connection: {
           channel: "filedrop",
-          path: "/nonexistent-path-that-cannot-exist-psilink-test",
+          path: "/nonexistent-path-that-cannot-exist-alcove-test",
         },
         auth: null,
         prepared: minimalPrepared,
@@ -5158,7 +5158,7 @@ test("a close that throws during an organic failure still emits the terminal err
     failure = await runProtocol({
       connection: {
         channel: "filedrop",
-        path: "/nonexistent-path-that-cannot-exist-psilink-test",
+        path: "/nonexistent-path-that-cannot-exist-alcove-test",
       },
       auth: null,
       prepared: minimalPrepared,
@@ -5201,7 +5201,7 @@ test("a close that throws deregisters the run's signal handlers all the same", a
     await runProtocol({
       connection: {
         channel: "filedrop",
-        path: "/nonexistent-path-that-cannot-exist-psilink-test",
+        path: "/nonexistent-path-that-cannot-exist-alcove-test",
       },
       auth: null,
       prepared: minimalPrepared,

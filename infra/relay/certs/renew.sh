@@ -11,7 +11,7 @@
 # Provider-pluggable: the client and the DNS provider are two variables, and the
 # provider's own credential comes from env beside this file. env.example carries
 # the Cloudflare shape; another provider is that provider's variables in the same
-# file and its name in PSILINK_RELAY_DNS_PROVIDER.
+# file and its name in ALCOVE_RELAY_DNS_PROVIDER.
 #
 # A real Let's Encrypt certificate has been issued through this script, by
 # DNS-01 through Cloudflare, on the 2026-09-03/04 live run (infra/relay/README.md,
@@ -19,10 +19,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ETC=/etc/psilink-relay
-ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
-ACME_ENV="${PSILINK_RELAY_ACME_ENV:-$ETC/acme.env}"
-ACME_HOME="${PSILINK_RELAY_ACME_HOME:-$ETC/acme}"
+ETC=/etc/alcove-relay
+ENV_FILE="${ALCOVE_RELAY_ENV_FILE:-$ETC/relay.env}"
+ACME_ENV="${ALCOVE_RELAY_ACME_ENV:-$ETC/acme.env}"
+ACME_HOME="${ALCOVE_RELAY_ACME_HOME:-$ETC/acme}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
@@ -42,12 +42,12 @@ log() { printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 # shellcheck disable=SC1090
 . "$ACME_ENV"
 
-REALM="${PSILINK_RELAY_REALM:-}"
-[ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE"
-EMAIL="${PSILINK_RELAY_ACME_EMAIL:-}"
-[ -n "$EMAIL" ] || die "PSILINK_RELAY_ACME_EMAIL is unset in $ACME_ENV; the authority requires a contact"
-PROVIDER="${PSILINK_RELAY_DNS_PROVIDER:-cloudflare}"
-CLIENT="${PSILINK_RELAY_ACME_CLIENT:-lego}"
+REALM="${ALCOVE_RELAY_REALM:-}"
+[ -n "$REALM" ] || die "ALCOVE_RELAY_REALM is unset in $ENV_FILE"
+EMAIL="${ALCOVE_RELAY_ACME_EMAIL:-}"
+[ -n "$EMAIL" ] || die "ALCOVE_RELAY_ACME_EMAIL is unset in $ACME_ENV; the authority requires a contact"
+PROVIDER="${ALCOVE_RELAY_DNS_PROVIDER:-cloudflare}"
+CLIENT="${ALCOVE_RELAY_ACME_CLIENT:-lego}"
 
 install -d -m 700 "$ACME_HOME"
 
@@ -94,10 +94,10 @@ case "$CLIENT" in
     SRC_KEY="$ACME_HOME/$REALM/$REALM.key"
     ;;
   *)
-    die "PSILINK_RELAY_ACME_CLIENT is '$CLIENT'; this script drives lego or acme.sh"
+    die "ALCOVE_RELAY_ACME_CLIENT is '$CLIENT'; this script drives lego or acme.sh"
     ;;
 esac
 
 [ -s "$SRC_CRT" ] && [ -s "$SRC_KEY" ] || die "$CLIENT reported success but left no certificate at $SRC_CRT"
 
-PSILINK_RELAY_CERT_SOURCE="$SRC_CRT" PSILINK_RELAY_KEY_SOURCE="$SRC_KEY" "$HERE/deploy-hook.sh"
+ALCOVE_RELAY_CERT_SOURCE="$SRC_CRT" ALCOVE_RELAY_KEY_SOURCE="$SRC_KEY" "$HERE/deploy-hook.sh"

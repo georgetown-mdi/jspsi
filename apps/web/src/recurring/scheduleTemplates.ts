@@ -1,6 +1,6 @@
 /**
  * The daily schedule snippets a hand-off surface shows an operator: the cron
- * entry and the Windows Task Scheduler registration that run a psilink
+ * entry and the Windows Task Scheduler registration that run an Alcove
  * invocation unattended from the folder holding its files.
  *
  * One copy, shared by both hand-off surfaces -- the managed exchange's
@@ -43,7 +43,7 @@ export function cronScheduleLine(command: string): string {
  */
 export function taskSchedulerLine(command: string): string {
   return (
-    `schtasks /Create /TN "psilink exchange" /SC DAILY /ST 02:00 ` +
+    `schtasks /Create /TN "alcove exchange" /SC DAILY /ST 02:00 ` +
     `/TR "cmd /c cd /d ${WINDOWS_FOLDER_PLACEHOLDER} && ` +
     `${command.replaceAll('"', '\\"')}"`
   );

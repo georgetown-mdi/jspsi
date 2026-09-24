@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError } from "@alcove/core";
 
 import {
   dialAsAcceptor,
@@ -22,7 +22,7 @@ import type {
   MessageConnection,
   RendezvousRole,
   WebRTCEndpoint,
-} from "@psilink/core";
+} from "@alcove/core";
 import type Peer from "peerjs";
 
 /**

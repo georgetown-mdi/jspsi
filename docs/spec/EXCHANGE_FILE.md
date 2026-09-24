@@ -4,7 +4,7 @@ title: "Exchange File Artifact"
 
 # Exchange file artifact
 
-This document specifies the downloadable **exchange file**: the `psilink.yaml`
+This document specifies the downloadable **exchange file**: the `alcove.yaml`
 a party composes in the web application and hands to the CLI. It covers what the
 artifact is (the shared CLI config schema, not a parallel format) and the
 mint-layer guarantees layered on top of it. It also covers the versioning and
@@ -15,7 +15,7 @@ path the shared secret takes (never the file), and the terms update that
 changes an established partnership's terms without it. It is the implementation-level
 complement to the
 field-level [exchange reference](../EXCHANGE_REFERENCE.md), which an operator
-opens to author or read a `psilink.yaml`, and to the **Provisioning the key file
+opens to author or read an `alcove.yaml`, and to the **Provisioning the key file
 from an invitation** material under that document's
 [Authentication](../EXCHANGE_REFERENCE.md#authentication) section; this document
 covers how the artifact is constructed and what it does and does not promise. It
@@ -30,7 +30,7 @@ statement of it. Intended readers are security auditors and implementors.
 
 ## The artifact is the CLI config schema
 
-A minted exchange file is an ordinary `psilink.yaml`. There is no web-specific
+A minted exchange file is an ordinary `alcove.yaml`. There is no web-specific
 format, no parallel schema, and no field a CLI-authored config could not also
 hold. The web mint layer (`mintExchangeFile` in
 `packages/core/src/config/exchangeFile.ts`) expands the credential-free locator
@@ -85,7 +85,7 @@ obligation, not a property of the artifact.
   `authentication` block at all. The schema makes that block optional and gives
   it three fields: `shared_secret` and `expires`, both key-file-injected at
   runtime, and the operator-policy `token_max_age_days`, which an operator sets
-  in `psilink.yaml` and no mint path has a value for. So a minted file that omits
+  in `alcove.yaml` and no mint path has a value for. So a minted file that omits
   the block has no secret and no place to put one, and leaves the max-age
   policy to whoever runs it. This mirrors `serializeExchangeDocument`
   (`packages/core/src/config/exchangeDocument.ts`), which strips
@@ -114,7 +114,7 @@ obligation, not a property of the artifact.
 
 ## Writing a configuration back
 
-A tool that reads a `psilink.yaml` and writes one -- the console opening the
+A tool that reads an `alcove.yaml` and writes one -- the console opening the
 configuration in its mounted folder, editing it, and handing back the file a
 scheduled command-line run loads (`apps/web/src/jobs/handoff.ts`) -- writes it
 through `serializeExchangeDocument`, the same function `saveConfig` calls. What
@@ -132,9 +132,9 @@ that promises, and what it does not, is bounded:
   (`packages/core/src/config/exchangeSpec.ts`) folds to the character are
   properties of the file rather than of the document, and a read-and-write
   cycle states the document. The promise is a file byte-compatible with what
-  psilink writes for those settings, not with an arbitrary hand-authored file.
-- **A CLI-written file is not itself in that order.** `psilink invite` and
-  `psilink accept` hand `saveConfig` a spec they assembled rather than one the
+  Alcove writes for those settings, not with an arbitrary hand-authored file.
+- **A CLI-written file is not itself in that order.** `alcove invite` and
+  `alcove accept` hand `saveConfig` a spec they assembled rather than one the
   schema parsed, so reading one of their files and writing it back states every
   setting at the same value with keys reordered inside a block. Measured against
   the built CLI in `apps/web/test/interop/consoleExportParity.test.ts`.
@@ -146,14 +146,14 @@ that promises, and what it does not, is bounded:
 ## Versioning and compatibility policy
 
 The hosted web application is continuously deployed; a CLI in the field is
-pinned to whatever `@psilink/core` version its release shipped with. A newer web
+pinned to whatever `@alcove/core` version its release shipped with. A newer web
 app can therefore mint a file whose schema is newer than an older CLI's. The
 policy below is the direct consequence of the schema mechanics, not a separate
 promise layered over them.
 
 ### What a minted file targets
 
-A minted file targets the `ExchangeSpecSchema` of the `@psilink/core` version the
+A minted file targets the `ExchangeSpecSchema` of the `@alcove/core` version the
 web app shipped with. Both applications embed the same schema; the artifact is
 valid against the version that produced it. That is the whole promise on the
 compatibility axis.
@@ -224,7 +224,7 @@ re-mint (or re-invite) rather than hand-migrate a file across a breaking change.
 ## What a consumer does with a setting it cannot honor
 
 A configuration is a configuration: one file, valid against one schema, readable
-wherever psilink runs. Three applications read it -- the CLI, the console, and the
+wherever Alcove runs. Three applications read it -- the CLI, the console, and the
 web application -- and they do not run the same exchanges or offer the same
 editors, so a file valid against the schema can name a setting the application in
 front of it cannot run.
@@ -375,7 +375,7 @@ How a party arrives at its set, by exchange mode:
   transmission. The acceptor locks in the subset the token declared -- known up
   front, with
   no observation needed -- and both an offline and an online accept persist it to
-  the written config so a later `psilink exchange` enforces what was consented to
+  the written config so a later `alcove exchange` enforces what was consented to
   at accept time. An acceptance that reuses a pre-existing config refreshes that
   config's field surgically in place, leaving the operator's connection and
   linkage blocks untouched: a partner that changes only what it discloses is
@@ -493,7 +493,7 @@ decides which order columns are transmitted in and not which are. Like the two
 fields above it is gated on `output.share_with_partner`.
 
 Every fresh acceptance surface derives the record through one function,
-`deriveOutboundPayloadConsent`: `psilink accept` writes it into the configuration
+`deriveOutboundPayloadConsent`: `alcove accept` writes it into the configuration
 it provisions, the browser's accept composes it into the exchange-file document
 it persists as a [managed exchange](MANAGED_EXCHANGE_RECORD.md), and a console
 acceptance composes it into the CLI configuration the console runs the job from
@@ -579,7 +579,7 @@ Every path that reaches an acceptance records it: the CLI's offline accept write
 it into the config it composes, the online accept includes it in the bootstrap's
 config write and refreshes a reused config in place, the browser's managed
 deposit persists it into the record's document, and a console server-job accept
-forwards it into the composed config. `psilink apply` writes the `deduplicate`
+forwards it into the composed config. `alcove apply` writes the `deduplicate`
 a [terms update](#terms-update) states for its sender, in the same write that
 adopts the update's terms. A later run restores it from the config
 onto `prepared.expectedPartnerDeduplicate`. No mint path records it: an inviter
@@ -587,7 +587,7 @@ accepted no declaration.
 
 ## Terms update
 
-A terms update is the artifact that changes an established partnership's linkage terms without a new invitation (`psilink update` mints it, `psilink apply` consumes it; operator behavior in [CLI.md](../CLI.md#changing-the-terms-of-an-established-partnership)). It is implemented in `packages/core/src/config/termsUpdate.ts`.
+A terms update is the artifact that changes an established partnership's linkage terms without a new invitation (`alcove update` mints it, `alcove apply` consumes it; operator behavior in [CLI.md](../CLI.md#changing-the-terms-of-an-established-partnership)). It is implemented in `packages/core/src/config/termsUpdate.ts`.
 
 ### Relation to the invitation token
 
@@ -618,8 +618,8 @@ The whole string is bounded by the invitation's encoded-length bound (`MAX_ENCOD
 Both derived values come from the decoded 32-byte shared secret, with the application HKDF (`hkdfDerive`: HKDF-SHA-256, zero salt) under labels in the [domain-separation label space](PROTOCOL.md#p-256-authenticated-key-exchange):
 
 ```
-partnership = base64url(HKDF(secret, "psilink-terms-update-v1:partnership", 16))
-mac_key     = HKDF(secret, "psilink-terms-update-v1:mac", 32)
+partnership = base64url(HKDF(secret, "alcove-terms-update-v2:partnership", 16))
+mac_key     = HKDF(secret, "alcove-terms-update-v2:mac", 32)
 ```
 
 The partnership identifier is a one-way function of the secret both parties hold, so neither needs anything beyond its key file to compute it, and it reveals nothing about the secret. It follows the secret: every rotation gives the partnership a new identifier, so an update made before an exchange no longer matches after it.
@@ -658,13 +658,13 @@ refused rather than adapted.
 The drivable set is not a property of "browser versus CLI" but of the tool and,
 for the web application, its deployment profile:
 
-- **CLI.** `sftp`, `filedrop`, and `webrtc`. `psilink accept` seeds the endpoint
+- **CLI.** `sftp`, `filedrop`, and `webrtc`. `alcove accept` seeds the endpoint
   into the acceptor's connection through the single consumer
   `connectionFromEndpoint` (`apps/cli`), which also applies the mirror swap for a
   split-directory endpoint. A seeded `webrtc` connection holds the locator
   only; the accept path stamps `role: acceptor` onto it (`withWebRTCPeerRole`),
   and the channel needs the shared secret both parties derive their rendezvous
-  ids from, so `psilink exchange` refuses a webrtc run that reaches it without a
+  ids from, so `alcove exchange` refuses a webrtc run that reaches it without a
   secret or without a stamped `role`.
 - **Browser, hosted profile.** `webrtc` only. A file-sync endpoint names a
   directory or an SFTP host the browser cannot reach.
@@ -696,7 +696,7 @@ are specified in [FILE_SYNC.md](FILE_SYNC.md#split-inboundoutbound-directories).
 ## The secret's path
 
 The shared secret rides only the invitation code. It never enters the exchange
-file, and each party provisions its own `.psilink.key` from the code:
+file, and each party provisions its own `.alcove.key` from the code:
 
 - **The file has no secret.** As above, a minted file has no
   `authentication` block, and `serializeExchangeDocument`
@@ -707,12 +707,12 @@ file, and each party provisions its own `.psilink.key` from the code:
   (`SHARED_SECRET_REGEX`: 43 base64url characters encoding 32 bytes,
   `packages/core/src/config/connection.ts`) is confidential and travels only on
   the encoded invitation code, over a trusted out-of-band channel.
-- **The three provisioning paths.** `psilink invite` writes the inviter's key
-  file (secret plus expiry); `psilink accept` writes the acceptor's copy
+- **The three provisioning paths.** `alcove invite` writes the inviter's key
+  file (secret plus expiry); `alcove accept` writes the acceptor's copy
   (secret, with the invitation expiry stripped); and
-  `psilink exchange --invitation CODE` provisions the key file for the party that
+  `alcove exchange --invitation CODE` provisions the key file for the party that
   composed the exchange in the web app and downloaded a secret-free config,
-  writing the inviter-side copy (secret **and** expiry, matching `psilink
+  writing the inviter-side copy (secret **and** expiry, matching `alcove
   invite`) so the invitation's bounded lifetime is enforced at exchange time.
 
 ### `exchange --invitation` fail-closed ordering

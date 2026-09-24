@@ -41,10 +41,10 @@ import {
   generateSigningIdentity,
 } from "../../dist/core.esm.js";
 
-const RECORD_VERSION = "psilink-signed-receipt/v3";
-const CONTENT_DOMAIN = "psilink-signed-receipt-content/v2";
-const CERTIFICATE_VERSION = "psilink-signing-cert/v2";
-const CERTIFICATE_SIGNATURE_DOMAIN = "psilink-signing-cert-signature/v1";
+const RECORD_VERSION = "alcove-signed-receipt/v4";
+const CONTENT_DOMAIN = "alcove-signed-receipt-content/v3";
+const CERTIFICATE_VERSION = "alcove-signing-cert/v3";
+const CERTIFICATE_SIGNATURE_DOMAIN = "alcove-signing-cert-signature/v2";
 const ALGORITHM = "ecdsa-p256-sha256";
 
 const fromBase64Url = (s) => new Uint8Array(Buffer.from(s, "base64url"));
@@ -94,7 +94,7 @@ function receiptSignatureBytes(content, fingerprint, role) {
  * openssl's own parse rather than from a DER decoder written here.
  */
 function signWithOpenssl(jwk, message) {
-  const dir = mkdtempSync(join(tmpdir(), "psilink-vectors-"));
+  const dir = mkdtempSync(join(tmpdir(), "alcove-vectors-"));
   const keyPath = join(dir, "key.pem");
   const msgPath = join(dir, "message.bin");
   const sigPath = join(dir, "signature.der");

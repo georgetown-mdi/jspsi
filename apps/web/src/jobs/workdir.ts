@@ -5,11 +5,11 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { EXCHANGE_RECORD_OUTCOMES, parseBoundedJson } from "@psilink/core";
+import { EXCHANGE_RECORD_OUTCOMES, parseBoundedJson } from "@alcove/core";
 
 import { isPathWithin } from "./pathContainment";
 
-import type { ExchangeRecordOutcome } from "@psilink/core";
+import type { ExchangeRecordOutcome } from "@alcove/core";
 
 /**
  * A server-generated job id: a v4 UUID. The client never supplies it, and every

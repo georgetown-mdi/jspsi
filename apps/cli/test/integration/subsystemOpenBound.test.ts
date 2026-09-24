@@ -1,6 +1,6 @@
 import { expect } from "vitest";
-import { TimeoutError } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { TimeoutError } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { startInProcessSftpServer } from "../sftpServer";

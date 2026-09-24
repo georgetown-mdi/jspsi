@@ -20,7 +20,7 @@ import type {
   RendezvousRole,
   WebRTCConnectionConfig,
   WebRTCEndpoint,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The CLI half of the CLI<->web WebRTC interop conformance check.

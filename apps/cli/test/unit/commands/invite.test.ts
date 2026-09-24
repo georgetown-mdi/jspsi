@@ -23,14 +23,14 @@ import {
   sanitizeErrorForDisplay,
   StandardizationTermsError,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   Algorithm,
   ConnectionConfig,
   LinkageTerms,
   Metadata,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // Mock only runOnlineBootstrap, so the online-handler wiring can be asserted
 // without opening a connection or running a real exchange; every other
@@ -106,8 +106,8 @@ function testOptions(
 ): CommonBootstrapOptions {
   const id = `${process.pid}-${optionsCounter++}`;
   return {
-    configFile: path.join(tmpdir(), `psilink-invite-test-${id}.yaml`),
-    keyFile: path.join(tmpdir(), `psilink-invite-test-${id}.key`),
+    configFile: path.join(tmpdir(), `alcove-invite-test-${id}.yaml`),
+    keyFile: path.join(tmpdir(), `alcove-invite-test-${id}.key`),
     identity: "Agency A",
     record: false,
     eventStream: false,
@@ -191,7 +191,7 @@ test("validateInvite: an unusable URL is rejected with no side effect", async ()
 test("validateInvite: offline rejects a missing input file, preserving its exit code", async () => {
   await expect(
     validateInvite({
-      resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+      resolved: { mode: "offline", input: "/nonexistent/alcove-input.csv" },
       options: testOptions(),
       acceptTimeout: 900,
       log: silentLog,
@@ -215,12 +215,12 @@ test("validateInvite: a missing or blank --identity is refused", async () => {
   // authoring path: the terms come from the input and nothing but the flag can
   // name this party. The refusal lands ahead of that (nonexistent) input file
   // and ahead of the token whose terms would hold the label. The blank cases
-  // are the scripted `--identity "$ORG"` with ORG unset -- nothing for psilink
+  // are the scripted `--identity "$ORG"` with ORG unset -- nothing for Alcove
   // to stand in, so they refuse exactly as the absent flag does.
   for (const identity of [undefined, "", "   "])
     await expect(
       validateInvite({
-        resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+        resolved: { mode: "offline", input: "/nonexistent/alcove-input.csv" },
         options: testOptions({ identity }),
         acceptTimeout: 900,
         log: silentLog,
@@ -255,13 +255,13 @@ test("onlineWaitInvalidationNotice: states the invitation is void on cancel/time
   expect(notice).toContain("accept-timeout");
   // The consequence and the recovery: the invitation is unusable; re-invite.
   expect(notice).toContain("can no longer be accepted");
-  expect(notice).toContain("psilink invite");
+  expect(notice).toContain("alcove invite");
 });
 
 // --- offlineAbandonNotice ----------------------------------------------------
 
 test("offlineAbandonNotice: names the key file as the early-abandonment path and spares the config", () => {
-  const keyPath = "/tmp/agency-a/.psilink.key";
+  const keyPath = "/tmp/agency-a/.alcove.key";
   const notice = offlineAbandonNotice(keyPath);
   // The actionable path -- delete this specific key file -- is named verbatim.
   expect(notice).toContain(keyPath);
@@ -288,7 +288,7 @@ afterEach(() => {
 /** A scratch directory with a small valid CSV; config/key default to fresh
  *  (non-existent) paths inside it so each test can occupy just what it needs. */
 function onlineFixture(): { input: string; options: CommonBootstrapOptions } {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-online-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-online-"));
   tmpDirs.push(dir);
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
@@ -298,8 +298,8 @@ function onlineFixture(): { input: string; options: CommonBootstrapOptions } {
   return {
     input,
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
   };
 }
@@ -485,7 +485,7 @@ test("validateInvite: online webrtc emits the coordination server as a credentia
 
 test("validateInvite: the online webrtc connection takes the inviter end of the rendezvous", async () => {
   // The URL has no role, so the invitation's own side is stamped by the
-  // command that mints it; without one `psilink exchange` refuses to dial.
+  // command that mints it; without one `alcove exchange` refuses to dial.
   const { input, options } = onlineFixture();
   const ready = await validateInvite({
     resolved: {
@@ -635,7 +635,7 @@ test("handler: a webrtc URL the dial would refuse prints no invitation", async (
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["wss://peers.example.org/psi%3Fkey=private", input],
       "config-file": options.configFile,
@@ -908,7 +908,7 @@ test("validateInvite: online includes the disclosed-columns subset from the infe
   // and `member_id` as an `_id` row-identifier, both transmitted; the name/dob/ssn
   // linkage columns are not. The token must hold exactly that disclosed subset so
   // the acceptor's consent and commitment derive from the wire's own predicate.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-disc-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-disc-"));
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
@@ -933,7 +933,7 @@ test("validateInvite: online includes the disclosed-columns subset from the infe
   expect(token.disclosedPayloadColumns).toEqual(["notes", "member_id"]);
   // The same disclosed set is persisted into the saved config's
   // disclosedPayloadColumns (the send-side commitment), so a later recurring
-  // `psilink exchange` can verify its metadata still discloses it before any
+  // `alcove exchange` can verify its metadata still discloses it before any
   // credential, terms, or data are sent -- byte-identical to the token copy.
   if (ready.mode !== "online") throw new Error("expected online mode");
   expect(ready.dataSpec.disclosedPayloadColumns).toEqual(
@@ -944,8 +944,8 @@ test("validateInvite: online includes the disclosed-columns subset from the infe
 test("validateInvite: offline infer-from-input persists the disclosed subset as the send commitment", async () => {
   // The offline infer path writes a config, so it persists the disclosed set it
   // published on the token into disclosedPayloadColumns too -- the send-side
-  // commitment the later recurring `psilink exchange` checks.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-disc-off-"));
+  // commitment the later recurring `alcove exchange` checks.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-disc-off-"));
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
@@ -954,7 +954,7 @@ test("validateInvite: offline infer-from-input persists the disclosed subset as 
   );
   const ready = await validateInvite({
     resolved: { mode: "offline", input },
-    options: testOptions({ configFile: path.join(dir, "psilink.yaml") }),
+    options: testOptions({ configFile: path.join(dir, "alcove.yaml") }),
     acceptTimeout: 900,
     log: silentLog,
   });
@@ -991,7 +991,7 @@ function fixtureWithTrailingColumn(name: string): {
   input: string;
   options: CommonBootstrapOptions;
 } {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-name-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-name-"));
   tmpDirs.push(dir);
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
@@ -1002,8 +1002,8 @@ function fixtureWithTrailingColumn(name: string): {
   return {
     input,
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
   };
 }
@@ -1051,7 +1051,7 @@ test("handler: the offline infer path refuses an over-long disclosed name, writi
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [input],
       "config-file": options.configFile,
@@ -1143,7 +1143,7 @@ test("validateInvite: omitting --linkage-strategy authors cascade with no disclo
 });
 
 test("validateInvite: offline infer-from-input also applies the selected single-pass strategy and notes the disclosure", async () => {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-sp-offline-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-sp-offline-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const log = getLogger("invite-strategy-offline-test");
@@ -1153,8 +1153,8 @@ test("validateInvite: offline infer-from-input also applies the selected single-
     const ready = await validateInvite({
       resolved: { mode: "offline", input },
       options: testOptions({
-        configFile: path.join(dir, "psilink.yaml"),
-        keyFile: path.join(dir, ".psilink.key"),
+        configFile: path.join(dir, "alcove.yaml"),
+        keyFile: path.join(dir, ".alcove.key"),
       }),
       acceptTimeout: 900,
       linkageStrategy: "single-pass",
@@ -1281,9 +1281,9 @@ test("validateInvite: a retain-mode config declares it on the token", async () =
   // The path a real retain exchange takes: retain mode needs a hand-authored
   // config (it implies the lockless rendezvous and timestamped filenames), so an
   // invite minted from one is where the disclosure has to land.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-retain-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-retain-"));
   tmpDirs.push(dir);
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   saveConfig(configPath, {
     connection: {
       channel: "filedrop",
@@ -1300,7 +1300,7 @@ test("validateInvite: a retain-mode config declares it on the token", async () =
     resolved: { mode: "offline" },
     options: testOptions({
       configFile: configPath,
-      keyFile: path.join(dir, ".psilink.key"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
     acceptTimeout: 900,
     log: silentLog,
@@ -1316,9 +1316,9 @@ test("validateInvite: a file-sync config-as-source invite emits no connection en
   // from the endpoint's shape and no endpoint can contradict the one it states
   // -- a split inbound/outbound connection, the shape that settles the mode by
   // itself, included.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-split-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-split-"));
   tmpDirs.push(dir);
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   saveConfig(configPath, {
     connection: {
       channel: "filedrop",
@@ -1336,7 +1336,7 @@ test("validateInvite: a file-sync config-as-source invite emits no connection en
     resolved: { mode: "offline" },
     options: testOptions({
       configFile: configPath,
-      keyFile: path.join(dir, ".psilink.key"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
     acceptTimeout: 900,
     log: silentLog,
@@ -1352,11 +1352,11 @@ test("validateInvite: a webrtc config declares nothing, whatever its options say
   // this pairing mints without ever reaching the endpoint-paired refusal (which
   // only fires for a webrtc endpoint already on the token) or any other check --
   // ConnectionConfigSchema does not forbid retain_files under webrtc; only the
-  // WebRTCConnectionConfig.options type does, at psilink's own authoring sites.
+  // WebRTCConnectionConfig.options type does, at Alcove's own authoring sites.
   // The file is hand-written raw (not through saveConfig) to reach this case.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-webrtc-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-webrtc-"));
   tmpDirs.push(dir);
-  const configPath = path.join(dir, "psilink.yaml");
+  const configPath = path.join(dir, "alcove.yaml");
   fs.writeFileSync(
     configPath,
     YAML.stringify({
@@ -1372,7 +1372,7 @@ test("validateInvite: a webrtc config declares nothing, whatever its options say
     resolved: { mode: "offline" },
     options: testOptions({
       configFile: configPath,
-      keyFile: path.join(dir, ".psilink.key"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
     acceptTimeout: 900,
     log: silentLog,
@@ -1403,14 +1403,14 @@ test("validateInvite: the offline-infer path declares nothing, even under --reta
   // fill in, and the connection-options overrides are warned-ignored on it, so
   // there is no settled mode to declare. Declaring the flag's value here would
   // state a mode the eventual exchange need not run in.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-infer-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-infer-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const ready = await validateInvite({
     resolved: { mode: "offline", input },
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
       retainFiles: true,
     }),
     acceptTimeout: 900,
@@ -1469,14 +1469,14 @@ test("validateInvite: an offline invitation has no endpoint (field stays optiona
   // Only the online producer emits an endpoint; an offline invitation omits it
   // and still encodes/decodes cleanly, so no regression for tokens minted
   // elsewhere (the field is optional).
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-noendpoint-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-noendpoint-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const ready = await validateInvite({
     resolved: { mode: "offline", input },
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
     acceptTimeout: 900,
     log: silentLog,
@@ -1508,8 +1508,8 @@ function withConfig(
   metadata?: Metadata,
   expectedPartnerDeduplicate?: boolean,
 ): { dir: string; configPath: string; keyPath: string } {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-cfg-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-cfg-"));
+  const configPath = path.join(dir, "alcove.yaml");
   saveConfig(configPath, {
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkageTerms: terms,
@@ -1519,7 +1519,7 @@ function withConfig(
       expectedPartnerDeduplicate,
     }),
   });
-  return { dir, configPath, keyPath: path.join(dir, ".psilink.key") };
+  return { dir, configPath, keyPath: path.join(dir, ".alcove.key") };
 }
 
 // A count-only config in exactly the shape the specification admits: the default
@@ -1568,8 +1568,8 @@ test("validateInvite: an invitation declares the rule set the config names", asy
   // The config names its rule set instead of writing the rules out, so what
   // the partner is offered is the set's own fields and keys under the citation
   // the file wrote -- the same declaration a config holding those rules mints.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-named-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-named-"));
+  const configPath = path.join(dir, "alcove.yaml");
   const { fieldSet, keySet } = DEFAULT_LINKAGE_RULE_SET.reference;
   fs.writeFileSync(
     configPath,
@@ -1594,7 +1594,7 @@ test("validateInvite: an invitation declares the rule set the config names", asy
       resolved: { mode: "offline" },
       options: testOptions({
         configFile: configPath,
-        keyFile: path.join(dir, ".psilink.key"),
+        keyFile: path.join(dir, ".alcove.key"),
       }),
       acceptTimeout: 900,
       log: silentLog,
@@ -1720,8 +1720,8 @@ function withDelimiterConfig(csvDelimiter: string | undefined): {
   keyPath: string;
   input: string;
 } {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-delim-"));
-  const configPath = path.join(dir, "psilink.yaml");
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-delim-"));
+  const configPath = path.join(dir, "alcove.yaml");
   saveConfig(configPath, {
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkageTerms: defaultTerms(),
@@ -1732,7 +1732,7 @@ function withDelimiterConfig(csvDelimiter: string | undefined): {
     input,
     "first_name|last_name|dob|ssn\nAlice|Smith|1990-01-02|123456789\n",
   );
-  return { dir, configPath, keyPath: path.join(dir, ".psilink.key"), input };
+  return { dir, configPath, keyPath: path.join(dir, ".alcove.key"), input };
 }
 
 test("validateInvite: the config's csv_delimiter reads the input its terms are checked against", async () => {
@@ -2191,7 +2191,7 @@ test("validateInvite: a config plus a disagreeing input is refused before mintin
 test("validateInvite: a config whose key cleaning drops every record is refused before minting", async () => {
   // The column the key needs is present, so the field-coverage verdict passes;
   // the key is still self-defeating, and an invitation holding it would mint,
-  // reach a partner, and then be refused by this party's own `psilink exchange`.
+  // reach a partner, and then be refused by this party's own `alcove exchange`.
   const { rendered, configPath, dir } = await mintRefusal({
     terms: deadKeyTerms(),
     header: "first_name,last_name,dob,ssn",
@@ -2321,7 +2321,7 @@ test("validateInvite: offline config-source refuses a standardization that contr
   // The mint-boundary counterpart of the exchange-time fail-closed check: a config
   // whose authored standardization names an output that is no declared linkage
   // field must be refused BEFORE the token is disclosed, so `invite` never mints a
-  // token the config's own `psilink exchange` would then reject (exit 64). No input
+  // token the config's own `alcove exchange` would then reject (exit 64). No input
   // is passed, so this exercises the check in isolation from the input-satisfiability
   // gate.
   const terms = defaultTerms();
@@ -2370,7 +2370,7 @@ test("validateInvite: offline config-source mints a conforming psi-c config", as
 test("validateInvite: offline config-source refuses an algorithm with no run path before minting", async () => {
   // The mint-boundary counterpart of the exchange-time gate: an algorithm no run
   // path honors is refused BEFORE the token is disclosed, so `invite` never mints
-  // an invitation the config's own `psilink exchange` would then refuse (exit 64).
+  // an invitation the config's own `alcove exchange` would then refuse (exit 64).
   // The terms reach the mint past the config parse (see the module mock at the top
   // of this file), which is the shape a member added to AlgorithmSchema ahead of
   // its run path takes at this boundary.
@@ -2562,7 +2562,7 @@ test.each(["cascade", "single-pass"] as const)(
   async (linkageStrategy) => {
     // Both strategies match a deduplicating cardinality, so both mint; a
     // strategy that stopped matching would be refused here BEFORE the token is
-    // disclosed, never minting an invitation the config's own `psilink
+    // disclosed, never minting an invitation the config's own `alcove
     // exchange` would then reject (exit 64). Acceptance derives its own
     // deduplicate as false, so the accepted pair is the one-sided one both
     // strategies run (linkageCardinality.test.ts covers it end to end).
@@ -2594,7 +2594,7 @@ test("validateInvite: offline config-source refuses a fan-out standardization be
   // count-only round counts matched values where the resolution pairs each
   // record at most once): a config whose hand-authored standardization declares
   // `split_on` must be refused BEFORE the token is disclosed, not left for the
-  // config's own `psilink exchange` to reject later (exit 64). An
+  // config's own `alcove exchange` to reject later (exit 64). An
   // OperatorConfigError, since a standardization is only this party's own
   // authoring.
   const terms = countOnlyTerms();
@@ -2842,7 +2842,7 @@ test("validateInvite: config-sourced invite still refuses a pre-existing key fil
 });
 
 test("validateInvite: with no config and an input file, terms are inferred and written", async () => {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-infer-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-infer-"));
   try {
     const input = writeCsv(dir, "first_name,last_name,dob,ssn");
     const ready = await validateInvite({
@@ -2867,7 +2867,7 @@ test("validateInvite: with no config and an input file, terms are inferred and w
 test("validateInvite: offline warns that a --server-* override is ignored", async () => {
   // The offline path writes a placeholder connection block, so a --server-*
   // override cannot take effect; it must be shown rather than silently dropped.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-override-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-override-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const log = getLogger("invite-offline-override-warn");
@@ -2876,8 +2876,8 @@ test("validateInvite: offline warns that a --server-* override is ignored", asyn
   await validateInvite({
     resolved: { mode: "offline", input },
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
       serverUsername: "alice",
     }),
     acceptTimeout: 900,
@@ -2928,7 +2928,7 @@ test("validateInvite: offline warns that a connection-options override is ignore
   // effect; it must be shown, with a remedy distinct from the server warning's
   // -- pointing at connection.options.
   const dir = fs.mkdtempSync(
-    path.join(tmpdir(), "psilink-invite-opt-override-"),
+    path.join(tmpdir(), "alcove-invite-opt-override-"),
   );
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
@@ -2938,8 +2938,8 @@ test("validateInvite: offline warns that a connection-options override is ignore
   await validateInvite({
     resolved: { mode: "offline", input },
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
       peerTimeout: 60,
     }),
     acceptTimeout: 900,
@@ -2962,7 +2962,7 @@ test("validateInvite: offline does not warn about connection.options when no opt
   // override: it feeds peerTimeout only on the online path (via the override
   // bag's `extra`), so an offline invite that sets it must not warn spuriously
   // about a dropped --peer-timeout.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-no-opt-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-no-opt-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const log = getLogger("invite-offline-no-opt-warn");
@@ -2971,8 +2971,8 @@ test("validateInvite: offline does not warn about connection.options when no opt
   await validateInvite({
     resolved: { mode: "offline", input },
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
     acceptTimeout: 900,
     log,
@@ -3013,15 +3013,15 @@ test("validateInvite: online does not warn about a connection-options override (
 // --- validateInvite: --expires-in override -----------------------------------
 
 test("validateInvite: --expires-in sets the token's expiry to the override", async () => {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-expires-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-expires-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const before = Date.now();
   const ready = await validateInvite({
     resolved: { mode: "offline", input },
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
     acceptTimeout: 900,
     expiresIn: "2h",
@@ -3040,15 +3040,15 @@ test("validateInvite: --expires-in sets the token's expiry to the override", asy
 });
 
 test("validateInvite: omitting --expires-in keeps the one-hour default", async () => {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-default-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-default-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const before = Date.now();
   const ready = await validateInvite({
     resolved: { mode: "offline", input },
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
     acceptTimeout: 900,
     log: silentLog,
@@ -3068,7 +3068,7 @@ test("validateInvite: a zero --expires-in is rejected before any token is minted
   // the very top of validateInvite, so the duration rejection -- not the missing
   // input -- is what shows, proving no token is minted on a bad override.
   const promise = validateInvite({
-    resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+    resolved: { mode: "offline", input: "/nonexistent/alcove-input.csv" },
     options: testOptions(),
     acceptTimeout: 900,
     expiresIn: "0m",
@@ -3083,7 +3083,7 @@ test("validateInvite: an --expires-in beyond the one-year maximum is rejected be
   // of validateInvite, so the ceiling rejection -- not the missing input -- is
   // what shows, proving no token is minted.
   const promise = validateInvite({
-    resolved: { mode: "offline", input: "/nonexistent/psilink-input.csv" },
+    resolved: { mode: "offline", input: "/nonexistent/alcove-input.csv" },
     options: testOptions(),
     acceptTimeout: 900,
     expiresIn: "366d",
@@ -3094,15 +3094,15 @@ test("validateInvite: an --expires-in beyond the one-year maximum is rejected be
 });
 
 test("validateInvite: an --expires-in at the one-year maximum is accepted", async () => {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-max-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-max-"));
   tmpDirs.push(dir);
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const before = Date.now();
   const ready = await validateInvite({
     resolved: { mode: "offline", input },
     options: testOptions({
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
     }),
     acceptTimeout: 900,
     expiresIn: "365d",
@@ -3173,24 +3173,24 @@ test("validateInvite: online warns when --expires-in is shorter than --accept-ti
 // --- handler: repeated single-value flag -------------------------------------
 
 test("handler: a repeated --accept-timeout is rejected (exit 64) before validation runs", async () => {
-  // `psilink invite --accept-timeout 60 --accept-timeout 120`: the handler
+  // `alcove invite --accept-timeout 60 --accept-timeout 120`: the handler
   // reads accept-timeout via singleValue before
   // resolveInvitePositionals/validateInvite, so the repeat fails with a clean
   // usage error (exit 64) instead of reaching the `acceptTimeout <= 0` /
   // `acceptTimeout > lifetimeSeconds` comparisons with an array operand. A
   // valid input file is present, so the guard alone stops the mint, print, and write.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-dup-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-dup-"));
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
   try {
     const input = writeCsv(dir, "first_name,last_name,dob,ssn");
-    const configFile = path.join(dir, "psilink.yaml");
-    const keyFile = path.join(dir, ".psilink.key");
+    const configFile = path.join(dir, "alcove.yaml");
+    const keyFile = path.join(dir, ".alcove.key");
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [input],
       "accept-timeout": [60, 120],
@@ -3214,23 +3214,23 @@ test("handler: a repeated --accept-timeout is rejected (exit 64) before validati
 });
 
 test("handler: a bare-integer --accept-timeout is rejected (exit 64) before any side effect", async () => {
-  // `psilink invite --accept-timeout 60`: the value migrated to the duration
+  // `alcove invite --accept-timeout 60`: the value migrated to the duration
   // syntax, so a bare number is no longer accepted. The handler parses it (via
   // durationFlagSeconds) before resolveInvitePositionals/validateInvite, so the
   // rejection fires before the offline commit would mint and print the token and
   // write both files -- exactly the no-side-effect guarantee asserted below.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-bare-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-bare-"));
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
   try {
     const input = writeCsv(dir, "first_name,last_name,dob,ssn");
-    const configFile = path.join(dir, "psilink.yaml");
-    const keyFile = path.join(dir, ".psilink.key");
+    const configFile = path.join(dir, "alcove.yaml");
+    const keyFile = path.join(dir, ".alcove.key");
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [input],
       "accept-timeout": "60",
@@ -3251,25 +3251,25 @@ test("handler: a bare-integer --accept-timeout is rejected (exit 64) before any 
 });
 
 test("handler: an --accept-timeout above the 7d ceiling is rejected (exit 64) before any side effect", async () => {
-  // `psilink invite --accept-timeout 8d`: the value is well-formed but past the
+  // `alcove invite --accept-timeout 8d`: the value is well-formed but past the
   // sanity ceiling, so durationFlagSeconds (with MAX_TIMEOUT_SECONDS) rejects it
   // (exit 64) before resolveInvitePositionals/validateInvite -- so the offline
   // commit never mints or prints the token or writes either file, exactly as the
   // bare-integer case above. The flag-named, max-stating message content is
   // asserted at the shared boundary (cli.test.ts). One day past the 7d cap.
   const overCeiling = `${MAX_TIMEOUT_SECONDS / 86_400 + 1}d`;
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-cap-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-cap-"));
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
   try {
     const input = writeCsv(dir, "first_name,last_name,dob,ssn");
-    const configFile = path.join(dir, "psilink.yaml");
-    const keyFile = path.join(dir, ".psilink.key");
+    const configFile = path.join(dir, "alcove.yaml");
+    const keyFile = path.join(dir, ".alcove.key");
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [input],
       "accept-timeout": overCeiling,
@@ -3295,18 +3295,18 @@ test("handler: an unrecognized --linkage-strategy is rejected (exit 64) before a
   // usage error (exit 64) and no token reaches stdout and no files are written --
   // pinning the wiring symmetrically with the --accept-timeout guards above (the
   // parser itself is unit-tested in bootstrap.test.ts).
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-strat-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-strat-"));
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => undefined) as never);
   try {
     const input = writeCsv(dir, "first_name,last_name,dob,ssn");
-    const configFile = path.join(dir, "psilink.yaml");
-    const keyFile = path.join(dir, ".psilink.key");
+    const configFile = path.join(dir, "alcove.yaml");
+    const keyFile = path.join(dir, ".alcove.key");
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [input],
       "linkage-strategy": "complete",
@@ -3330,10 +3330,10 @@ test("handler: a mistyped --flag exits 64 naming it, before any side effect", as
   // invite sets unknown-options-as-args, so a mistyped --server-usernam lands in
   // the positionals; it must be rejected before any conflict gate, input read, or
   // token mint, not absorbed as an input path.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-unknown-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-unknown-"));
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
-  const configFile = path.join(dir, "psilink.yaml");
-  const keyFile = path.join(dir, ".psilink.key");
+  const configFile = path.join(dir, "alcove.yaml");
+  const keyFile = path.join(dir, ".alcove.key");
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
   const exit = vi
     .spyOn(process, "exit")
@@ -3346,7 +3346,7 @@ test("handler: a mistyped --flag exits 64 naming it, before any side effect", as
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["--server-usernam", "u", input],
       "config-file": configFile,
@@ -3370,7 +3370,7 @@ test("handler: a mistyped --flag exits 64 naming it, before any side effect", as
 // --- handler: the send commitment is persisted end-to-end --------------------
 
 test("handler: offline-from-config persists the disclosed subset into the reused config", async () => {
-  // The end-to-end wiring this whole change exists for. `psilink invite` from a
+  // The end-to-end wiring this whole change exists for. `alcove invite` from a
   // pre-existing config with a metadata block reuses that config (writing only the
   // key) and refreshes disclosed_payload_columns in place, so the later recurring
   // exchange has the commitment to check. validateInvite is tested above; this
@@ -3392,7 +3392,7 @@ test("handler: offline-from-config persists the disclosed subset into the reused
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [],
       "config-file": configPath,
@@ -3442,7 +3442,7 @@ test("handler: offline-from-config removes an acceptor-era outbound consent reco
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [],
       "config-file": configPath,
@@ -3463,11 +3463,11 @@ test("handler: offline-from-config removes an acceptor-era outbound consent reco
 
 test("handler: an offline invitation's placeholder connection has no role", async () => {
   // `role` is a WebRTC-only field: the placeholder block an offline invite writes
-  // is sftp, so the stamp `psilink invite` applies must leave it alone rather
+  // is sftp, so the stamp `alcove invite` applies must leave it alone rather
   // than write a field that channel's schema does not define.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-role-"));
-  const configFile = path.join(dir, "psilink.yaml");
-  const keyFile = path.join(dir, ".psilink.key");
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-role-"));
+  const configFile = path.join(dir, "alcove.yaml");
+  const keyFile = path.join(dir, ".alcove.key");
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
@@ -3480,7 +3480,7 @@ test("handler: an offline invitation's placeholder connection has no role", asyn
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [input],
       "config-file": configFile,
@@ -3509,10 +3509,10 @@ test("handler: the offline notice and the written config point at the block", as
   // placeholder, so both the notice and the file itself have to say where the
   // block for each channel is and that the tuning exists, or the operator never
   // learns filedrop, webrtc, or poll_interval_ms are available.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-guidance-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-guidance-"));
   tmpDirs.push(dir);
-  const configFile = path.join(dir, "psilink.yaml");
-  const keyFile = path.join(dir, ".psilink.key");
+  const configFile = path.join(dir, "alcove.yaml");
+  const keyFile = path.join(dir, ".alcove.key");
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
   const exit = vi
     .spyOn(process, "exit")
@@ -3521,7 +3521,7 @@ test("handler: the offline notice and the written config point at the block", as
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [input],
       "config-file": configFile,
@@ -3545,14 +3545,14 @@ test("handler: the offline notice and the written config point at the block", as
 });
 
 test("handler: offline infer-from-input writes the disclosed subset into the fresh config", async () => {
-  // The fresh-config counterpart: `psilink invite input.csv` infers metadata,
+  // The fresh-config counterpart: `alcove invite input.csv` infers metadata,
   // mints, and writes a new config via saveConfig; disclosed_payload_columns must
   // land in that written file (not just on the token) so the recurring exchange can
   // enforce it -- proven here on the written file, not only at the validateInvite
   // return value.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-infer-"));
-  const configFile = path.join(dir, "psilink.yaml");
-  const keyFile = path.join(dir, ".psilink.key");
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-infer-"));
+  const configFile = path.join(dir, "alcove.yaml");
+  const keyFile = path.join(dir, ".alcove.key");
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(
     input,
@@ -3565,7 +3565,7 @@ test("handler: offline infer-from-input writes the disclosed subset into the fre
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [input],
       "config-file": configFile,
@@ -3595,10 +3595,10 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
   // -- so a template interpolating it would put the secret wherever that
   // routing leads. Driven through the real handler at the noisiest level, so
   // this covers every line the run emits, not just today's printInvitation.
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-secret-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-secret-"));
   const input = writeCsv(dir, "first_name,last_name,dob,ssn");
-  const configFile = path.join(dir, "psilink.yaml");
-  const keyFile = path.join(dir, ".psilink.key");
+  const configFile = path.join(dir, "alcove.yaml");
+  const keyFile = path.join(dir, ".alcove.key");
   const { stderrWrites, restore } = captureStdio();
   const printed: string[] = [];
   const logSpy = vi.spyOn(console, "log").mockImplementation((...args) => {
@@ -3610,7 +3610,7 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: [input],
       "config-file": configFile,
@@ -3636,7 +3636,7 @@ test("handler: the invitation reaches stdout and never a diagnostic line", async
     // than included, and with the identity accepting requires named where they
     // meet the command.
     expect(diagnostics).toContain(
-      "psilink accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
+      "alcove accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
         "<INVITATION> <INPUT_FILE>",
     );
   } finally {
@@ -3671,7 +3671,7 @@ test("handler: online invite whose config write failed keeps exit 73 and says so
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
@@ -3720,7 +3720,7 @@ test("handler: a clean config write leaves the exchange's own exit 73 in place",
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
@@ -3759,7 +3759,7 @@ test("handler: online hands the accept budget to the run and reports what was sa
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
@@ -3799,7 +3799,7 @@ test("handler: a webrtc online invite reports the webrtc peer-budget defaults, n
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["wss://peers.example.org/psi", input],
       "config-file": options.configFile,
@@ -3836,7 +3836,7 @@ test("handler: a failed config write reports no saved peer budget", async () => 
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
@@ -3872,7 +3872,7 @@ test("handler: a failed config write leaves --peer-timeout's warning unfalsified
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
@@ -3911,7 +3911,7 @@ test("handler: a webrtc online invite tells the partner to accept, with no URL a
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["wss://peers.example.org/psi", input],
       "config-file": options.configFile,
@@ -3923,12 +3923,12 @@ test("handler: a webrtc online invite tells the partner to accept, with no URL a
     expect(exit).not.toHaveBeenCalled();
     expect(stderr).toContain("accepts and runs the exchange with:");
     expect(stderr).toContain(
-      "psilink accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
+      "alcove accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
         "<INVITATION> <INPUT_FILE>",
     );
     // Matched on the template's own indented command line, so the peer-budget
     // notice's prose mention of the command does not stand in for it.
-    expect(stderr).not.toContain("\n  psilink exchange");
+    expect(stderr).not.toContain("\n  alcove exchange");
     expect(stderr).not.toContain("wss://peers.example.org");
   } finally {
     stdio.restore();
@@ -3939,7 +3939,7 @@ test("handler: a webrtc online invite tells the partner to accept, with no URL a
 
 test("handler: the server-URL accept template names the identity too", async () => {
   // The third of the three templates, and the one a file-sync partner reads.
-  // Accepting requires a label psilink invents for nobody, so a template that
+  // Accepting requires a label Alcove invents for nobody, so a template that
   // named the server and the invitation but not the identity would hand the
   // partner a command that stops -- the same refusal the other two templates
   // are pinned against.
@@ -3953,7 +3953,7 @@ test("handler: the server-URL accept template names the identity too", async () 
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["sftp://host/drop", input],
       "config-file": options.configFile,
@@ -3964,7 +3964,7 @@ test("handler: the server-URL accept template names the identity too", async () 
     const stderr = stdio.stderrWrites.join("");
     expect(exit).not.toHaveBeenCalled();
     expect(stderr).toContain(
-      "psilink accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
+      "alcove accept --identity <YOUR NAME, YOUR ORGANIZATION> " +
         "sftp://host/drop <INVITATION> <INPUT_FILE>",
     );
   } finally {

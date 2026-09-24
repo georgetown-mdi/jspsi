@@ -2,7 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { expect } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
+import { FileSyncConnection } from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { startInProcessSftpServer } from "../sftpServer";

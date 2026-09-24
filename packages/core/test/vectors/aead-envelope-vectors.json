@@ -8,7 +8,7 @@
   "keyDerivation": {
     "function": "HKDF-SHA-256",
     "saltHex": "0000000000000000000000000000000000000000000000000000000000000000",
-    "infoPrefix": "psilink-aead-v1:",
+    "infoPrefix": "alcove-aead-v2:",
     "note": "info = infoPrefix + context; the initiator sends under context 'initiator-to-responder'."
   },
   "ivLayout": "12 bytes: 4 leading zero bytes (authenticated, not separately validated) followed by an 8-byte big-endian sequence number.",
@@ -30,9 +30,9 @@
       },
       "typeTag": 0,
       "ivHex": "000000000000000000000000",
-      "ciphertextHex": "caba33afbb3a76286cc0f54109589694226a479d9b4f5c1397",
-      "tagHex": "d7d410cdc4c4e0d9411c7f2c5ab289b6",
-      "envelopeHex": "01000000000000000000000000caba33afbb3a76286cc0f54109589694226a479d9b4f5c1397d7d410cdc4c4e0d9411c7f2c5ab289b6"
+      "ciphertextHex": "e547ef614f970df62aeaa503e10f26a394733796f551d72686",
+      "tagHex": "64356d29cd87629e6aa42ccdf9926a37",
+      "envelopeHex": "01000000000000000000000000e547ef614f970df62aeaa503e10f26a394733796f551d7268664356d29cd87629e6aa42ccdf9926a37"
     },
     {
       "name": "binary-initiator-seq4328719365",
@@ -44,9 +44,9 @@
       "payloadHex": "deadbeef",
       "typeTag": 1,
       "ivHex": "000000000000000102030405",
-      "ciphertextHex": "00c04fd8df",
-      "tagHex": "8efad81942f87df44ced7b82ff2d9ded",
-      "envelopeHex": "0100000000000000010203040500c04fd8df8efad81942f87df44ced7b82ff2d9ded"
+      "ciphertextHex": "eef7c52d2e",
+      "tagHex": "7ae4ad8534d00770f4efc5934ba5b0f3",
+      "envelopeHex": "01000000000000000102030405eef7c52d2e7ae4ad8534d00770f4efc5934ba5b0f3"
     },
     {
       "name": "json-responder-seq1",
@@ -60,9 +60,9 @@
       },
       "typeTag": 0,
       "ivHex": "000000000000000000000001",
-      "ciphertextHex": "69ce4b20a11adae637696d7aec",
-      "tagHex": "9b0b2f484303041df450c2ea7edf8f64",
-      "envelopeHex": "0100000000000000000000000169ce4b20a11adae637696d7aec9b0b2f484303041df450c2ea7edf8f64"
+      "ciphertextHex": "6909b7308d29a0b2985215155b",
+      "tagHex": "510436e73cad712c6ce7f9c0700eab78",
+      "envelopeHex": "010000000000000000000000016909b7308d29a0b2985215155b510436e73cad712c6ce7f9c0700eab78"
     }
   ]
 }

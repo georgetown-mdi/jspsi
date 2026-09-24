@@ -5,9 +5,9 @@
 // bounds is the close here and, where the result goes to stdout instead of a
 // path, the drain that hands it to the reader (util/dataIo).
 
-import { TEARDOWN_LEFTOVER_FILES_CLAUSE } from "@psilink/core";
+import { TEARDOWN_LEFTOVER_FILES_CLAUSE } from "@alcove/core";
 
-import type { ConnectionConfig } from "@psilink/core";
+import type { ConnectionConfig } from "@alcove/core";
 
 import { settleWithinCeiling, type CeilingOutcome } from "./util/ceiling";
 import { heldResourceKinds } from "./util/exitGate";

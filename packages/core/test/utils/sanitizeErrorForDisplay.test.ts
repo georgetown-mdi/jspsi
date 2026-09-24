@@ -696,7 +696,7 @@ describe("keepFirstPartyLineBreaks", () => {
     const err = new Error("head");
     Object.defineProperty(
       err,
-      Symbol.for("psilink.errorDisplay.firstPartyLineBreaks"),
+      Symbol.for("alcove.errorDisplay.firstPartyLineBreaks"),
       { value: "head\ncaused by: forged", configurable: true },
     );
     const rendered = sanitizeErrorForDisplay(err);

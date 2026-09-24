@@ -1,7 +1,7 @@
 {
-  "name": "jspsi",
+  "name": "alcove-monorepo",
   "version": "0.0.0",
-  "description": "JavaScript implementation of private set intersection for record linkage.",
+  "description": "Alcove: encrypted matching and sharing through private set intersection for record linkage.",
   "license": "Apache-2.0",
   "author": "Vincent Dorie <vdorie@gmail.com>",
   "workspaces": [
@@ -17,6 +17,7 @@
     "formatcheck": "prettier --list-different .",
     "linkcheck": "node scripts/check-doc-links.mjs",
     "check:all": "node scripts/run-checks.mjs",
+    "check:no-legacy-names": "node scripts/check-no-legacy-names.mjs",
     "check:contributing": "node scripts/check-contributing-scope.mjs",
     "check:claudemd-budget": "node scripts/check-claudemd-budget.mjs",
     "check:comment-narration": "node scripts/check-comment-history-narration.mjs",

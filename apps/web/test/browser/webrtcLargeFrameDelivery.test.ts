@@ -4,7 +4,7 @@ import { expect, inject, test } from "vitest";
 
 import { pack } from "peerjs-js-binarypack";
 
-import { encodeBinaryPackValue, generateSharedSecret } from "@psilink/core";
+import { encodeBinaryPackValue, generateSharedSecret } from "@alcove/core";
 
 import { openPeerMessageConnection } from "../../src/psi/transport/peerMessageConnection.js";
 

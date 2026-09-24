@@ -14,7 +14,7 @@
  * thing on one surface and another elsewhere.
  */
 
-import { hasExpiryInstantPassed } from "@psilink/core";
+import { hasExpiryInstantPassed } from "@alcove/core";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 

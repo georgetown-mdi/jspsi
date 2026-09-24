@@ -20,13 +20,13 @@ import {
   getLogger,
   parseExchangeSpec,
   SHARED_SECRET_REGEX,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ExchangeSpec,
   FileDropConnectionConfig,
   SFTPConnectionConfig,
-} from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+} from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import {
   resolveInvitePositionals,
@@ -73,7 +73,7 @@ vi.mock("../../src/util/prompt", async (importOriginal) => {
 let work: string;
 
 beforeEach(() => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-online-integ-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-online-integ-"));
 });
 
 afterEach(() => {
@@ -103,7 +103,7 @@ const PEER_TIMEOUT_SECONDS = 30;
 // the invite/accept conflict gates pass and each run writes its own files.
 // `record` is left at the shipped CLI default (true) -- matching what the real
 // handlers do -- so the default-on audit-record path is exercised; recordFile is
-// pinned under the work dir (rather than the default `./psilink-record-<stamp>`,
+// pinned under the work dir (rather than the default `./alcove-record-<stamp>`,
 // which would litter the process cwd) so the artifacts are cleaned up with it.
 function testOptions(label: string): CommonBootstrapOptions {
   return {
@@ -398,7 +398,7 @@ async function runOnlineRoundTrip(params: {
       localIdentity?: unknown;
       partnerIdentity?: unknown;
     };
-    expect(record.version).toBe("psilink-exchange-record/v8");
+    expect(record.version).toBe("alcove-exchange-record/v9");
     expect(record.localIdentity).toBe(party.local);
     expect(record.partnerIdentity).toBe(party.partner);
   }
@@ -445,7 +445,7 @@ function expectNoPersistedFiles(options: CommonBootstrapOptions): void {
 
 test("filedrop: online invite + accept round-trip authenticates, finds the intersection, rotates the token, and persists both configs and audit records", async () => {
   // Both parties meet at the same file-drop directory; the URL is what each would
-  // pass on the command line (psilink invite/accept <URL> ...).
+  // pass on the command line (alcove invite/accept <URL> ...).
   const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
   const url = pathToFileURL(dropDir).href;
 

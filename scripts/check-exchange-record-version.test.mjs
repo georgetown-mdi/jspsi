@@ -58,7 +58,7 @@ afterAll(() => {
     rmSync(root, { recursive: true, force: true });
 });
 
-const DEVELOPMENT_VERSION = "psilink-exchange-record/v8";
+const DEVELOPMENT_VERSION = "alcove-exchange-record/v9";
 const FIRST_PUBLISHED_RELEASE = "0.2.0";
 
 /** The kinds a set of violations reports, in the order reported. */
@@ -97,7 +97,7 @@ function fixtureTree({
   recordSource,
   omitRecovery = null,
 } = {}) {
-  const root = mkdtempSync(resolve(tmpdir(), "psilink-record-version-"));
+  const root = mkdtempSync(resolve(tmpdir(), "alcove-record-version-"));
   temporaryRoots.push(root);
   const write = (relative, content) => {
     mkdirSync(resolve(root, dirname(relative)), { recursive: true });
@@ -140,9 +140,9 @@ describe("reading the declared record version", () => {
   it("reads a moved literal as the moved value", () => {
     expect(
       declaredRecordVersion(
-        'export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v7";',
+        'export const EXCHANGE_RECORD_VERSION = "alcove-exchange-record/v7";',
       ),
-    ).toBe("psilink-exchange-record/v7");
+    ).toBe("alcove-exchange-record/v7");
   });
 
   it("reads none from a declaration that is not a quoted literal", () => {
@@ -150,7 +150,7 @@ describe("reading the declared record version", () => {
     // and guessing one would make the rule silently inert.
     for (const source of [
       "export const EXCHANGE_RECORD_VERSION = RECORD_VERSIONS.current;",
-      "export const EXCHANGE_RECORD_VERSION = `psilink-exchange-record/v${n}`;",
+      "export const EXCHANGE_RECORD_VERSION = `alcove-exchange-record/v${n}`;",
       "export { EXCHANGE_RECORD_VERSION } from './versions';",
       "",
     ]) {
@@ -166,7 +166,7 @@ describe("rule 1 fires on a version move and on nothing else", () => {
 
   it("fails a simulated move, naming the obligation rather than only the mismatch", () => {
     const violations = bumpViolations(
-      "psilink-exchange-record/v9",
+      "alcove-exchange-record/v10",
       realSources,
     );
 
@@ -174,7 +174,7 @@ describe("rule 1 fires on a version move and on nothing else", () => {
     const [{ message }] = violations;
     // Both versions, so which of the two is wrong is the maintainer's call.
     expect(message).toContain(RECORD_VERSION_PIN);
-    expect(message).toContain("psilink-exchange-record/v9");
+    expect(message).toContain("alcove-exchange-record/v10");
     // The obligation itself: what a move does to a stored accounting, and what
     // has to be re-taken before the new value is recorded.
     expect(message).toContain("accounting of disclosures");
@@ -231,8 +231,8 @@ describe("before the release that publishes the reset", () => {
   it("leaves the development counter alone wherever it stands", () => {
     for (const declared of [
       DEVELOPMENT_VERSION,
-      "psilink-exchange-record/v9",
-      "psilink-exchange-record/v12",
+      "alcove-exchange-record/v10",
+      "alcove-exchange-record/v13",
     ]) {
       expect(resetViolations(state({ declared }))).toEqual([]);
     }
@@ -287,8 +287,8 @@ describe("the recorded reset discharge", () => {
     // bump after publication, demanding a version that already shipped.
     for (const declared of [
       RESET_RECORD_VERSION,
-      "psilink-exchange-record/v2",
-      "psilink-exchange-record/v3",
+      "alcove-exchange-record/v2",
+      "alcove-exchange-record/v3",
     ]) {
       expect(
         resetViolations(
@@ -353,7 +353,7 @@ describe("the check as CI runs it", () => {
     const { status, stderr } = runCheck(
       fixtureTree({
         releaseVersion: FIRST_PUBLISHED_RELEASE,
-        declared: "psilink-exchange-record/v9",
+        declared: "alcove-exchange-record/v10",
       }),
     );
 
@@ -401,9 +401,9 @@ describe("the check as CI runs it", () => {
   it("passes a published release whose recorded discharges retire both rules", () => {
     // Both discharges driven through the real script, since each is a constant
     // in the check rather than an input the fixture tree holds.
-    const moved = "psilink-exchange-record/v2";
+    const moved = "alcove-exchange-record/v2";
     const scriptRoot = mkdtempSync(
-      resolve(tmpdir(), "psilink-record-version-script-"),
+      resolve(tmpdir(), "alcove-record-version-script-"),
     );
     temporaryRoots.push(scriptRoot);
     mkdirSync(resolve(scriptRoot, "scripts/lib"), { recursive: true });
@@ -449,7 +449,7 @@ describe("the check as CI runs it", () => {
     const root = fixtureTree();
     writeFileSync(
       resolve(root, RELEASE_MANIFEST),
-      JSON.stringify({ name: "psilink" }),
+      JSON.stringify({ name: "alcove" }),
     );
     const { status, stderr } = runCheck(root);
 
@@ -547,6 +547,6 @@ describe("the check's registration", () => {
     expect(storeName).toBeTruthy();
     expect(releases).toContain(dbName);
     expect(releases).toContain(storeName);
-    expect(releases).toContain("psilink-record-");
+    expect(releases).toContain("alcove-record-");
   });
 });

@@ -68,7 +68,7 @@ describe("createWorkdir and writeJobFile enforce least-privilege modes", () => {
     created.push(root);
     const id = generateJobId();
     const { workdir } = await createWorkdir(root, id);
-    const filePath = await writeJobFile(workdir, ".psilink.key", "secret");
+    const filePath = await writeJobFile(workdir, ".alcove.key", "secret");
     expect(fs.statSync(filePath).mode & 0o777).toBe(JOB_FILE_MODE);
     expect(fs.readFileSync(filePath, "utf8")).toBe("secret");
   });
@@ -101,7 +101,7 @@ describe("jobPathPresent", () => {
       created.push(root);
       const parent = path.join(root, "mount");
       fs.mkdirSync(parent, { recursive: true });
-      const filePath = path.join(parent, ".psilink-signing-identity.json");
+      const filePath = path.join(parent, ".alcove-signing-identity.json");
       fs.writeFileSync(filePath, "{}\n");
       fs.chmodSync(parent, 0o000);
       try {

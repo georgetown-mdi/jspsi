@@ -108,14 +108,14 @@ export const OPEN_CONFIGURATION_LABEL = "Open the configuration in my folder";
 
 /** What the control says while nothing has been read. */
 export const OPEN_CONFIGURATION_INVITATION =
-  "If you already run this exchange with psilink on the command line, open " +
-  "its psilink.yaml from the folder you mounted and every step below starts " +
+  "If you already run this exchange with Alcove on the command line, open " +
+  "its alcove.yaml from the folder you mounted and every step below starts " +
   "from it.";
 
 /** What the control says for a mount holding no configuration. Not a fault: a
  * console whose operator has authored nothing yet is the ordinary first run. */
 export const NO_CONFIGURATION_IN_FOLDER =
-  "There is no psilink.yaml in the folder you mounted, so this exchange is " +
+  "There is no alcove.yaml in the folder you mounted, so this exchange is " +
   "authored here from the start.";
 
 /** What the control says for a read that did not answer. */
@@ -133,8 +133,8 @@ export const CONFIGURATION_LOAD_SEALED =
 /** What the review and run steps say for a run of the opened configuration:
  * it uses the key file beside that configuration, so no invitation is sent. */
 export const OPENED_EXCHANGE_CONTINUES =
-  "This run continues the exchange your psilink.yaml set up, under the " +
-  ".psilink.key beside it. No new invitation is made: your partner runs " +
+  "This run continues the exchange your alcove.yaml set up, under the " +
+  ".alcove.key beside it. No new invitation is made: your partner runs " +
   "their side as they usually do.";
 
 /** The review step's start action for a run of the opened configuration. */
@@ -168,9 +168,9 @@ export function channelNotConductedNotice(channel: UnconductedChannel): string {
   return (
     `This configuration runs over ${channel}, and the console conducts sftp ` +
     "and filedrop exchanges only. Change its settings in the steps below, " +
-    `then save them to psilink.yaml on the review step: its ${channel} ` +
+    `then save them to alcove.yaml on the review step: its ${channel} ` +
     "connection is kept exactly as your file states it. Run the saved file " +
-    `with psilink on the command line, which conducts ${channel} exchanges.`
+    `with Alcove on the command line, which conducts ${channel} exchanges.`
   );
 }
 
@@ -188,7 +188,7 @@ export function runWithheldReason(
   return (
     `The console cannot run this ${state.notConducted} configuration: it ` +
     "conducts sftp and filedrop exchanges only. Save your changes to " +
-    "psilink.yaml, then run it with psilink on the command line."
+    "alcove.yaml, then run it with Alcove on the command line."
   );
 }
 
@@ -200,7 +200,7 @@ export const EDITED_TERMS_TITLE = "Your partner holds the terms you opened";
  * What the review step says when the terms the draft builds are not the terms
  * the opened configuration built (`termsEditedSinceOpened`): the partner holds
  * the file's terms and refuses an exchange wherever the two differ, and
- * `psilink update` with `psilink apply` is how both sides change them. The
+ * `alcove update` with `alcove apply` is how both sides change them. The
  * operator can still start the run.
  *
  * Undefined where no edit reaches the partner that way: nothing is open, the
@@ -223,16 +223,16 @@ export function editedTermsWarning(
     return (
       changed +
       "An exchange run from the file you save is refused until they apply " +
-      "yours: after you save, run psilink update and send what it prints to " +
-      "your partner to apply with psilink apply."
+      "yours: after you save, run alcove update and send what it prints to " +
+      "your partner to apply with alcove apply."
     );
   if (!continuesOpenedExchange) return undefined;
   return (
     changed +
     "This run is refused wherever the two differ. To run the terms your " +
     "partner holds, undo the change, or close the configuration and open it " +
-    "again. To change the terms, edit psilink.yaml, run psilink update, and " +
-    "send what it prints to your partner to apply with psilink apply."
+    "again. To change the terms, edit alcove.yaml, run alcove update, and " +
+    "send what it prints to your partner to apply with alcove apply."
   );
 }
 
@@ -296,7 +296,7 @@ export function conversionStatement(
         (receipt ? ", and names no receipt file" : "")
       : "it then names no receipt file";
   return (
-    "Your psilink.yaml names " +
+    "Your alcove.yaml names " +
     (replaced.length === 1 ? "a path" : "paths") +
     " of its own: " +
     nameList(replaced) +
@@ -381,7 +381,7 @@ export function unconvertedSigningWithheldReason(
     "signed receipt off: this exchange then runs unsigned, and " +
     SCHEDULED_CONFIGURATION +
     " keeps your file's signing settings as they are. Or run the file with " +
-    "psilink on the command line."
+    "Alcove on the command line."
   );
 }
 
@@ -399,7 +399,7 @@ export function connectionSettingsHeldNotice(
   return (
     `This configuration's ${state.notConducted} connection, its tuning and ` +
     "file handling included, is saved exactly as your file states it. Edit " +
-    "it in psilink.yaml on the command line."
+    "it in alcove.yaml on the command line."
   );
 }
 
@@ -415,15 +415,15 @@ export type ConfigurationSaveState =
 
 /** What the review step says once the settings are written to the folder. */
 export const CONFIGURATION_SAVED =
-  "Saved your changes to psilink.yaml in your working folder, with its " +
+  "Saved your changes to alcove.yaml in your working folder, with its " +
   "connection as your file stated it. The file as it was before this save " +
   `is kept beside it as ${PREVIOUS_CONFIGURATION_FILE_NAME}. Run it with ` +
-  "psilink on the command line.";
+  "Alcove on the command line.";
 
 /** What the review step says when the save did not answer. */
 export const CONFIGURATION_SAVE_UNAVAILABLE =
   "The console did not answer, so your changes were not saved to " +
-  "psilink.yaml. Save again.";
+  "alcove.yaml. Save again.";
 
 /** The save state one answer from the console leaves for `sent`, the hand-back
  * the save sent. */
@@ -571,7 +571,7 @@ export function carriedThroughNotice(
         " as your file does.") +
     " Edit " +
     (one ? "it" : "them") +
-    " with psilink on the command line."
+    " with Alcove on the command line."
   );
 }
 
@@ -615,7 +615,7 @@ export function termsNotAppliedNotice(
     "under " +
     nameList(fields) +
     ", so the steps below hold what your own columns support. Run this " +
-    "exchange with psilink on the command line to keep " +
+    "exchange with Alcove on the command line to keep " +
     (one ? "that setting" : "those settings") +
     " as your file states " +
     (one ? "it" : "them") +
@@ -652,7 +652,7 @@ export function columnsNotCoveredNotice(
 export const PENDING_OUTBOUND_CONSENT_WARNING =
   "This configuration's outbound_payload_consent is pending, so a run that " +
   "shares results with your partner is refused until it is confirmed with " +
-  "psilink on the command line.";
+  "Alcove on the command line.";
 
 /**
  * What the operator is told when the columns this run would send to the partner
@@ -673,7 +673,7 @@ export function divergedCommitmentWarning(
       "step to match " +
       (one ? "it" : "them") +
       ", or close this configuration."
-    : ", so psilink on the command line refuses to run the file you save " +
+    : ", so Alcove on the command line refuses to run the file you save " +
       "here. Change the columns on the next step to match " +
       (one ? "it" : "them") +
       ", or invite your partner again so a new invitation states these columns.";

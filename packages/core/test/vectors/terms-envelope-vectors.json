@@ -148,7 +148,7 @@
   },
   "signingCertificates": [
     {
-      "version": "psilink-signing-cert/v2",
+      "version": "alcove-signing-cert/v3",
       "algorithm": "ecdsa-p256-sha256",
       "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
       "publicKey": {
@@ -157,10 +157,10 @@
         "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
         "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
       },
-      "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+      "signature": "LB2wzmukLSBqxcFTZZ9Is9tAC9KZky_qtO7SEMR4AERDHuvDUeIhdjQ7ZP4DdQjyST-Oqj5sHdgF9KfcF0HJlQ"
     },
     {
-      "version": "psilink-signing-cert/v2",
+      "version": "alcove-signing-cert/v3",
       "algorithm": "ecdsa-p256-sha256",
       "identity": "Bureau of B, Office of Linkage",
       "publicKey": {
@@ -169,7 +169,7 @@
         "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
         "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
       },
-      "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
+      "signature": "qzvJBS9wJbRKop32wkONNA3f9uG4uRtrRn3SY-ERe9IOiFcAX43RIiXYy3ihD9__VOTSwz6yw31q2yEeSW7htA"
     }
   ],
   "scenarios": [
@@ -386,7 +386,7 @@
             "protocolVersion": 1,
             "disclosesPayload": true,
             "certificate": {
-              "version": "psilink-signing-cert/v2",
+              "version": "alcove-signing-cert/v3",
               "algorithm": "ecdsa-p256-sha256",
               "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
               "publicKey": {
@@ -395,7 +395,7 @@
                 "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
                 "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
               },
-              "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+              "signature": "LB2wzmukLSBqxcFTZZ9Is9tAC9KZky_qtO7SEMR4AERDHuvDUeIhdjQ7ZP4DdQjyST-Oqj5sHdgF9KfcF0HJlQ"
             }
           },
           "carriesLinkageTerms": "partyA"
@@ -417,7 +417,7 @@
             "protocolVersion": 1,
             "disclosesPayload": true,
             "certificate": {
-              "version": "psilink-signing-cert/v2",
+              "version": "alcove-signing-cert/v3",
               "algorithm": "ecdsa-p256-sha256",
               "identity": "Bureau of B, Office of Linkage",
               "publicKey": {
@@ -426,7 +426,7 @@
                 "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
                 "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
               },
-              "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
+              "signature": "qzvJBS9wJbRKop32wkONNA3f9uG4uRtrRn3SY-ERe9IOiFcAX43RIiXYy3ihD9__VOTSwz6yw31q2yEeSW7htA"
             }
           },
           "carriesLinkageTerms": "partyB"
@@ -450,7 +450,7 @@
           "partnerHostKey": null,
           "partnerHostKeyMalformed": false,
           "partnerCertificate": {
-            "version": "psilink-signing-cert/v2",
+            "version": "alcove-signing-cert/v3",
             "algorithm": "ecdsa-p256-sha256",
             "identity": "Bureau of B, Office of Linkage",
             "publicKey": {
@@ -459,7 +459,7 @@
               "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
               "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
             },
-            "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
+            "signature": "qzvJBS9wJbRKop32wkONNA3f9uG4uRtrRn3SY-ERe9IOiFcAX43RIiXYy3ihD9__VOTSwz6yw31q2yEeSW7htA"
           },
           "partnerCertificateMalformed": false
         },
@@ -471,7 +471,7 @@
           "partnerHostKey": null,
           "partnerHostKeyMalformed": false,
           "partnerCertificate": {
-            "version": "psilink-signing-cert/v2",
+            "version": "alcove-signing-cert/v3",
             "algorithm": "ecdsa-p256-sha256",
             "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
             "publicKey": {
@@ -480,7 +480,7 @@
               "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
               "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
             },
-            "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+            "signature": "LB2wzmukLSBqxcFTZZ9Is9tAC9KZky_qtO7SEMR4AERDHuvDUeIhdjQ7ZP4DdQjyST-Oqj5sHdgF9KfcF0HJlQ"
           },
           "partnerCertificateMalformed": false
         }

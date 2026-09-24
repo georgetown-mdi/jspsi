@@ -2,7 +2,7 @@ import {
   ConnectionError,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import {

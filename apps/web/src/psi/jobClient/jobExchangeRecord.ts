@@ -19,7 +19,7 @@
  * for how each outcome is told apart.
  */
 
-import { EXCHANGE_RECORD_OUTCOMES } from "@psilink/core";
+import { EXCHANGE_RECORD_OUTCOMES } from "@alcove/core";
 
 import {
   MAX_JOB_STATUS_RESPONSE_BYTES,
@@ -29,7 +29,7 @@ import { delayUntilAborted } from "@psi/delayUntilAborted";
 
 import { recordFileStamp } from "../runOutputs";
 
-import type { ExchangeRecordOutcome } from "@psilink/core";
+import type { ExchangeRecordOutcome } from "@alcove/core";
 import type { RecordDownloads } from "../exchangeLifecycle";
 import type { RecordUnavailableReason } from "@jobs/jobManager";
 
@@ -59,9 +59,9 @@ export function jobRecordDownloads(
   const stamp = recordFileStamp(createdAt);
   return {
     recordUrl: jobRecordUrl(jobId),
-    recordFileName: `psilink-record-${stamp}.json`,
+    recordFileName: `alcove-record-${stamp}.json`,
     keysUrl: jobKeysUrl(jobId),
-    keysFileName: `psilink-record-${stamp}.keys.json`,
+    keysFileName: `alcove-record-${stamp}.keys.json`,
   };
 }
 

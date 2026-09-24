@@ -5,7 +5,7 @@
 // decides every tag docker/metadata-action publishes the image under, while
 // apps/cli/package.json's version -- the canonical release version
 // (docs/RELEASES.md) -- is what the image build bakes into the client bundle as
-// VITE_PSILINK_VERSION, and that is the version the partner accept kit prints in
+// VITE_ALCOVE_VERSION, and that is the version the partner accept kit prints in
 // every `docker run` line it hands the partner (docs/spec/SERVER_JOB_API.md).
 // Their agreement rests on a release-checklist step ordering, the manifest bump
 // preceding the tag push, and an ordering cannot fail: a tag pushed without the
@@ -86,10 +86,10 @@ export function agreementViolations(tag, version) {
 // interpolation into the `run:` line.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const tag = process.env.PSILINK_TAG;
+  const tag = process.env.ALCOVE_TAG;
   if (tag === undefined || tag === "") {
     console.error(
-      "usage: PSILINK_TAG=vX.Y.Z node scripts/check-release-version.mjs",
+      "usage: ALCOVE_TAG=vX.Y.Z node scripts/check-release-version.mjs",
     );
     process.exit(2);
   }

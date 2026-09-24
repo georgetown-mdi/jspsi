@@ -11,14 +11,14 @@ import { createElement } from "react";
 // bar, intercepting the clicks this walk makes.
 import "@mantine/core/styles.css";
 
-import { encodeInvitation, generateSharedSecret } from "@psilink/core";
+import { encodeInvitation, generateSharedSecret } from "@alcove/core";
 
 import { AcceptorScreen } from "@exchange/AcceptorScreen";
 import { InviterScreen } from "@exchange/InviterScreen";
 
 import { createAppMount } from "./renderApp";
 
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import type { InvitationToken, LinkageTerms } from "@alcove/core";
 
 // A run seat hosts the live WebRTC exchange itself, so unloading mid-run
 // with nothing asking first would end the session for both parties. The

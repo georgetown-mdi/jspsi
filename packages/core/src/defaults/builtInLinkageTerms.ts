@@ -338,7 +338,7 @@ function frozenThroughContents<T>(value: T): T {
  * The one built-in rule set: the {@link DEFAULT_LINKAGE_KEY_SET_NAME} keys
  * over the {@link DEFAULT_LINKAGE_FIELD_SET_NAME} fields, at the version
  * each declares. It is the set every path that authors nothing selects, so
- * a zero-setup exchange, the `psilink init` template, and the web invite
+ * a zero-setup exchange, the `alcove init` template, and the web invite
  * editors' starting point all cite the same rules.
  *
  * Composed from the six declarations above rather than replacing them: the

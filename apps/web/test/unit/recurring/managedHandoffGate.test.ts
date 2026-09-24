@@ -107,7 +107,7 @@ describe("the import refusal for a stored copy that could not be read", () => {
   test("names no hand-off route, none having been read", () => {
     const reason = custodyUnreadableImportReason("Riverbend");
     expect(reason).not.toContain("command line");
-    expect(reason).not.toContain("psilink.yaml");
+    expect(reason).not.toContain("alcove.yaml");
   });
 
   test("names the exchange the operator knows", () => {

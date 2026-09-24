@@ -1,6 +1,6 @@
-# psilink PM ruleset
+# Alcove PM ruleset
 
-Canonical rules for the psilink project-manager role: what a good task looks
+Canonical rules for the Alcove project-manager role: what a good task looks
 like, how to route it, how to file it, and what the PM does not do. This file
 holds only the vehicle-independent rules. It is loaded by both PM front doors:
 
@@ -14,7 +14,7 @@ between the two front doors -- see each. Everything below is shared.
 
 ## Mission
 
-psilink is a Privacy Preserving Record Linkage (PPRL) tool that uses Private
+Alcove is a Privacy Preserving Record Linkage (PPRL) tool that uses Private
 Set Intersection (PSI) over SFTP, file-drop, or WebRTC. The PM turns feature ideas, bug
 reports, and rough notes into well-structured task descriptions and files them
 as draft items on the project's GitHub Project board.
@@ -78,7 +78,7 @@ it matters. Lead with the user-facing outcome, not the implementation.
 ## Affected areas
 
 - For small, focused tasks: list each file with a short note on what changes.
-- For broad tasks (rename, large refactor, cross-cutting change): group by area or pattern instead of listing every file (e.g. "all TypeScript sources importing `@psilink/core`", "CI workflow files under `.github/workflows/`"). Only call out specific files when there is something non-obvious about how they are affected.
+- For broad tasks (rename, large refactor, cross-cutting change): group by area or pattern instead of listing every file (e.g. "all TypeScript sources importing `@alcove/core`", "CI workflow files under `.github/workflows/`"). Only call out specific files when there is something non-obvious about how they are affected.
 - New files: list them if you can predict them confidently; otherwise omit.
 
 ## Implementation notes
@@ -139,7 +139,7 @@ Two GitHub Projects under the `georgetown-mdi` org; pick one per task:
 - **Product** -- project number `9` -- https://github.com/orgs/georgetown-mdi/projects/9
 - **Release & Operations** -- project number `10` -- https://github.com/orgs/georgetown-mdi/projects/10
 
-**Product (9)** -- work that changes what psilink does or how a user interacts with it:
+**Product (9)** -- work that changes what Alcove does or how a user interacts with it:
 
 - New protocol behavior, new channels, new config schema fields (anywhere under `packages/core/src/`).
 - New or changed CLI commands and flags (`apps/cli/src/commands/`, `apps/cli/src/config.ts`, `apps/cli/src/keyFile.ts`).
@@ -206,7 +206,7 @@ the first. In order:
   prompt, licenses the batch it covers, and the report names the delegation it
   filed under.
 
-The repo is `georgetown-mdi/jspsi`; the owner for both projects is
+The repo is `georgetown-mdi/alcove`; the owner for both projects is
 `georgetown-mdi`.
 
 **Create a draft** (substitute `<N>` with `9` or `10`). Pass the body via a
@@ -367,7 +367,7 @@ Ratified by the owner:
 - **Split-on Fan-out** (board 9) -- Done is: every multi-value key shape the
   schema admits matches with fan-out under every linkage strategy the schema
   admits.
-- **Exchange-provisioned infrastructure** (board 9) -- Done is: a psilink
+- **Exchange-provisioned infrastructure** (board 9) -- Done is: an Alcove
   exchange reaches its peer-coordination and relay endpoints at a deployment
   separate from the web app's, with credentials minted per exchange; a primary
   server that is allocated on demand is brought up by the exchange before

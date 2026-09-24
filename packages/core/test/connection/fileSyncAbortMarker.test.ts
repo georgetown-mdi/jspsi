@@ -518,7 +518,7 @@ test("PeerAbortError has the recovery-hint tag so the CLI suppresses the generic
   // runProtocol's isHintTagged walker reads this property to skip the generic
   // "retry without re-inviting" advisory, leaving only the definitive message.
   expect(
-    (new PeerAbortError() as { psilinkRecoveryHintEmitted?: unknown })
-      .psilinkRecoveryHintEmitted,
+    (new PeerAbortError() as { alcoveRecoveryHintEmitted?: unknown })
+      .alcoveRecoveryHintEmitted,
   ).toBe(true);
 });

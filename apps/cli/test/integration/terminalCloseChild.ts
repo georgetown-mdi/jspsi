@@ -11,7 +11,7 @@
 // like a passing case for the other mode. No process.exit(), by design: the
 // exit code must come from a drained event loop.
 import logLibrary from "loglevel";
-import { FileSyncConnection } from "@psilink/core";
+import { FileSyncConnection } from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 
@@ -27,8 +27,7 @@ async function main(): Promise<void> {
   // line is emitted here exactly as an operator would see it. loglevel binds a
   // logger's level at creation, so this precedes the adapter.
   logLibrary.setDefaultLevel("info");
-  const connectionPerPoll =
-    process.env.PSILINK_TEST_CONNECTION_PER_POLL === "1";
+  const connectionPerPoll = process.env.ALCOVE_TEST_CONNECTION_PER_POLL === "1";
   process.stdout.write(
     `MODE ${connectionPerPoll ? "connection-per-poll" : "held-session"}\n`,
   );
@@ -44,12 +43,12 @@ async function main(): Promise<void> {
   await conn.open({
     channel: "sftp",
     server: {
-      host: required("PSILINK_TEST_HOST"),
-      port: Number(required("PSILINK_TEST_PORT")),
-      username: required("PSILINK_TEST_USERNAME"),
-      password: required("PSILINK_TEST_PASSWORD"),
-      hostKeyFingerprint: required("PSILINK_TEST_HOST_KEY"),
-      path: required("PSILINK_TEST_REMOTE_PATH"),
+      host: required("ALCOVE_TEST_HOST"),
+      port: Number(required("ALCOVE_TEST_PORT")),
+      username: required("ALCOVE_TEST_USERNAME"),
+      password: required("ALCOVE_TEST_PASSWORD"),
+      hostKeyFingerprint: required("ALCOVE_TEST_HOST_KEY"),
+      path: required("ALCOVE_TEST_REMOTE_PATH"),
     },
   });
   process.stdout.write("OPENED\n");

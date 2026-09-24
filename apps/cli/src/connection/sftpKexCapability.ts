@@ -9,7 +9,7 @@
 
 import { generateKeyPairSync } from "node:crypto";
 
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
 /**
  * A key-agreement primitive an SSH key-exchange algorithm can be built on,
@@ -163,7 +163,7 @@ interface WarnSink {
  * before this module existed.
  *
  * The offer is expressed through ssh2's own `algorithms.kex` modifier object
- * (`{ remove: [...] }`) rather than through a list psilink enumerates, so ssh2
+ * (`{ remove: [...] }`) rather than through a list Alcove enumerates, so ssh2
  * keeps ownership of WHICH algorithms are offered and in what order, and this
  * module owns only the subtraction. Three shapes reach here and each keeps that
  * property:
@@ -325,7 +325,7 @@ export function isUnperformableKexNegotiationFailure(
  * Given a dial rejection, return it as it stands, or -- when it is a
  * key-exchange negotiation failure on a process missing a primitive -- an
  * error naming the platform capability behind it, holding the original as
- * its `cause`. This is the permanently-incompatible case: nothing psilink
+ * its `cause`. This is the permanently-incompatible case: nothing Alcove
  * offers can satisfy a server that accepts only algorithms built on a
  * missing primitive, and ssh2's own "no matching key exchange algorithm"
  * names neither the withheld algorithms nor the reason, leaving an operator
@@ -346,7 +346,7 @@ export function explainKexNegotiationFailure(
   return new UnperformableKexNegotiationError(
     `the SFTP server accepts no key exchange this host can perform: its ` +
       `crypto provider offers no ${names}. Ask the server's administrator to ` +
-      `enable an ECDH or Diffie-Hellman group exchange, or run psilink on a ` +
+      `enable an ECDH or Diffie-Hellman group exchange, or run Alcove on a ` +
       `host that provides ${names}.`,
     { cause: error },
   );

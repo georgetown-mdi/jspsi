@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { parse as parseYaml } from "yaml";
 
-import { parseExchangeSpec, serializeExchangeDocument } from "@psilink/core";
+import { parseExchangeSpec, serializeExchangeDocument } from "@alcove/core";
 
 import {
   HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
@@ -24,12 +24,12 @@ import type {
   JobSftpExchangeIntent,
   JobZeroSetupSftpIntent,
 } from "@jobs/intentSchemas";
-import type { Metadata, Standardization } from "@psilink/core";
+import type { Metadata, Standardization } from "@alcove/core";
 
 /**
  * The graduation invariant, pinned against drift: everything the console lets an
  * operator author reaches the recurring-run hand-off -- the exchange mode's
- * portable `psilink.yaml` or the zero-setup mode's command line -- and the
+ * portable `alcove.yaml` or the zero-setup mode's command line -- and the
  * composed configuration stays one format with one validator, core's.
  *
  * The enumerations below are `Record`s keyed by the authoring surface's own
@@ -43,7 +43,7 @@ import type { Metadata, Standardization } from "@psilink/core";
 
 /** Where one authorable member is passed into the hand-off. */
 type HandoffRoute =
-  /** A top-level key of the composed `psilink.yaml`. */
+  /** A top-level key of the composed `alcove.yaml`. */
   | { carries: "configKey"; key: string }
   /** An exact token of the zero-setup command line. */
   | { carries: "argvToken"; token: string }
@@ -139,7 +139,7 @@ const DISTINCT_SECRET = "b".repeat(42) + "A";
 const CONTAINER_SIGNING_IDENTITY = "/data/jobs/job-7/signing-identity.json";
 const CONTAINER_RECEIPT_OUTPUT = "/data/jobs/job-7/receipt.json";
 /** The container-internal credential reference the authored server entry holds. */
-const CONTAINER_CREDENTIAL_PATH = "@/etc/psilink/prod-east-password";
+const CONTAINER_CREDENTIAL_PATH = "@/etc/alcove/prod-east-password";
 
 /** An sftp exchange intent with every authorable field set. */
 function maximalExchangeIntent(): JobSftpExchangeIntent {
@@ -401,7 +401,7 @@ describe("every authorable option graduates into the hand-off", () => {
     // The whole command, in order: the connection portion the authored server
     // composes, then the tuning flags, the two selectors, and the positionals.
     expect(maximalZeroSetupArgv()).toEqual([
-      "psilink",
+      "alcove",
       "sftp://sftp.example.org:2222/exchange",
       "--server-username=linkage",
       `--server-password=${HANDOFF_CREDENTIAL_PATH_PLACEHOLDER}`,
@@ -481,7 +481,7 @@ describe("every authorable option graduates into the hand-off", () => {
 describe("the composed config stays one format with one validator", () => {
   test("the template parses through the same core entry point the CLI loads with", () => {
     // `loadConfig` (apps/cli/src/commands/exchange.ts) parses the operator's
-    // psilink.yaml through core's parseExchangeSpec and nothing else, so a
+    // alcove.yaml through core's parseExchangeSpec and nothing else, so a
     // template that survives this parse is one the CLI loads.
     expect(() =>
       parseExchangeSpec(parseYaml(maximalExchangeYaml())),

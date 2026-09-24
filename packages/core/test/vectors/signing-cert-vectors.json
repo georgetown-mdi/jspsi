@@ -1,11 +1,11 @@
 {
-  "description": "Cross-implementation vectors for the psilink-signing-cert/v2 certificate and psilink-signing-identity/v2 identity file: ECDSA over P-256 with SHA-256, the public key an RFC 7518 EC JWK, the signature the fixed-length raw r||s (IEEE P1363). Each vector fixes a private key and an identity. The public coordinates and the certificate fingerprint are known answers -- the fingerprint covers the body and never the signature, so it stays deterministic though ECDSA signing is not. The self-signature is NOT a known answer and is verify-only: it was produced by the openssl CLI (see externalAnchors), so a suite that parses these certificates accepts a signature made outside this codebase. Regenerate with generate-signing-cert-vectors.mjs.",
+  "description": "Cross-implementation vectors for the alcove-signing-cert/v3 certificate and alcove-signing-identity/v3 identity file: ECDSA over P-256 with SHA-256, the public key an RFC 7518 EC JWK, the signature the fixed-length raw r||s (IEEE P1363). Each vector fixes a private key and an identity. The public coordinates and the certificate fingerprint are known answers -- the fingerprint covers the body and never the signature, so it stays deterministic though ECDSA signing is not. The self-signature is NOT a known answer and is verify-only: it was produced by the openssl CLI (see externalAnchors), so a suite that parses these certificates accepts a signature made outside this codebase. Regenerate with generate-signing-cert-vectors.mjs.",
   "construction": {
-    "certificateVersion": "psilink-signing-cert/v2",
-    "identityVersion": "psilink-signing-identity/v2",
+    "certificateVersion": "alcove-signing-cert/v3",
+    "identityVersion": "alcove-signing-identity/v3",
     "algorithm": "ecdsa-p256-sha256",
-    "signatureDomain": "psilink-signing-cert-signature/v1",
-    "fingerprintDomain": "psilink-signing-cert-fingerprint/v1",
+    "signatureDomain": "alcove-signing-cert-signature/v2",
+    "fingerprintDomain": "alcove-signing-cert-fingerprint/v2",
     "signedBytes": "canonicalBytes({ domain: signatureDomain, certificate: { version, algorithm, identity, publicKey: { kty, crv, x, y } } }) (RFC 8785)",
     "fingerprint": "base64url(SHA-256(canonicalBytes({ domain: fingerprintDomain, certificate: <the same body> })))",
     "signatureEncoding": "64 bytes, r || s, each field element left-padded to 32 bytes. Not DER: a field of any other length is rejected rather than decoded.",
@@ -26,10 +26,10 @@
       "expected": {
         "publicKeyX": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
         "publicKeyY": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q",
-        "fingerprint": "WiJHb37O9YMHrcF0R6g0UXgzAjW60jWYVSTgqA326yg"
+        "fingerprint": "VYbRtgjAKf-SCwsc4wB46nySdE1ElNCsX0EHLrsDKKs"
       },
       "certificate": {
-        "version": "psilink-signing-cert/v2",
+        "version": "alcove-signing-cert/v3",
         "algorithm": "ecdsa-p256-sha256",
         "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
         "publicKey": {
@@ -38,10 +38,10 @@
           "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
           "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
         },
-        "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+        "signature": "LB2wzmukLSBqxcFTZZ9Is9tAC9KZky_qtO7SEMR4AERDHuvDUeIhdjQ7ZP4DdQjyST-Oqj5sHdgF9KfcF0HJlQ"
       },
       "identityFile": {
-        "version": "psilink-signing-identity/v2",
+        "version": "alcove-signing-identity/v3",
         "privateKey": {
           "kty": "EC",
           "crv": "P-256",
@@ -50,7 +50,7 @@
           "d": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
         },
         "certificate": {
-          "version": "psilink-signing-cert/v2",
+          "version": "alcove-signing-cert/v3",
           "algorithm": "ecdsa-p256-sha256",
           "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
           "publicKey": {
@@ -59,7 +59,7 @@
             "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
             "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
           },
-          "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+          "signature": "LB2wzmukLSBqxcFTZZ9Is9tAC9KZky_qtO7SEMR4AERDHuvDUeIhdjQ7ZP4DdQjyST-Oqj5sHdgF9KfcF0HJlQ"
         }
       }
     },
@@ -77,10 +77,10 @@
       "expected": {
         "publicKeyX": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
         "publicKeyY": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg",
-        "fingerprint": "fRw3Aonk4i4yd4t28rcUrznFcxhmo6qo3PkzzsUxj1s"
+        "fingerprint": "9DP13l60ghZaPTP57Wh8y-HiLjV2yETFe5kgKASHo-U"
       },
       "certificate": {
-        "version": "psilink-signing-cert/v2",
+        "version": "alcove-signing-cert/v3",
         "algorithm": "ecdsa-p256-sha256",
         "identity": "Bureau of B, Office of Linkage",
         "publicKey": {
@@ -89,10 +89,10 @@
           "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
           "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
         },
-        "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
+        "signature": "qzvJBS9wJbRKop32wkONNA3f9uG4uRtrRn3SY-ERe9IOiFcAX43RIiXYy3ihD9__VOTSwz6yw31q2yEeSW7htA"
       },
       "identityFile": {
-        "version": "psilink-signing-identity/v2",
+        "version": "alcove-signing-identity/v3",
         "privateKey": {
           "kty": "EC",
           "crv": "P-256",
@@ -101,7 +101,7 @@
           "d": "__79_Pv6-fj39vX08_Lx8O_u7ezr6uno5-bl5OPi4eA"
         },
         "certificate": {
-          "version": "psilink-signing-cert/v2",
+          "version": "alcove-signing-cert/v3",
           "algorithm": "ecdsa-p256-sha256",
           "identity": "Bureau of B, Office of Linkage",
           "publicKey": {
@@ -110,13 +110,13 @@
             "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
             "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
           },
-          "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
+          "signature": "qzvJBS9wJbRKop32wkONNA3f9uG4uRtrRn3SY-ERe9IOiFcAX43RIiXYy3ihD9__VOTSwz6yw31q2yEeSW7htA"
         }
       }
     }
   ],
   "externalAnchors": {
-    "signatureProducer": "OpenSSL 3.0.20 7 Apr 2026 (Library: OpenSSL 3.0.20 7 Apr 2026)",
+    "signatureProducer": "OpenSSL 3.6.4 25 Aug 2026 (Library: OpenSSL 3.6.4 25 Aug 2026)",
     "note": "Every checked-in self-signature was produced by the openssl CLI named above (openssl dgst -sha256 -sign, DER read back through openssl asn1parse and re-encoded as the fixed-length raw r||s), over signed bytes this generator assembles from docs/spec/PROTOCOL.md. A suite that parses these certificates is therefore accepting a signature produced outside this codebase."
   }
 }

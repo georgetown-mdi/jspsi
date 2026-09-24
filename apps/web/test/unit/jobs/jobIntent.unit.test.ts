@@ -11,7 +11,7 @@ import {
   disclosedColumnNames,
   safeParseExchangeSpec,
   safeParseMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   ZeroSetupFingerprintListError,
@@ -60,7 +60,7 @@ import type {
   Metadata,
   OutboundPayloadConsent,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // The intent schema is the ONLY channel from the client into a CLI invocation.
 // These pin its injection-closure: unknown/injection-shaped values are rejected,
@@ -284,7 +284,7 @@ describe("jobExchangeIntentSchema enforces exactly-one-of inputCsv/inputFile", (
   });
 
   test("rejects a non-segment inputFile name (same shape rule as the listing)", () => {
-    for (const name of ["../secret", "a/b", ".psilink.key", ""]) {
+    for (const name of ["../secret", "a/b", ".alcove.key", ""]) {
       const intent = validInputFileIntent({ ...SAMPLE_INPUT_FILE_REF, name });
       expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
     }
@@ -674,7 +674,7 @@ describe("the composers state the party's max-age policy", () => {
 });
 
 describe("the composers forward the terms-side commitment", () => {
-  // The console runs `psilink exchange` from this document at a separate
+  // The console runs `alcove exchange` from this document at a separate
   // invocation, so an acceptance's declaration binds the run only if it reaches
   // the YAML. Both composers, because an sftp job assembles its spec directly
   // rather than through mintExchangeFile.
@@ -858,7 +858,7 @@ describe("a stated consent record is composed rather than derived", () => {
 });
 
 describe("a composed acceptance config satisfies the later run's consent gate", () => {
-  /** The verdict a later `psilink exchange` reaches on a composed config: the
+  /** The verdict a later `alcove exchange` reaches on a composed config: the
    * record the config holds, assessed against the set that run would actually
    * transmit -- the exact reading `confirmOutboundPayloadConsent` performs before
    * any credential, terms, or data are sent. `runMetadata` is what the run
@@ -1395,7 +1395,7 @@ describe("composeSftpConfigDocument", () => {
     expect(doc.connection.server.host).toBe("sftp.example.org");
     expect(doc.connection.server.port).toBe(2222);
     expect(doc.connection.server.password).toBe(
-      "@/etc/psilink/prod-east-password",
+      "@/etc/alcove/prod-east-password",
     );
     expect(doc.connection.server.host_key_fingerprint).toBe(
       TEST_HOST_KEY_FINGERPRINT,
@@ -1967,9 +1967,7 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     const argv = zeroSetupSftpArgv(testSftpServerEntry());
     expect(argv).toContain("--server-username=linkage");
     // The @path is emitted as a filename reference, never resolved to a secret.
-    expect(argv).toContain(
-      "--server-password=@/etc/psilink/prod-east-password",
-    );
+    expect(argv).toContain("--server-password=@/etc/alcove/prod-east-password");
     // Single tokens throughout: no bare value flag whose value could be misparsed.
     expect(argv).not.toContain("--server-username");
     expect(argv).not.toContain("--server-password");
@@ -1979,12 +1977,12 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     const argv = zeroSetupSftpArgv({
       host: "sftp.example.org",
       hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
-      privateKey: "@/etc/psilink/id_ed25519",
-      privateKeyPassphrase: "@/etc/psilink/passphrase",
+      privateKey: "@/etc/alcove/id_ed25519",
+      privateKeyPassphrase: "@/etc/alcove/passphrase",
     });
-    expect(argv).toContain("--server-private-key=@/etc/psilink/id_ed25519");
+    expect(argv).toContain("--server-private-key=@/etc/alcove/id_ed25519");
     expect(argv).toContain(
-      "--server-private-key-passphrase=@/etc/psilink/passphrase",
+      "--server-private-key-passphrase=@/etc/alcove/passphrase",
     );
     expect(argv.some((token) => token.startsWith("--server-password"))).toBe(
       false,
@@ -2018,7 +2016,7 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     // The only credential-bearing tokens are @path references, never values: the
     // value portion (after the flag's `=`) always starts with `@`.
     for (const token of argv) {
-      if (!token.includes("psilink")) continue;
+      if (!token.includes("alcove")) continue;
       expect(token.slice(token.indexOf("=") + 1).startsWith("@")).toBe(true);
     }
   });
@@ -2032,7 +2030,7 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
       expect(() =>
         zeroSetupSftpArgv({
           host,
-          password: "@/etc/psilink/pw",
+          password: "@/etc/alcove/pw",
           hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
         }),
       ).toThrow(/could not encode/);
@@ -2043,7 +2041,7 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     expect(() =>
       zeroSetupSftpArgv({
         host: "sftp.example.org",
-        password: "@/etc/psilink/pw",
+        password: "@/etc/alcove/pw",
         hostKeyFingerprint: [
           TEST_HOST_KEY_FINGERPRINT,
           `SHA256:${"B".repeat(43)}`,
@@ -2055,7 +2053,7 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
   test("omits --server-username when the entry holds none", () => {
     const argv = zeroSetupSftpArgv({
       host: "sftp.example.org",
-      password: "@/etc/psilink/pw",
+      password: "@/etc/alcove/pw",
       hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
     });
     expect(argv.some((token) => token.startsWith("--server-username"))).toBe(
@@ -2070,7 +2068,7 @@ function composedFiledropConnection(yaml: string): Record<string, unknown> {
   const parsed = parseYaml(yaml) as { connection?: Record<string, unknown> };
   const connection = parsed.connection;
   if (connection === undefined)
-    throw new Error("composed psilink.yaml has no connection");
+    throw new Error("composed alcove.yaml has no connection");
   return connection;
 }
 

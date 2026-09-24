@@ -9,7 +9,7 @@ they are scanned for URL literals with the other shipped container files, and
 the Dockerfile freeze test requires the `COPY` that puts them in the image.
 
 Two of its scripts answer three questions about an OpenSSL FIPS provider running
-beside the Node in a psilink container base:
+beside the Node in an Alcove container base:
 
 1. Is X25519 among the FIPS provider's key-exchange algorithms?
 2. Is Ed25519 among its signature algorithms?
@@ -74,8 +74,8 @@ The gate is already inside it, at the path its entrypoint runs, so running it
 against the configuration the image ships needs no mount:
 
 ```sh
-docker build -f Dockerfile.fips -t psi-link:fips .
-docker run --rm --entrypoint node psi-link:fips /app/fips-probe/image-engagement.mjs
+docker build -f Dockerfile.fips -t alcove:fips .
+docker run --rm --entrypoint node alcove:fips /app/fips-probe/image-engagement.mjs
 ```
 
 That is also the command to run when a container's startup preamble warns: the
@@ -113,7 +113,7 @@ instead, which is what it is designed to do.
   output of its own. The probe above writes the configurations it measures,
   which is what makes its verdict attributable and also why it cannot answer
   this: it replaces the arrangement an operator gets. This replaces nothing and
-  reaches ENGAGED only when `fips.so` is mapped into the process, psilink's five
+  reaches ENGAGED only when `fips.so` is mapped into the process, Alcove's five
   call shapes -- AES-256-GCM, HKDF-SHA-256, HMAC-SHA-256, SHA-256 and P-256
   ECDH -- all succeed, and an MD5 digest and a below-minimum RSA keygen both
   fail beside them.

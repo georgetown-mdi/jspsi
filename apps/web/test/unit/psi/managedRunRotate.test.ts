@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { generateSharedSecret } from "@psilink/core";
+import { generateSharedSecret } from "@alcove/core";
 
 import {
   RotationPersistError,

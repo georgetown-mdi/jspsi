@@ -463,29 +463,29 @@ describe("--check against the committed default list", () => {
 
 describe("querying a built image", () => {
   it("runs each image's own query against the tag it is given", () => {
-    expect(dockerQueryArgv("default", "psi-link:smoke")).toEqual([
+    expect(dockerQueryArgv("default", "alcove:smoke")).toEqual([
       "run",
       "--rm",
       "--entrypoint",
       "sh",
-      "psi-link:smoke",
+      "alcove:smoke",
       "-c",
       "apk list --installed",
     ]);
-    const fips = dockerQueryArgv("fips", "psi-link:fips-smoke");
+    const fips = dockerQueryArgv("fips", "alcove:fips-smoke");
     expect(fips.slice(0, 5)).toEqual([
       "run",
       "--rm",
       "--entrypoint",
       "sh",
-      "psi-link:fips-smoke",
+      "alcove:fips-smoke",
     ]);
     expect(fips[6]).toContain("rpm -qa --qf");
     expect(fips[6]).toContain("%{LICENSE}");
   });
 
   it("refuses an image it has no query for, and a missing tag", () => {
-    expect(() => dockerQueryArgv("alpine", "psi-link:smoke")).toThrow(
+    expect(() => dockerQueryArgv("alpine", "alcove:smoke")).toThrow(
       /no image is named alpine/,
     );
     expect(() => dockerQueryArgv("default", "")).toThrow(/no image tag/);

@@ -9,8 +9,8 @@ import { afterEach, expect, test, vi } from "vitest";
 // the result table and the record this test reads are built by the real ones.
 const logCapture = vi.hoisted(() => ({ infos: [] as string[] }));
 
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   return {
     ...actual,
     getLogger: () => ({
@@ -34,14 +34,14 @@ import {
   preparePayload,
   toCommittedPayload,
   toRetainedResult,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   AssociationTable,
   CSVRow,
   LinkageTerms,
   Metadata,
   PartnerPayload,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { writeExchangeRecord } from "../../../src/recordFile";
 import { writeOutput } from "../../../src/util/dataIo";
@@ -111,7 +111,7 @@ const partnerTerms: LinkageTerms = { ...terms, identity: "Party B" };
 const tempDirs: string[] = [];
 
 function tempDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-both-sided-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-both-sided-"));
   tempDirs.push(dir);
   return dir;
 }

@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import { mintExchangeFile, PLACEHOLDER_SSH_USERNAME } from "@psilink/core";
-import type { LinkageTerms } from "@psilink/core";
+import { mintExchangeFile, PLACEHOLDER_SSH_USERNAME } from "@alcove/core";
+import type { LinkageTerms } from "@alcove/core";
 
 import { loadConfig } from "../../../src/commands/exchange";
 import { saveKeyFile } from "../../../src/keyFile";
@@ -30,9 +30,9 @@ let configFile: string;
 let keyFile: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-exchange-file-test-"));
-  configFile = path.join(dir, "psilink.yaml");
-  keyFile = path.join(dir, ".psilink.key");
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-exchange-file-test-"));
+  configFile = path.join(dir, "alcove.yaml");
+  keyFile = path.join(dir, ".alcove.key");
 });
 
 afterEach(() => {

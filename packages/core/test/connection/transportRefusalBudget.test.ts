@@ -398,8 +398,8 @@ for (const refusal of REFUSAL_CLASSES) {
     expect(error.message).toBe("the refusal summary");
     expect(error.message).not.toContain(refusal.recoveryStep);
     expect(
-      (error as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted,
+      (error as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
     ).toBe(true);
   });
 }

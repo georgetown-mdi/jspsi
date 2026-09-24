@@ -94,7 +94,7 @@ async function startedLoop(harnessState, appScript = "dev") {
 
 /** A packages/core layout under a throwaway root, with the given mtimes. */
 function coreTree({ sourceMtime, distMtime }) {
-  const root = mkdtempSync(join(tmpdir(), "psilink-dev-"));
+  const root = mkdtempSync(join(tmpdir(), "alcove-dev-"));
   const core = join(root, CORE_WORKSPACE);
   mkdirSync(join(core, "src"), { recursive: true });
   writeFileSync(join(core, "src", "main.ts"), "export const a = 1;\n");
@@ -216,7 +216,7 @@ describe("core's build currency", () => {
 // npm runs the script through, and the tool underneath. It never finishes, so it
 // also stands in for a core build a signal arrives in the middle of.
 function leafWorkspace(script = "leaf") {
-  const root = mkdtempSync(join(tmpdir(), "psilink-dev-leaf-"));
+  const root = mkdtempSync(join(tmpdir(), "alcove-dev-leaf-"));
   writeFileSync(
     join(root, "package.json"),
     JSON.stringify({

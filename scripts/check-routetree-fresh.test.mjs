@@ -107,13 +107,13 @@ describe("freshness against an injected codegen", () => {
       regenerate: () => {
         const error = new Error("Command failed");
         error.stdout = "";
-        error.stderr = "Error: Cannot find module '@psilink/core'";
+        error.stderr = "Error: Cannot find module '@alcove/core'";
         throw error;
       },
     });
     expect(result.ok).toBe(false);
     expect(result.status).toBe("codegen-failed");
-    expect(result.message).toContain("Cannot find module '@psilink/core'");
+    expect(result.message).toContain("Cannot find module '@alcove/core'");
     expect(readFileSync(file, "utf8")).toBe(GENERATED);
   });
 

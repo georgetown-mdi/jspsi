@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { EXCHANGE_RECORD_VERSION } from "@psilink/core";
+import { EXCHANGE_RECORD_VERSION } from "@alcove/core";
 
 import {
   DISCLOSURE_ACCOUNTING_VERSION,
@@ -107,7 +107,7 @@ describe("reading a stored accounting", () => {
     expect(() =>
       parseDisclosureAccounting({
         ...accounting,
-        version: "psilink-disclosure-accounting/v2",
+        version: "alcove-disclosure-accounting/v3",
       }),
     ).toThrow();
   });
@@ -125,7 +125,7 @@ describe("reading a stored accounting", () => {
         ...accounting,
         entries: [
           ...accounting.entries,
-          { ...accounting.entries[0], version: "psilink-exchange-record/v99" },
+          { ...accounting.entries[0], version: "alcove-exchange-record/v100" },
         ],
       }),
     ).toThrow();
@@ -278,8 +278,8 @@ describe("telling a stranded accounting from a stale page", () => {
 
     for (const entry of [
       { ...record, version: `${EXCHANGE_RECORD_VERSION}-moved` },
-      { ...record, version: "psilink-disclosure-accounting/v99" },
-      { ...record, version: "psilink-exchange-record/vNext" },
+      { ...record, version: "alcove-disclosure-accounting/v100" },
+      { ...record, version: "alcove-exchange-record/vNext" },
       { ...record, version: 6 },
       "one disclosure",
       null,
@@ -310,7 +310,7 @@ describe("the envelope-only read is scoped to the envelope, not an override", ()
     expect(() =>
       parseStoredDisclosureAccounting({
         ...accounting,
-        version: "psilink-disclosure-accounting/v2",
+        version: "alcove-disclosure-accounting/v3",
       }),
     ).toThrow();
   });

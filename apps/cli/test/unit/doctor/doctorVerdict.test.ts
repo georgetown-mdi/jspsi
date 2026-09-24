@@ -269,7 +269,7 @@ describe("the human rendering", () => {
           id: "rename_onto_existing",
           status: "warn",
           summary: "will not rename onto an existing file.",
-          meaning: "psilink does that when two sides meet at once.",
+          meaning: "Alcove does that when two sides meet at once.",
           action: "pass --lockless-rendezvous on BOTH sides.",
         },
       ]),

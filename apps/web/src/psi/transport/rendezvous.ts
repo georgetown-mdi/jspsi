@@ -8,7 +8,7 @@ import {
   deriveRendezvousPeerId,
   getLogger,
   mintRelayCredential,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { isDiagnosticMode, whenDiagnostic } from "@utils/diagnostics";
 import { ConfigManager } from "@utils/clientConfig";
@@ -25,7 +25,7 @@ import {
 import { watchIceGathering, withIceServerFailure } from "./iceGathering";
 
 import type { DataConnection, PeerOptions } from "peerjs";
-import type { WebRTCEndpoint } from "@psilink/core";
+import type { WebRTCEndpoint } from "@alcove/core";
 
 const log = getLogger("rendezvous");
 
@@ -101,7 +101,7 @@ const DEFAULT_STUN_URLS = [
 export const RELAY_CREDENTIAL_TTL_SECONDS = RELAY_CREDENTIAL_MAX_TTL_SECONDS;
 
 /** The label in a minted credential's username, `<expiry>:<label>`. */
-const RELAY_CREDENTIAL_LABEL = "psilink";
+const RELAY_CREDENTIAL_LABEL = "alcove";
 
 /**
  * The ICE server list for one run. With no relay, or one naming no url, it is
@@ -203,7 +203,7 @@ export const WEBRTC_ENDPOINT_PATH_REFUSED =
 /**
  * An endpoint refusal in the shape the run's alert reads as an invitation
  * fault: a `security`-kind {@link ConnectionError} holding core's
- * `psilinkRecoveryHintEmitted` tag, which together show the refusal's own text
+ * `alcoveRecoveryHintEmitted` tag, which together show the refusal's own text
  * and remedy with no retry control (`failureFor` in
  * `apps/web/src/exchange/useInviterExchange.ts`). A plain `Error` takes the
  * generic retryable copy instead, and every retry refuses identically, since
@@ -213,7 +213,7 @@ export const WEBRTC_ENDPOINT_PATH_REFUSED =
  */
 function endpointRefusal(message: string): ConnectionError {
   return Object.assign(new ConnectionError(message, "security"), {
-    psilinkRecoveryHintEmitted: true,
+    alcoveRecoveryHintEmitted: true,
   });
 }
 

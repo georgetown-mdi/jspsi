@@ -125,7 +125,7 @@ const HANDED_OFF_IMPORT_REASON: Record<
 > = {
   "command-line": (named) =>
     `${named} is still here, handed off to the command line: it runs from the ` +
-    "psilink.yaml and .psilink.key you saved, on the machine you saved them to, " +
+    "alcove.yaml and .alcove.key you saved, on the machine you saved them to, " +
     "and that machine is its one owner. A backup file taken before the hand-off " +
     "would run a copy you gave away, so nothing was imported. To run this " +
     'exchange in this browser again, open it from the list and choose "Take ' +
@@ -175,7 +175,7 @@ export function custodyUnreadableImportReason(label: string): string {
 }
 
 /**
- * The refusal a command-line `psilink.yaml` and `.psilink.key` meet when the key
+ * The refusal a command-line `alcove.yaml` and `.alcove.key` meet when the key
  * file's secret matches an exchange this browser handed off to the command line.
  * Those files are what the hand-off saved, and the route that brings them back is
  * the re-take on that exchange's own surface: it asks the operator to stop the
@@ -190,7 +190,7 @@ const HANDED_OFF_PAIR_IMPORT_REASON: Record<
     `${named} is still here, handed off to the command line, and these are ` +
     "the files it runs from there, so nothing was imported. To run it in " +
     'this browser again, open it from the list, choose "Take this exchange ' +
-    'back", and choose this .psilink.key there.',
+    'back", and choose this .alcove.key there.',
 };
 
 /** {@link handedOffImportReason} for a command-line pair's import. */
@@ -212,7 +212,7 @@ export function custodyUnreadablePairImportReason(label: string): string {
     `This browser could not read the note it keeps beside ${named} -- the one ` +
     "recording whether this copy was handed off somewhere else -- so nothing " +
     "was imported. Delete that exchange from the list on this page, then " +
-    "import the psilink.yaml and .psilink.key again. If you handed it off to " +
+    "import the alcove.yaml and .alcove.key again. If you handed it off to " +
     "the command line, stop the scheduled run there first."
   );
 }

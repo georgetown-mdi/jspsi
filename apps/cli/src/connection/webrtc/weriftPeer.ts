@@ -11,7 +11,7 @@ import {
   RELAY_CREDENTIAL_MAX_TTL_SECONDS,
   redactAndSanitizeForDisplay,
   selectRunRelay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { REPORT_LIBRARY_INCOMPATIBILITY } from "../libraryIncompatibility";
 import { BROKER_MESSAGE, connectToBroker } from "./brokerClient";
@@ -32,7 +32,7 @@ import type {
   RelayCredential,
   RendezvousRole,
   WebRTCConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   RTCDataChannel,
   RTCIceCandidate,
@@ -119,7 +119,7 @@ export const DEFAULT_CHANNEL_OPEN_TIMEOUT_MS = 30_000;
 
 /**
  * The STUN server a peer connection built with no `iceServers` list gathers
- * against. It is werift's own built-in, not a psilink choice, so the value is
+ * against. It is werift's own built-in, not an Alcove choice, so the value is
  * established by driving the library rather than by reading it: the integration
  * suite resolves this host to loopback and watches the real peer's STUN binding
  * request arrive on this port (`test/integration/webrtc/transport.test.ts`).
@@ -239,7 +239,7 @@ export function assertSctpDrainSupported(peer: RTCPeerConnection): void {
   throw new ConnectionError(
     "the installed WebRTC library does not support the clean close this " +
       "exchange needs, so a final message could be lost when the connection " +
-      "closes. This build of psilink is not compatible with that library; " +
+      "closes. This build of Alcove is not compatible with that library; " +
       `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
     "usage",
   );
@@ -375,7 +375,7 @@ export const WEBRTC_BROKER_PATH_REFUSED =
  * {@link WebRTCServer.secure} for why an omitted value is TLS.
  *
  * It is also where `host` and `path` are refused for shape, since both routes
- * here -- an operator's `psilink.yaml` and the invitation endpoint an offline
+ * here -- an operator's `alcove.yaml` and the invitation endpoint an offline
  * accept persists -- can hold a partner-supplied value. The rule is core's
  * {@link authorityMovingSignalingField}, shared with the browser acceptor so
  * both refuse the same delimiters; the CLI additionally requires a bare
@@ -493,7 +493,7 @@ export function turnEntryNeedsSecretMessage(url: string): string {
   return (
     `the turn entry for ${url} sets no username or credential, so its ` +
     "credential is minted from the exchange's shared secret, and this run " +
-    "holds none. Establish one with 'psilink invite' and 'psilink accept', " +
+    "holds none. Establish one with 'alcove invite' and 'alcove accept', " +
     "or set username and credential on the entry."
   );
 }
@@ -661,7 +661,7 @@ export function buildPeerConfiguration(
  * its dependency tree cost the CLI bundle roughly 0.3 s to load, and the CLI
  * bundles to a single CommonJS file whose external `require`s all run at
  * startup -- so a static import here would put that cost on every invocation,
- * `psilink --version` included, for a channel most runs never open. The
+ * `alcove --version` included, for a channel most runs never open. The
  * measurement and its basis are recorded once, at the lint rule that holds
  * this deferral: the `no-restricted-syntax` entry banning a value import (or
  * re-export) of werift across `apps/cli/src` (eslint.config.mjs).

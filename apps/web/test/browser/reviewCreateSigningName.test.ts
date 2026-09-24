@@ -38,7 +38,7 @@ import type { ReceiptsDraft } from "@psi/receiptsModel";
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
-  psilinkVersion: () => undefined,
+  alcoveVersion: () => undefined,
 }));
 
 /** A canonical 43-character fingerprint: the last character comes from the
@@ -65,8 +65,8 @@ const csv: AcquiredCsv = {
  * transport is offered and its run happens here. */
 const RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
-  locator: "psilink",
-  folderName: "psilink",
+  locator: "alcove",
+  folderName: "alcove",
   sharesDataRoot: false,
   sharesDataRootUncertain: false,
 };

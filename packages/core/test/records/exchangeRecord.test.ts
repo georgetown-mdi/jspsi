@@ -1083,7 +1083,7 @@ describe("serialize / parse", () => {
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const bumped = { ...record, version: "psilink-exchange-record/v9" };
+    const bumped = { ...record, version: "alcove-exchange-record/v10" };
     expect(() => parseExchangeRecord(bumped)).toThrow();
   });
 
@@ -1094,7 +1094,7 @@ describe("serialize / parse", () => {
     // states something it did not -- refused on the version discriminant, like
     // the shapes above.
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const v5 = { ...record, version: "psilink-exchange-record/v5" };
+    const v5 = { ...record, version: "alcove-exchange-record/v5" };
     expect(() => parseExchangeRecord(v5)).toThrow();
   });
 
@@ -1188,7 +1188,7 @@ describe("serialize / parse", () => {
     // than read as unpaired, so a pre-change artifact is a version refusal and not
     // a pairing failure. Pre-release, no migration is offered.
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const v1 = { ...record, version: "psilink-exchange-record/v1" };
+    const v1 = { ...record, version: "alcove-exchange-record/v1" };
     expect(() => parseExchangeRecord(v1)).toThrow();
   });
 
@@ -1198,7 +1198,7 @@ describe("serialize / parse", () => {
     // not what a writer that could not cite one meant. Refused on the version
     // discriminant for the same reason the run binder above is.
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const v2 = { ...record, version: "psilink-exchange-record/v2" };
+    const v2 = { ...record, version: "alcove-exchange-record/v2" };
     expect(() => parseExchangeRecord(v2)).toThrow();
   });
 
@@ -1209,7 +1209,7 @@ describe("serialize / parse", () => {
     // ran no check at all -- so it is refused on the version discriminant, like
     // the two shapes above.
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const v3 = { ...record, version: "psilink-exchange-record/v3" };
+    const v3 = { ...record, version: "alcove-exchange-record/v3" };
     expect(() => parseExchangeRecord(v3)).toThrow();
   });
 

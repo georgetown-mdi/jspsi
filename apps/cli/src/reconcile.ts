@@ -1,10 +1,10 @@
-import { normalizeFiledropPath } from "@psilink/core";
+import { normalizeFiledropPath } from "@alcove/core";
 import type {
   CompatibilityMessageFragment,
   ConnectionConfig,
   FileDropConnectionConfig,
   SFTPConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   RECONCILE_UNSET,

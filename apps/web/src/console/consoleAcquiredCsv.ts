@@ -1,6 +1,6 @@
 import type { AcceptorAcquiredCsv } from "@exchange/acceptorColumnsModel";
 import type { AcquiredCsv } from "@psi/inviterEditor";
-import type { CSVRow } from "@psilink/core";
+import type { CSVRow } from "@alcove/core";
 
 /**
  * The file facts the console acquires from the server-side profile instead of the

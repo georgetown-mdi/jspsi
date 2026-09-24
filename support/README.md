@@ -1,9 +1,9 @@
-# Support: getting psilink running in your environment
+# Support: getting Alcove running in your environment
 
-This area holds what sits *around* psilink rather than in it -- your operating
+This area holds what sits *around* Alcove rather than in it -- your operating
 system, your Docker installation, your agency's network and its policies, and
-the harnesses that measure the ground psilink stands on. Most of it is field
-guides: psilink is barely involved, and the same obstacles face anyone running
+the harnesses that measure the ground Alcove stands on. Most of it is field
+guides: Alcove is barely involved, and the same obstacles face anyone running
 a container against a corporate file server.
 
 These pages are separate from [`docs/`](../docs/README.md) on purpose.
@@ -17,7 +17,7 @@ One subdirectory is not a field guide and is not verified that way:
 [`fips-probe/`](fips-probe/README.md) is a measurement harness, and CI runs it.
 Its entry is below.
 
-If you are choosing, evaluating, or operating psilink deliberately, start at
+If you are choosing, evaluating, or operating Alcove deliberately, start at
 [`docs/`](../docs/README.md) instead. Come here when something will not start,
 or when you need the provider measurements behind a FIPS claim.
 
@@ -33,7 +33,7 @@ or when you need the provider measurements behind a FIPS claim.
 | Nothing to send IT when a network problem turns out to be theirs | [what to ask IT for](windows-network-filedrop/troubleshooting.md#what-to-ask-your-it-department-for) |
 | A Windows PC with no PowerShell, or with policy blocking it | [which version to run](windows-network-filedrop/README.md#which-version-to-run) |
 | Deciding which account to give a Docker CIFS volume, and what happens to its password | [passwords](windows-network-filedrop/passwords.md) |
-| Which OpenSSL FIPS provider algorithms a psilink container base actually serves | [fips-probe](fips-probe/README.md) |
+| Which OpenSSL FIPS provider algorithms an Alcove container base actually serves | [fips-probe](fips-probe/README.md) |
 
 ## Each guide
 
@@ -44,13 +44,13 @@ describe rather than with this repository.
 
 - [windows-network-filedrop](windows-network-filedrop/README.md) -- using a
   file drop that lives on a Windows network location (mapped drive, UNC path,
-  or DFS namespace) with the psilink container. The folder holds a short setup
+  or DFS namespace) with the Alcove container. The folder holds a short setup
   page covering both the PowerShell and the Command Prompt script, a
   [troubleshooting page](windows-network-filedrop/troubleshooting.md) with a
   section per failure, an optional page on
   [choosing the account](windows-network-filedrop/passwords.md) whose password
   Docker will store, and the scripts themselves. The launchers that open the
-  psilink console -- `Start-Psilink.ps1` and `start-psilink.sh` -- live here
+  Alcove console -- `Start-Alcove.ps1` and `start-alcove.sh` -- live here
   too, because the Windows one needs the setup script beside it; the macOS and
   Linux one is here to keep the pair together rather than because the folder's
   subject matter applies to it.
@@ -58,7 +58,7 @@ describe rather than with this repository.
 ## Measurement harnesses
 
 [`fips-probe/`](fips-probe/README.md) answers what an OpenSSL FIPS provider
-running beside the Node in a psilink container base actually serves, by driving
+running beside the Node in an Alcove container base actually serves, by driving
 the provider rather than reading its documentation. It is not a field guide and
 is not verified like one: `fips_provider_probe.yaml` and `image_smoke.yaml` run
 it in CI, and two of its files ship inside the FIPS variant image, which runs

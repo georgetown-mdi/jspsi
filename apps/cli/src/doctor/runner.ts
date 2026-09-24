@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-// The one process boundary `psilink doctor probe` crosses, through
+// The one process boundary `alcove doctor probe` crosses, through
 // `CommandRunner`, so the checks stay unit-testable against a recorded
 // transcript. Two rules make it safe: an argv ARRAY, never a shell string --
 // the server, share, path, username, and domain in it are operator input --

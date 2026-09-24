@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { expect, test, vi } from "vitest";
-import { sanitizeErrorForDisplay, UsageError } from "@psilink/core";
+import { sanitizeErrorForDisplay, UsageError } from "@alcove/core";
 
 import {
   ACCEPT_IDENTITY_QUESTION,
@@ -135,7 +135,7 @@ test("a real label containing the placeholder's text is a name like any other", 
   for (const label of REAL_LABELS) {
     expect(resolveIdentity(label)).toBe(label);
     expect(optionalIdentity(label)).toBe(label);
-    expect(resolveInvitationIdentity(label, "/work/psilink.yaml")).toBe(label);
+    expect(resolveInvitationIdentity(label, "/work/alcove.yaml")).toBe(label);
   }
 });
 
@@ -155,7 +155,7 @@ test("the refusal names the flag that supplies an identity", () => {
 });
 
 test("nothing the CLI ships resolves a party name from the account", () => {
-  // The account psilink runs as is not a label the operator chose, so the
+  // The account Alcove runs as is not a label the operator chose, so the
   // fallback and the user-database read behind it are gone rather than
   // guarded. This is a source check: it holds for every path, including the
   // ones no test drives. It sees only this workspace's own sources, so it
@@ -168,7 +168,7 @@ test("nothing the CLI ships resolves a party name from the account", () => {
 });
 
 test("an invitation's configured identity is returned", () => {
-  expect(resolveInvitationIdentity("Test Party", "/work/psilink.yaml")).toBe(
+  expect(resolveInvitationIdentity("Test Party", "/work/alcove.yaml")).toBe(
     "Test Party",
   );
 });
@@ -178,13 +178,13 @@ test("an invitation over a configuration holding no identity is refused", () => 
   // the two commands that will not proceed unnamed; the refusal names the file
   // and the field, since the flag cannot stand in on this path.
   const raised = refusalFrom(() =>
-    resolveInvitationIdentity(undefined, "/work/psilink.yaml"),
+    resolveInvitationIdentity(undefined, "/work/alcove.yaml"),
   );
   expect(raised).toBeInstanceOf(UsageError);
   expect((raised as Error).message).toBe(
-    configuredIdentityRequired("/work/psilink.yaml"),
+    configuredIdentityRequired("/work/alcove.yaml"),
   );
-  expect((raised as Error).message).toContain("/work/psilink.yaml");
+  expect((raised as Error).message).toContain("/work/alcove.yaml");
   expect((raised as Error).message).toContain("linkage_terms.identity");
 });
 
@@ -195,11 +195,11 @@ test("a whitespace-only configured identity is refused, not held", () => {
   // absence and refuses.
   for (const blank of [" ", "   ", "\t", " \t ", "\n"]) {
     const raised = refusalFrom(() =>
-      resolveInvitationIdentity(blank, "/work/psilink.yaml"),
+      resolveInvitationIdentity(blank, "/work/alcove.yaml"),
     );
     expect(raised).toBeInstanceOf(UsageError);
     expect((raised as Error).message).toBe(
-      configuredIdentityRequired("/work/psilink.yaml"),
+      configuredIdentityRequired("/work/alcove.yaml"),
     );
   }
 });
@@ -211,16 +211,16 @@ test("an invitation over a configuration still holding the placeholder is refuse
   // name the field and the file, since the flag cannot stand in on this path.
   for (const form of PLACEHOLDER_FORMS) {
     const raised = refusalFrom(() =>
-      resolveInvitationIdentity(form, "/work/psilink.yaml"),
+      resolveInvitationIdentity(form, "/work/alcove.yaml"),
     );
     expect(raised).toBeInstanceOf(UsageError);
     expect((raised as Error).message).toBe(
-      configuredIdentityStillPlaceholder("/work/psilink.yaml"),
+      configuredIdentityStillPlaceholder("/work/alcove.yaml"),
     );
   }
-  const message = configuredIdentityStillPlaceholder("/work/psilink.yaml");
+  const message = configuredIdentityStillPlaceholder("/work/alcove.yaml");
   expect(message).toContain("linkage_terms.identity");
-  expect(message).toContain("/work/psilink.yaml");
+  expect(message).toContain("/work/alcove.yaml");
   expect(message).toContain(PLACEHOLDER_IDENTITY);
 });
 
@@ -228,22 +228,22 @@ test("the placeholder refusal escapes the configuration path exactly once", () =
   // Same display-boundary contract as the absent-identity refusal: the path is
   // composed RAW and escaped once by the renderer the CLI shows errors through
   // (CONTRIBUTING.md, Operator-facing escaping).
-  const windows = String.raw`C:\work\psilink.yaml`;
+  const windows = String.raw`C:\work\alcove.yaml`;
   const rendered = sanitizeErrorForDisplay(
     new UsageError(configuredIdentityStillPlaceholder(windows)),
   );
-  expect(rendered).toContain(String.raw`C:\\work\\psilink.yaml`);
+  expect(rendered).toContain(String.raw`C:\\work\\alcove.yaml`);
   expect(rendered).not.toContain(String.raw`C:\\\\work`);
 });
 
 test("a configured identity comes back verbatim, whitespace and all", () => {
   // Trimming decides only whether the refusal fires. The label the partnership
-  // sends is the configuration's own bytes -- every later `psilink exchange`
+  // sends is the configuration's own bytes -- every later `alcove exchange`
   // reads them straight from the file, and a certificate authorizes an exact
   // string -- so this must not hand back a trimmed copy.
-  expect(
-    resolveInvitationIdentity("  Test Party  ", "/work/psilink.yaml"),
-  ).toBe("  Test Party  ");
+  expect(resolveInvitationIdentity("  Test Party  ", "/work/alcove.yaml")).toBe(
+    "  Test Party  ",
+  );
 });
 
 test("the configuration path in the refusal is escaped exactly once", () => {
@@ -252,18 +252,18 @@ test("the configuration path in the refusal is escaped exactly once", () => {
   // control character must not reach the operator's terminal, and a Windows
   // path's backslashes must not come back quadrupled by a second escape at
   // composition (CONTRIBUTING.md, Operator-facing escaping).
-  const windows = String.raw`C:\work\psilink.yaml`;
+  const windows = String.raw`C:\work\alcove.yaml`;
   const rendered = sanitizeErrorForDisplay(
     new UsageError(configuredIdentityRequired(windows)),
   );
-  expect(rendered).toContain(String.raw`C:\\work\\psilink.yaml`);
+  expect(rendered).toContain(String.raw`C:\\work\\alcove.yaml`);
   expect(rendered).not.toContain(String.raw`C:\\\\work`);
 
   const withControl = sanitizeErrorForDisplay(
-    new UsageError(configuredIdentityRequired("/work/\u001b[31mpsilink.yaml")),
+    new UsageError(configuredIdentityRequired("/work/\u001b[31malcove.yaml")),
   );
   expect(withControl).not.toContain("\u001b");
-  expect(withControl).toContain(String.raw`\x1b[31mpsilink.yaml`);
+  expect(withControl).toContain(String.raw`\x1b[31malcove.yaml`);
 });
 
 test("a kept configuration's identity is returned verbatim", () => {
@@ -272,10 +272,10 @@ test("a kept configuration's identity is returned verbatim", () => {
   // exchange under the partnership goes on sending exactly what is there, and a
   // certificate authorizes an exact string.
   expect(
-    resolveKeptConfigurationIdentity("Test Party", "/work/psilink.yaml"),
+    resolveKeptConfigurationIdentity("Test Party", "/work/alcove.yaml"),
   ).toBe("Test Party");
   expect(
-    resolveKeptConfigurationIdentity("  Test Party  ", "/work/psilink.yaml"),
+    resolveKeptConfigurationIdentity("  Test Party  ", "/work/alcove.yaml"),
   ).toBe("  Test Party  ");
 });
 
@@ -285,15 +285,15 @@ test("an acceptance over a configuration holding no identity is refused", () => 
   // field instead of accepting one the partnership would not go on sending.
   for (const missing of [undefined, " ", "   ", "\t", "\n"]) {
     const raised = refusalFrom(() =>
-      resolveKeptConfigurationIdentity(missing, "/work/psilink.yaml"),
+      resolveKeptConfigurationIdentity(missing, "/work/alcove.yaml"),
     );
     expect(raised).toBeInstanceOf(UsageError);
     expect((raised as Error).message).toBe(
-      keptConfigurationIdentityRequired("/work/psilink.yaml"),
+      keptConfigurationIdentityRequired("/work/alcove.yaml"),
     );
   }
-  const message = keptConfigurationIdentityRequired("/work/psilink.yaml");
-  expect(message).toContain("/work/psilink.yaml");
+  const message = keptConfigurationIdentityRequired("/work/alcove.yaml");
+  expect(message).toContain("/work/alcove.yaml");
   expect(message).toContain("linkage_terms.identity");
   expect(message).toContain('--identity "name, org, contact" cannot stand in');
 });
@@ -304,15 +304,15 @@ test("an acceptance over a configuration still holding the placeholder is refuse
   // command line.
   for (const form of PLACEHOLDER_FORMS) {
     const raised = refusalFrom(() =>
-      resolveKeptConfigurationIdentity(form, "/work/psilink.yaml"),
+      resolveKeptConfigurationIdentity(form, "/work/alcove.yaml"),
     );
     expect(raised).toBeInstanceOf(UsageError);
     expect((raised as Error).message).toBe(
-      configuredIdentityStillPlaceholder("/work/psilink.yaml"),
+      configuredIdentityStillPlaceholder("/work/alcove.yaml"),
     );
   }
   for (const label of REAL_LABELS)
-    expect(resolveKeptConfigurationIdentity(label, "/work/psilink.yaml")).toBe(
+    expect(resolveKeptConfigurationIdentity(label, "/work/alcove.yaml")).toBe(
       label,
     );
 });
@@ -321,11 +321,11 @@ test("the kept-configuration refusal escapes its path exactly once", () => {
   // The display-boundary contract every refusal here holds to: the path is
   // composed RAW and escaped once by the renderer the CLI shows errors through
   // (CONTRIBUTING.md, Operator-facing escaping).
-  const windows = String.raw`C:\work\psilink.yaml`;
+  const windows = String.raw`C:\work\alcove.yaml`;
   const rendered = sanitizeErrorForDisplay(
     new UsageError(keptConfigurationIdentityRequired(windows)),
   );
-  expect(rendered).toContain(String.raw`C:\\work\\psilink.yaml`);
+  expect(rendered).toContain(String.raw`C:\\work\\alcove.yaml`);
   expect(rendered).not.toContain(String.raw`C:\\\\work`);
 });
 
@@ -388,7 +388,7 @@ test("an answer takes the treatment a flag value takes", async () => {
     ).rejects.toThrow(IDENTITY_STILL_PLACEHOLDER);
 });
 
-test("both questions state why psilink asks rather than naming the party", () => {
+test("both questions state why Alcove asks rather than naming the party", () => {
   // The prompt copy and the refusals argue the same thing, so an operator meets
   // one account of whose the label is however they reach it.
   expect(IDENTITY_PROMPT_PREAMBLE).toContain(

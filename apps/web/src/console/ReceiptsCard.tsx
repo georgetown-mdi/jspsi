@@ -15,7 +15,7 @@ import {
 } from "@mantine/core";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
-import { MAX_TOKEN_MAX_AGE_DAYS, sanitizeForDisplay } from "@psilink/core";
+import { MAX_TOKEN_MAX_AGE_DAYS, sanitizeForDisplay } from "@alcove/core";
 
 import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient";
 
@@ -74,7 +74,7 @@ const MODE_CHOICES: ReadonlyArray<{
  * value. Each names the remedy, since every one of them is recoverable. The
  * `refused` message holds the whole CLI exit-64 class, unsplittable once stderr
  * is discarded (`runSigningFingerprint` in `jobs/signingIdentity.ts`); one member
- * is a malformed `psilink.yaml` a partner can write when the mount is also the
+ * is a malformed `alcove.yaml` a partner can write when the mount is also the
  * synced folder, so the copy sends the operator to read that file too. The
  * `absent` message answers a read of a picked location holding nothing, and
  * names the command that puts an identity there. Where the operator picked a
@@ -94,7 +94,7 @@ function fingerprintFailureMessage(
         "reads that location and creates no key there, except a file removed " +
         "between this check and the read that follows it. So create the " +
         "identity yourself at the command line -- " +
-        "'psilink fingerprint --identity-file' pointed at that path -- then " +
+        "'alcove fingerprint --identity-file' pointed at that path -- then " +
         "show the fingerprint again. Or pick the file that already holds your " +
         "identity."
       );
@@ -103,23 +103,23 @@ function fingerprintFailureMessage(
         ? "Your signing identity could not be read from the file you picked. " +
             "It may be unreadable, or not a signing identity. Check that file at " +
             "the location you picked, or pick another one. Check too that any " +
-            "psilink.yaml in the folder you mounted is valid YAML. If that " +
-            "folder is also the one your partner syncs into, the psilink.yaml " +
+            "alcove.yaml in the folder you mounted is valid YAML. If that " +
+            "folder is also the one your partner syncs into, the alcove.yaml " +
             "may be theirs, so read it before changing your own setup. A " +
-            "psilink.yaml your partner wrote cannot move where your key is read " +
+            "alcove.yaml your partner wrote cannot move where your key is read " +
             "from or change whose name it binds, because both are passed " +
             "explicitly here. Fix what you find and try again -- running " +
-            "'psilink fingerprint --identity-file' pointed at that file prints " +
+            "'alcove fingerprint --identity-file' pointed at that file prints " +
             "the reason."
         : "Your signing identity could not be created or read in the folder " +
             "you mounted. Check that the folder is writable, that any signing " +
-            "identity already in it is intact, and that any psilink.yaml there " +
+            "identity already in it is intact, and that any alcove.yaml there " +
             "is valid YAML. If that folder is also the one your partner syncs " +
-            "into, the psilink.yaml may be theirs, so read it before changing " +
-            "your own setup. A psilink.yaml your partner wrote cannot move " +
+            "into, the alcove.yaml may be theirs, so read it before changing " +
+            "your own setup. An alcove.yaml your partner wrote cannot move " +
             "where your key is written or change whose name it binds, because " +
             "both are passed explicitly here. Fix what you find and try again " +
-            "-- running 'psilink fingerprint' against the same folder prints " +
+            "-- running 'alcove fingerprint' against the same folder prints " +
             "the reason.";
     case "syncing":
       return (

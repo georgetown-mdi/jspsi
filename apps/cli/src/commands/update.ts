@@ -6,7 +6,7 @@ import {
   operatorSuppliedText,
   redactAndRenderOperatorSuppliedText,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { writeTermsRecord } from "../acceptedTermsRecords";
 import {
@@ -34,7 +34,7 @@ export function builder(cmd: Argv): Argv {
           "Make a terms update from this party's configuration: its linkage\n" +
           "terms and the columns it discloses, authenticated under the shared\n" +
           "secret in the key file. The update is printed to stdout; your\n" +
-          "partner applies it with 'psilink apply'. The key file and the\n" +
+          "partner applies it with 'alcove apply'. The key file and the\n" +
           "connection block are not changed.",
       )
       .option("config-file", {
@@ -63,7 +63,7 @@ export async function handler(argv: Arguments): Promise<void> {
         .map(String);
       if (positionals.length > 0)
         throw new UsageError(
-          "psilink update takes no positional arguments; it reads the " +
+          "alcove update takes no positional arguments; it reads the " +
             "configuration named by --config-file.",
         );
       const configPath =
@@ -115,7 +115,7 @@ export async function handler(argv: Arguments): Promise<void> {
       );
       console.log(update);
       log.info(
-        "Your partner applies it with:\n  psilink apply <UPDATE>\nwhere " +
+        "Your partner applies it with:\n  alcove apply <UPDATE>\nwhere " +
           "<UPDATE> is the update printed above. Until they have applied it, " +
           "an exchange between you is refused wherever your terms and theirs " +
           "differ. " +

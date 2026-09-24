@@ -7,7 +7,7 @@ import {
   getDiagnosticSink,
   getLogger,
   setDiagnosticSink,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   BROKER_MESSAGE,
@@ -297,7 +297,7 @@ test("a broker diagnostic reaches stderr, leaving the ready-line stdout alone", 
   await waitFor(() =>
     broker.stderr().slice(stderrBefore).includes("[client-frame]"),
   );
-  expect(broker.stdout()).toMatch(/^psilink-broker \d+\n$/);
+  expect(broker.stdout()).toMatch(/^alcove-broker \d+\n$/);
 }, 60_000);
 
 test("a broker diagnostic opens with the prefix core would have written", async () => {

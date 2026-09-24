@@ -1,4 +1,4 @@
-import { sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@alcove/core";
 
 /**
  * Keeps an otherwise-idle SFTP session alive past a server's idle timeout by

@@ -1037,7 +1037,7 @@ test("providerOptions cannot redirect the connection via sock or authHandler", a
   expect(opts["authHandler"]).toBeUndefined();
 });
 
-test("providerOptions cannot override the psilink-managed readyTimeout", async () => {
+test("providerOptions cannot override the alcove-managed readyTimeout", async () => {
   // readyTimeout is derived from serverConnectTimeoutMs and is intentionally not
   // on the allowlist, so a providerOptions value cannot shorten or lengthen it.
   const opts = await captureSftpConnectOptions({
@@ -1052,7 +1052,7 @@ test("providerOptions cannot override the psilink-managed readyTimeout", async (
 test("providerOptions cannot supply readyTimeout when the config omits a connect timeout", async () => {
   // Symmetric to the case above: the allowlist drops a providerOptions
   // readyTimeout rather than letting it populate the connect option. With no
-  // serverConnectTimeoutMs the connection then falls back to psilink's documented
+  // serverConnectTimeoutMs the connection then falls back to Alcove's documented
   // 30000 ms default (supplied at the connect site even for a config with no
   // options block), NOT to the dropped providerOptions value or ssh2's default.
   const opts = await captureSftpConnectOptions({
@@ -4207,7 +4207,7 @@ test("poll() terminal: an old-format JSON message shows a likely-incompatible-ve
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   const message = (errors[0] as Error).message;
-  expect(message).toContain("incompatible psilink version");
+  expect(message).toContain("incompatible Alcove version");
   expect(message).toContain("both parties must run the same version");
   // The reframed message replaces the raw envelope-corruption text, not appends.
   expect(message).not.toContain("malformed envelope");
@@ -4238,7 +4238,7 @@ test("poll() terminal: a foreign envelope version byte shows the same version hi
   expect(errors).toHaveLength(1);
   expect(errors[0]).toBeInstanceOf(UsageError);
   const message = (errors[0] as Error).message;
-  expect(message).toContain("incompatible psilink version");
+  expect(message).toContain("incompatible Alcove version");
   expect(message).toContain("envelope version byte 2");
 });
 

@@ -3,7 +3,7 @@
  * reverse of the command-line export ({@link ./managedCronExport.ts}), and the one
  * route from a spent record to a running one.
  *
- * The hand-off wrote the exchange's own secret into the CLI's `.psilink.key`, so
+ * The hand-off wrote the exchange's own secret into the CLI's `.alcove.key`, so
  * bringing it back needs no fresh invitation -- it needs whichever secret the
  * partnership is on now. Each command-line run rotates that secret and writes the
  * rotated one back to the key file, so:
@@ -30,7 +30,7 @@
  * from its own surface ({@link ./managedReinvite.ts}).
  */
 
-import { parseSensitiveJson } from "@psilink/core";
+import { parseSensitiveJson } from "@alcove/core";
 
 import { keyFileFieldsSchema } from "./managedExchangeRecord";
 import { retakeHandedOffManagedExchange } from "./managedExchangeStore";
@@ -49,7 +49,7 @@ export const MAX_KEY_FILE_IMPORT_BYTES = 10_000;
 const KEY_FILE_LABEL = "command-line key file";
 
 /**
- * Parse a `.psilink.key` file's text into the validated key pair the take-back
+ * Parse a `.alcove.key` file's text into the validated key pair the take-back
  * installs. Bounded sensitive parse, then the strict reader-rejects-unknown key
  * schema, so a file holding anything but the pair is rejected before any store write.
  *

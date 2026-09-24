@@ -1,0 +1,9 @@
+[Unit]
+Description=Verify the Alcove relay carries a TURNS allocation
+Documentation=https://github.com/georgetown-mdi/alcove/blob/main/infra/relay/README.md
+After=alcove-relay.service
+Requires=alcove-relay.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/alcove-relay/verify.sh

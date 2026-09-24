@@ -5,7 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import YAML from "yaml";
 
-import { generateSigningIdentity } from "@psilink/core";
+import { generateSigningIdentity } from "@alcove/core";
 
 import { handler } from "../../../src/commands/exchange";
 import { saveKeyFile } from "../../../src/keyFile";
@@ -31,7 +31,7 @@ const SHARED_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-pin-preflight-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-pin-preflight-"));
 });
 
 afterEach(() => {
@@ -42,8 +42,8 @@ afterEach(() => {
 test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "a first contact that cannot record its pin exits 64 with nothing on fd 3 (skipped where a directory cannot be made read-only for its owner)",
   async () => {
-    const configFile = path.join(dir, "psilink.yaml");
-    const keyFile = path.join(dir, ".psilink.key");
+    const configFile = path.join(dir, "alcove.yaml");
+    const keyFile = path.join(dir, ".alcove.key");
     const identityFile = path.join(dir, "signing-identity.json");
     const input = path.join(dir, "in.csv");
     fs.writeFileSync(input, "ssn\n123456789\n");
@@ -81,7 +81,7 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     fs.chmodSync(dir, 0o555);
     const argv = {
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       input,
       "config-file": configFile,
       "key-file": keyFile,

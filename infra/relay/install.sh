@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install the psilink standing relay on this host. Idempotent: run it again after
+# Install the Alcove standing relay on this host. Idempotent: run it again after
 # an edit to the template, the unit, or the Dockerfile and it converges.
 #
 #   install.sh [--skip-verify]
@@ -13,11 +13,11 @@
 # exchange.
 #
 # The runtime is podman where the distribution carries it and docker where it
-# does not, and that decides one thing: which file defines psilink-relay.service.
+# does not, and that decides one thing: which file defines alcove-relay.service.
 # Everything else -- the image, its flags and mounts, the uid probe, the
 # certificate hook, the timers, the registrar -- is the same on either.
 #
-# It refuses to run without /etc/psilink-relay/relay.env, which names the realm.
+# It refuses to run without /etc/alcove-relay/relay.env, which names the realm.
 # Nothing here defaults to a hostname: a realm that does not match what
 # mint-credential.sh signs against fails every credential, quietly, at the point
 # an exchange needs the relay.
@@ -27,10 +27,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # Both paths are literals here and in the unit files, which cannot read a
 # variable this script was given: a configurable root would move the scripts and
 # leave the units pointing at the old one, splitting the install in half.
-ETC=/etc/psilink-relay
-LIBEXEC=/opt/psilink-relay
-ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
-IMAGE="${PSILINK_RELAY_IMAGE:-localhost/psilink-relay:installed}"
+ETC=/etc/alcove-relay
+LIBEXEC=/opt/alcove-relay
+ENV_FILE="${ALCOVE_RELAY_ENV_FILE:-$ETC/relay.env}"
+IMAGE="${ALCOVE_RELAY_IMAGE:-localhost/alcove-relay:installed}"
 QUADLET_DIR=/etc/containers/systemd
 UNIT_DIR=/etc/systemd/system
 
@@ -67,14 +67,14 @@ record_env_value() {
 [ -f "$ENV_FILE" ] || die "no $ENV_FILE. Copy relay.env.example there, set the realm, and run again"
 # shellcheck disable=SC1090
 . "$ENV_FILE"
-[ -n "${PSILINK_RELAY_REALM:-}" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE; refusing to guess a realm"
-log "installing the relay for realm $PSILINK_RELAY_REALM"
+[ -n "${ALCOVE_RELAY_REALM:-}" ] || die "ALCOVE_RELAY_REALM is unset in $ENV_FILE; refusing to guess a realm"
+log "installing the relay for realm $ALCOVE_RELAY_REALM"
 
 # Checked here rather than at the certificate step, which is past the package
 # install and the image build: a missing provider credential is the one failure
 # this script can see coming.
-if [ ! -s "$ETC/certs/fullchain.pem" ] && [ ! -f "${PSILINK_RELAY_ACME_ENV:-$ETC/acme.env}" ]; then
-  die "no certificate and no ${PSILINK_RELAY_ACME_ENV:-$ETC/acme.env}. Copy certs/env.example there at mode 600 and fill in the DNS provider credential"
+if [ ! -s "$ETC/certs/fullchain.pem" ] && [ ! -f "${ALCOVE_RELAY_ACME_ENV:-$ETC/acme.env}" ]; then
+  die "no certificate and no ${ALCOVE_RELAY_ACME_ENV:-$ETC/acme.env}. Copy certs/env.example there at mode 600 and fill in the DNS provider credential"
 fi
 
 # --- the container runtime --------------------------------------------------
@@ -86,7 +86,7 @@ fi
 # A runtime already on the host wins over one dnf could add, so a converge run
 # never moves a running relay from one supervisor to the other. The value this
 # script records in the env file is read back on the next run and pins it.
-RUNTIME="${PSILINK_RELAY_RUNTIME:-}"
+RUNTIME="${ALCOVE_RELAY_RUNTIME:-}"
 if [ -z "$RUNTIME" ]; then
   if command -v podman >/dev/null 2>&1; then
     RUNTIME=podman
@@ -99,32 +99,32 @@ if [ -z "$RUNTIME" ]; then
     else
       log "dnf has no podman on this distribution; installing docker instead"
       dnf -y install docker \
-        || die "this host has neither podman nor docker and dnf could install neither; install one by hand and run again, or set PSILINK_RELAY_RUNTIME in $ENV_FILE"
+        || die "this host has neither podman nor docker and dnf could install neither; install one by hand and run again, or set ALCOVE_RELAY_RUNTIME in $ENV_FILE"
       RUNTIME=docker
     fi
   fi
 fi
 case "$RUNTIME" in
   podman|docker) ;;
-  *) die "PSILINK_RELAY_RUNTIME is '$RUNTIME'; this reference drives podman or docker" ;;
+  *) die "ALCOVE_RELAY_RUNTIME is '$RUNTIME'; this reference drives podman or docker" ;;
 esac
 command -v "$RUNTIME" >/dev/null 2>&1 || die "the runtime is $RUNTIME, which is not on PATH"
 log "container runtime: $RUNTIME"
 # verify.sh runs the same image on the same runtime, from a timer that does no
 # detection of its own.
-record_env_value PSILINK_RELAY_RUNTIME "$RUNTIME"
+record_env_value ALCOVE_RELAY_RUNTIME "$RUNTIME"
 
 if [ "$RUNTIME" = docker ]; then
   # podman needs no daemon. docker's has to be up for the build below, and
-  # psilink-relay-docker.service requires it besides.
+  # alcove-relay-docker.service requires it besides.
   systemctl enable --now docker.service \
     || die "docker.service did not enable and start, so nothing can build or run the relay image; journalctl -u docker.service"
-  # systemd takes an absolute path in ExecStart, and psilink-relay-docker.service
+  # systemd takes an absolute path in ExecStart, and alcove-relay-docker.service
   # carries the path the distribution package uses. Caught here rather than at
   # the first start, which reports it as a unit that cannot locate an executable.
   DOCKER_BIN="$(command -v docker)"
   [ "$DOCKER_BIN" = /usr/bin/docker ] \
-    || die "docker is at $DOCKER_BIN and psilink-relay-docker.service names /usr/bin/docker; point its ExecStart lines at $DOCKER_BIN and run again"
+    || die "docker is at $DOCKER_BIN and alcove-relay-docker.service names /usr/bin/docker; point its ExecStart lines at $DOCKER_BIN and run again"
 fi
 
 command -v openssl >/dev/null 2>&1 || dnf -y install openssl
@@ -154,7 +154,7 @@ fi
 # Optional, and never minted here: a host that holds one keeps it, beside the
 # per-exchange secrets table, until the operator deletes it (README.md,
 # Per-exchange keys).
-SECRET_FILE="${PSILINK_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
+SECRET_FILE="${ALCOVE_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
 install -d -m 700 "$ETC"
 install -d -m 755 "$ETC/certs"
 if [ -f "$SECRET_FILE" ]; then
@@ -186,8 +186,8 @@ case "$IMAGE_GID" in
   ''|*[!0-9]*) die "could not read the image's gid; got '$IMAGE_GID'" ;;
 esac
 log "the image runs as uid $IMAGE_UID, gid $IMAGE_GID"
-record_env_value PSILINK_RELAY_IMAGE_UID "$IMAGE_UID"
-record_env_value PSILINK_RELAY_IMAGE_GID "$IMAGE_GID"
+record_env_value ALCOVE_RELAY_IMAGE_UID "$IMAGE_UID"
+record_env_value ALCOVE_RELAY_IMAGE_GID "$IMAGE_GID"
 
 # --- the secrets table ------------------------------------------------------
 # coturn creates the table's SQLite file at its first start and reads it as the
@@ -198,7 +198,7 @@ record_env_value PSILINK_RELAY_IMAGE_GID "$IMAGE_GID"
 # failed write left, so the file, its journal, and the directory would all need
 # group write, which coturn does not give the file it creates. So the directory
 # is that account's alone, and the units run as its uid and gid.
-install -d -m 700 -o "$IMAGE_UID" -g "$IMAGE_GID" /var/lib/psilink-relay
+install -d -m 700 -o "$IMAGE_UID" -g "$IMAGE_GID" /var/lib/alcove-relay
 
 # --- the scripts this host runs ---------------------------------------------
 install -d -m 755 "$LIBEXEC" "$LIBEXEC/aws" "$LIBEXEC/certs"
@@ -230,59 +230,59 @@ fi
 
 # --- units ------------------------------------------------------------------
 # One service name whichever runtime this is: certs/deploy-hook.sh restarts
-# psilink-relay.service by name and psilink-relay-verify.service requires it, so
+# alcove-relay.service by name and alcove-relay-verify.service requires it, so
 # only the file that defines it differs.
 if [ "$RUNTIME" = podman ]; then
   install -d -m 755 "$QUADLET_DIR"
-  install -m 644 "$HERE/psilink-relay.container" "$QUADLET_DIR/"
-  STALE_UNIT="$UNIT_DIR/psilink-relay.service"
+  install -m 644 "$HERE/alcove-relay.container" "$QUADLET_DIR/"
+  STALE_UNIT="$UNIT_DIR/alcove-relay.service"
 else
-  install -m 644 "$HERE/psilink-relay-docker.service" "$UNIT_DIR/psilink-relay.service"
-  STALE_UNIT="$QUADLET_DIR/psilink-relay.container"
+  install -m 644 "$HERE/alcove-relay-docker.service" "$UNIT_DIR/alcove-relay.service"
+  STALE_UNIT="$QUADLET_DIR/alcove-relay.container"
 fi
 # A unit left by an install on the other runtime would supervise a second
 # container on the same ports, and a plain unit of this name shadows the Quadlet
 # generator's output besides.
 if [ -e "$STALE_UNIT" ]; then
   log "removing $STALE_UNIT, left by an install on the other runtime"
-  systemctl stop psilink-relay.service || true
+  systemctl stop alcove-relay.service || true
   # A plain unit (the docker shape) was `systemctl enable`d at install time and
   # so left a multi-user.target.wants symlink; a Quadlet unit (the podman
   # shape) is generator-provided and was never enabled this way, so disabling
   # it fails with nothing to disable. Tolerated the same way either shape
   # answers, so a docker-to-podman switch does not leave that symlink dangling.
-  systemctl disable psilink-relay.service 2>/dev/null || true
+  systemctl disable alcove-relay.service 2>/dev/null || true
   rm -f "$STALE_UNIT"
 fi
-install -m 644 "$HERE/certs/psilink-relay-cert.service" "$HERE/certs/psilink-relay-cert.timer" "$UNIT_DIR/"
-install -m 644 "$HERE/psilink-relay-verify.service" "$HERE/psilink-relay-verify.timer" "$UNIT_DIR/"
-install -m 644 "$HERE/psilink-relay-sweep.timer" "$UNIT_DIR/"
+install -m 644 "$HERE/certs/alcove-relay-cert.service" "$HERE/certs/alcove-relay-cert.timer" "$UNIT_DIR/"
+install -m 644 "$HERE/alcove-relay-verify.service" "$HERE/alcove-relay-verify.timer" "$UNIT_DIR/"
+install -m 644 "$HERE/alcove-relay-sweep.timer" "$UNIT_DIR/"
 # The two units that run as the image's account, with its uid and gid filled in.
-for unit in psilink-relay-sweep.service psilink-relay-registrar.service; do
-  sed -e "s/__PSILINK_RELAY_IMAGE_UID__/$IMAGE_UID/g" -e "s/__PSILINK_RELAY_IMAGE_GID__/$IMAGE_GID/g" \
+for unit in alcove-relay-sweep.service alcove-relay-registrar.service; do
+  sed -e "s/__ALCOVE_RELAY_IMAGE_UID__/$IMAGE_UID/g" -e "s/__ALCOVE_RELAY_IMAGE_GID__/$IMAGE_GID/g" \
     "$HERE/$unit" > "$UNIT_DIR/$unit.tmp"
   chmod 644 "$UNIT_DIR/$unit.tmp"
   mv "$UNIT_DIR/$unit.tmp" "$UNIT_DIR/$unit"
 done
 
 systemctl daemon-reload || die "systemctl daemon-reload failed, so systemd has not read the relay's unit; check systemd-analyze verify and run again"
-systemctl enable --now psilink-relay-cert.timer \
-  || die "psilink-relay-cert.timer did not start; the certificate would expire unrenewed. journalctl -u psilink-relay-cert.timer"
-systemctl enable --now psilink-relay-verify.timer \
-  || die "psilink-relay-verify.timer did not start; nothing would notice a relay that stopped allocating. journalctl -u psilink-relay-verify.timer"
-systemctl enable --now psilink-relay-sweep.timer \
-  || die "psilink-relay-sweep.timer did not start; lapsed exchange keys would stay registered. journalctl -u psilink-relay-sweep.timer"
+systemctl enable --now alcove-relay-cert.timer \
+  || die "alcove-relay-cert.timer did not start; the certificate would expire unrenewed. journalctl -u alcove-relay-cert.timer"
+systemctl enable --now alcove-relay-verify.timer \
+  || die "alcove-relay-verify.timer did not start; nothing would notice a relay that stopped allocating. journalctl -u alcove-relay-verify.timer"
+systemctl enable --now alcove-relay-sweep.timer \
+  || die "alcove-relay-sweep.timer did not start; lapsed exchange keys would stay registered. journalctl -u alcove-relay-sweep.timer"
 
 if [ "$RUNTIME" = docker ]; then
   # A Quadlet-generated service is enabled by the unit's own [Install] section at
   # generation time. A plain unit file is not enabled by being installed, and a
   # host that rebooted without this would come up with no relay.
-  systemctl enable psilink-relay.service \
-    || die "psilink-relay.service could not be enabled; the relay would not come back after a reboot"
+  systemctl enable alcove-relay.service \
+    || die "alcove-relay.service could not be enabled; the relay would not come back after a reboot"
 fi
-systemctl restart psilink-relay.service \
-  || die "psilink-relay.service did not start; journalctl -u psilink-relay.service carries coturn's own output"
-log "psilink-relay.service started"
+systemctl restart alcove-relay.service \
+  || die "alcove-relay.service did not start; journalctl -u alcove-relay.service carries coturn's own output"
+log "alcove-relay.service started"
 
 # An install from before the mapping moved into the secrets table kept it as a
 # text file under /etc; its exchanges are carried into the table once coturn
@@ -290,7 +290,7 @@ log "psilink-relay.service started"
 OLD_MAP_FILE="$ETC/exchange-keys"
 if [ -f "$OLD_MAP_FILE" ]; then
   for _ in $(seq 30); do
-    [ -f /var/lib/psilink-relay/turndb ] && break
+    [ -f /var/lib/alcove-relay/turndb ] && break
     sleep 1
   done
   (
@@ -307,13 +307,13 @@ if [ -f "$OLD_MAP_FILE" ]; then
 fi
 
 if [ "$REGISTRAR" = 1 ]; then
-  systemctl enable psilink-relay-registrar.service \
-    || die "psilink-relay-registrar.service could not be enabled; the registrar would not come back after a reboot"
-  systemctl restart psilink-relay-registrar.service \
-    || die "psilink-relay-registrar.service did not start; journalctl -u psilink-relay-registrar.service"
-  log "psilink-relay-registrar.service started on port ${PSILINK_RELAY_REGISTRAR_PORT:-8443}"
+  systemctl enable alcove-relay-registrar.service \
+    || die "alcove-relay-registrar.service could not be enabled; the registrar would not come back after a reboot"
+  systemctl restart alcove-relay-registrar.service \
+    || die "alcove-relay-registrar.service did not start; journalctl -u alcove-relay-registrar.service"
+  log "alcove-relay-registrar.service started on port ${ALCOVE_RELAY_REGISTRAR_PORT:-8443}"
 else
-  systemctl disable --now psilink-relay-registrar.service 2>/dev/null || true
+  systemctl disable --now alcove-relay-registrar.service 2>/dev/null || true
   log "no $REGISTRAR_TOKEN_FILE, so the registrar is not running"
 fi
 
@@ -327,10 +327,10 @@ log "verifying"
 # verify.sh's TCP probes get connection-refused when run on the relay box
 # against the public name, even while the relay serves correctly to everyone
 # else. Measured on the relay instance 2026-09-03. render-config.sh already
-# derived this host's private address from PSILINK_RELAY_EXTERNAL_IP_HELPER to
+# derived this host's private address from ALCOVE_RELAY_EXTERNAL_IP_HELPER to
 # render listening-ip=; read it back from there rather than asking the helper
 # again.
-CONF="${PSILINK_RELAY_CONF:-$ETC/turnserver.conf}"
+CONF="${ALCOVE_RELAY_CONF:-$ETC/turnserver.conf}"
 PRIVATE_IP="$(sed -n 's/^listening-ip=//p' "$CONF" | head -1)"
 [ -n "$PRIVATE_IP" ] || die "could not read listening-ip from $CONF; render-config.sh should have written it"
-PSILINK_RELAY_VERIFY_CONNECT="$PRIVATE_IP" "$LIBEXEC/verify.sh"
+ALCOVE_RELAY_VERIFY_CONNECT="$PRIVATE_IP" "$LIBEXEC/verify.sh"

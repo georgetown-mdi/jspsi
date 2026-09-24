@@ -191,7 +191,7 @@ export interface InvitationLegalAgreementSummary {
  *
  * The name and version are the inviter's own declaration about its rules: a
  * surface presents them as the inviting party's citation, not a
- * psilink-vouched provenance, since the token is accepted on a transcription
+ * alcove-vouched provenance, since the token is accepted on a transcription
  * checksum rather than an authenticity guarantee.
  *
  * {@link verdict} is not the inviter's claim -- it is this build's own check

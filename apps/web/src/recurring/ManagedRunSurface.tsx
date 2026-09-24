@@ -10,7 +10,7 @@ import {
 } from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 
-import { describeResolvedMatching } from "@psilink/core";
+import { describeResolvedMatching } from "@alcove/core";
 
 import { triggerBlobDownload } from "@components/blobDownload";
 import { useOnlineStatus } from "@components/useOnlineStatus";
@@ -133,7 +133,7 @@ import { REINVITE_RUN_IN_FLIGHT_REASON } from "./managedReinviteGate";
 import { useManagedRunInFlight } from "./useManagedRunInFlight";
 
 import type { Ref } from "react";
-import type { ResolvedMatching } from "@psilink/core";
+import type { ResolvedMatching } from "@alcove/core";
 
 import type {
   ManagedExchangeLocalEdits,
@@ -1123,9 +1123,8 @@ export function ManagedRunSurface({ id }: { id: string }) {
           <>
             <h1>Handed off to the command line</h1>
             <p className={styles.sub}>
-              You exported this exchange&apos;s psilink.yaml and .psilink.key,
-              so it no longer runs here. Run it on the machine you saved them
-              to:
+              You exported this exchange&apos;s alcove.yaml and .alcove.key, so
+              it no longer runs here. Run it on the machine you saved them to:
             </p>
             <p className={styles.mono}>{commandLineHandoff}</p>
             <p className={styles.small}>
@@ -1863,7 +1862,7 @@ function ReinvitePanel({
  * the artifact this browser restores from. A backup export leaves this exchange live;
  * a migration export hands it off to another device, spending this copy. Both are
  * named against the command-line export below, whose two files bring back no secret
- * (its `psilink.yaml` imports as a configuration only), so the state this panel shows
+ * (its `alcove.yaml` imports as a configuration only), so the state this panel shows
  * is about the restorable file alone.
  * The custody guidance matches the CLI key file's: the file is a plaintext credential
  * to keep under owner-only custody. */
@@ -2005,7 +2004,7 @@ function SpentSurface({
       <h1>This exchange was handed off</h1>
       <p className={styles.sub}>
         You handed this exchange to the command line{on}, so it no longer runs
-        here. It runs from the psilink.yaml and .psilink.key you saved, on the
+        here. It runs from the alcove.yaml and .alcove.key you saved, on the
         machine you saved them to.
       </p>
       {refused}
@@ -2038,7 +2037,7 @@ function SpentSurface({
  *
  * Behind a confirmation, because the browser cannot see either thing the operator
  * has to have settled: that the scheduled run on the other machine is stopped, and
- * whether it has run since the hand-off -- which decides whether the `.psilink.key`
+ * whether it has run since the hand-off -- which decides whether the `.alcove.key`
  * from that machine is needed. Declining writes nothing and leaves the copy spent.
  *
  * The key file is optional at the confirmation rather than required, since the
@@ -2116,7 +2115,7 @@ function RetakeControl({
         <FileButton accept="application/json,.key" onChange={setKeyFile}>
           {(props) => (
             <Button variant="default" {...props}>
-              Choose the .psilink.key file
+              Choose the .alcove.key file
             </Button>
           )}
         </FileButton>

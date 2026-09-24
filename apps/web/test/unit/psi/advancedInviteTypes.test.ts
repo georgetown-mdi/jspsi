@@ -5,7 +5,7 @@ import {
   outputForDirection,
 } from "../../../src/psi/authoring/advancedInviteTypes.js";
 
-import type { Output } from "@psilink/core";
+import type { Output } from "@alcove/core";
 import type { OutputDirection } from "../../../src/psi/authoring/advancedInviteTypes.js";
 
 /** Every direction the editor can hold, as a total record so a fourth one cannot

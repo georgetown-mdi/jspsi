@@ -10,7 +10,7 @@ import { createElement } from "react";
 // unstyled DOM a contrast walk cannot resolve a background from.
 import "@mantine/core/styles.css";
 
-import { encodeInvitation, generateSharedSecret } from "@psilink/core";
+import { encodeInvitation, generateSharedSecret } from "@alcove/core";
 
 import { AcceptorScreen } from "@exchange/AcceptorScreen";
 import { Lobby } from "@exchange/Lobby";
@@ -20,7 +20,7 @@ import { VerifyReceiptScreen } from "@exchange/VerifyReceiptScreen";
 
 import { createAppMount } from "./renderApp";
 
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import type { InvitationToken, LinkageTerms } from "@alcove/core";
 import type { ReactNode } from "react";
 
 // BREADTH contrast sweep over the primary rendered web routes, complementing

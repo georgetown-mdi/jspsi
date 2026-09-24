@@ -13,7 +13,7 @@ import {
   maxCodeUnits,
   readRowColumn,
   streamCSVRows,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { PREVIEW_SAMPLE_SIZE } from "@psi/columnSamples";
 import { createFieldCoverageAccumulator } from "@psi/workers/nonEmptyAggregate";
@@ -28,7 +28,7 @@ import {
 import { JOB_DATA_ROOT_ENV } from "./gate";
 
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
-import type { Standardization } from "@psilink/core";
+import type { Standardization } from "@alcove/core";
 
 /**
  * The environment variable naming the operator-mounted directory the console

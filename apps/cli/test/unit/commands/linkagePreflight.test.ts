@@ -7,9 +7,9 @@ import {
   MAX_NAME_LENGTH,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
-import { CAUSE_DEPTH_ELISION_MARKER } from "@psilink/core/testing";
-import type { getLogger, LinkageTerms } from "@psilink/core";
+} from "@alcove/core";
+import { CAUSE_DEPTH_ELISION_MARKER } from "@alcove/core/testing";
+import type { getLogger, LinkageTerms } from "@alcove/core";
 
 import {
   checkLinkageSatisfiability,

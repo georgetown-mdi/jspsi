@@ -19,7 +19,7 @@ const DEL = String.fromCharCode(0x7f);
 const SHAPED_NO_DOT = ["input.csv", "clients", "a b", "id_ed25519", "x"];
 
 // Shape-admissible names that DO start with a dot: the only divergence point.
-const SHAPED_LEADING_DOT = [".ssh", ".psilink.key", ".env", "...", ".a"];
+const SHAPED_LEADING_DOT = [".ssh", ".alcove.key", ".env", "...", ".a"];
 
 // Names failing a SHARED shape check: both rules reject, regardless of the dot.
 // Control-char cases are built from char codes so no literal control byte lands

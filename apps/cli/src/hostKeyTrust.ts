@@ -6,8 +6,8 @@ import {
   redactPrivateKeyMaterial,
   UsageError,
   getLogger,
-} from "@psilink/core";
-import type { ConnectionConfig, PresentedHostKey } from "@psilink/core";
+} from "@alcove/core";
+import type { ConnectionConfig, PresentedHostKey } from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 import { persistHostKeyFingerprint } from "./config";
@@ -279,7 +279,7 @@ export async function establishHostKeyTrust(
         `trusting ${hostDisplay}'s host key (${presented.fingerprint}) for ` +
           `this ` +
           `exchange only; it is not saved. Use a saved configuration ` +
-          `(psilink invite/accept, or --save) to pin it for future runs.`,
+          `(alcove invite/accept, or --save) to pin it for future runs.`,
       );
       break;
   }

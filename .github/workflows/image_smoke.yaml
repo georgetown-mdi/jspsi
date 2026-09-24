@@ -105,11 +105,11 @@ jobs:
         include:
           - variant: default
             dockerfile: Dockerfile
-            tag: psi-link:smoke
+            tag: alcove:smoke
             fips: "false"
           - variant: fips
             dockerfile: Dockerfile.fips
-            tag: psi-link:fips-smoke
+            tag: alcove:fips-smoke
             fips: "true"
     steps:
       - uses: actions/checkout@v7
@@ -118,7 +118,7 @@ jobs:
       # image, so it needs the version this repository requires (package.json
       # engines) rather than whatever the runner image happens to ship. The
       # script is dependency-free, so a plain pinned Node suffices -- no npm ci
-      # or @psilink/core build (the ./.github/actions/setup prologue) needed.
+      # or @alcove/core build (the ./.github/actions/setup prologue) needed.
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
@@ -195,7 +195,7 @@ jobs:
           set -euo pipefail
           docker run --rm --entrypoint sh ${{ matrix.tag }} -c '
             set -eu
-            for tree in /work /run/psilink/sftp-credentials
+            for tree in /work /run/alcove/sftp-credentials
             do
               probe="$tree/.write-probe.$$"
               if ! touch "$probe"; then
@@ -321,9 +321,9 @@ jobs:
               -v "$work/$1":/work -v "$work/repoint.awk":/repoint.awk:ro \
               --entrypoint sh ${{ matrix.tag }} -c '
                 set -e
-                awk -f /repoint.awk /work/psilink.yaml > /work/psilink.yaml.repointed
-                mv /work/psilink.yaml.repointed /work/psilink.yaml
-                chmod 600 /work/psilink.yaml
+                awk -f /repoint.awk /work/alcove.yaml > /work/alcove.yaml.repointed
+                mv /work/alcove.yaml.repointed /work/alcove.yaml
+                chmod 600 /work/alcove.yaml
               '
           }
           cli() {
@@ -352,7 +352,7 @@ jobs:
             exit 1
           fi
           repoint inviter
-          key_before=$(sudo sha256sum "$work/inviter/.psilink.key" | cut -d " " -f 1)
+          key_before=$(sudo sha256sum "$work/inviter/.alcove.key" | cut -d " " -f 1)
 
           cli acceptor accept "$invitation" input.csv --consent-to-terms --identity "CI Smoke Acceptor"
           repoint acceptor
@@ -390,7 +390,7 @@ jobs:
           # rests on the modes of what lands there.
           #
           # Two names are skipped inside the two walked mounts. input.csv is the
-          # file this step placed there itself. psilink.yaml is excluded because
+          # file this step placed there itself. alcove.yaml is excluded because
           # its mode here would be this step's own doing rather than the image's:
           # the repoint above rewrites the file through a shell redirect, which
           # creates it at the container's umask, and then chmods the result to
@@ -399,7 +399,7 @@ jobs:
           for party in inviter acceptor
           do
             artifacts=$(sudo find "$work/$party" -type f \
-              ! -name input.csv ! -name psilink.yaml | sort)
+              ! -name input.csv ! -name alcove.yaml | sort)
             if [ -z "$artifacts" ]; then
               echo "the exchange left no files in the $party bind mount" >&2
               exit 1
@@ -419,7 +419,7 @@ jobs:
           # The rotated token is written back after a successful exchange, so a
           # mount the container user cannot write would fail here even though the
           # exchange itself had already succeeded.
-          key_after=$(sudo sha256sum "$work/inviter/.psilink.key" | cut -d " " -f 1)
+          key_after=$(sudo sha256sum "$work/inviter/.alcove.key" | cut -d " " -f 1)
           if [ "$key_before" = "$key_after" ]; then
             echo "the rotated token was not written back to the bind mount" >&2
             exit 1
@@ -507,7 +507,7 @@ jobs:
           echo "the ${{ matrix.variant }} image resolves none of npm, npx, corepack, yarn or yarnpkg"
 
       # Everything else those setup scripts ask of the image, read out of the
-      # scripts rather than listed beside them: the psilink argument vectors they
+      # scripts rather than listed beside them: the Alcove argument vectors they
       # hand a container, and the helper scripts they pipe into a shell in it.
       # Each is exercised -- the vector is run and its verdict read back, the
       # helper is piped in as the `.cmd` pipes it -- so the in-image tools a
@@ -518,7 +518,7 @@ jobs:
       # launchers: they ship stamped with a release's manifest digest, so their
       # image is locked to the commit they were built from and a script that
       # outruns the source tree in the same pull request is caught here. It is
-      # the wrong subject for Setup-PsilinkFileDrop.ps1, which is fetched off the
+      # the wrong subject for Setup-AlcoveFileDrop.ps1, which is fetched off the
       # default branch on its own and runs the floating tag -- the published job
       # below is that half.
       #
@@ -552,7 +552,7 @@ jobs:
       # at all. This runs the copy INSIDE the image -- the same file the
       # entrypoint runs at every container start, rather than a mounted one that
       # could differ from it -- and it fails unless fips.so is mapped into the
-      # process, the five psilink call shapes (AES-256-GCM, HKDF-SHA-256,
+      # process, the five Alcove call shapes (AES-256-GCM, HKDF-SHA-256,
       # HMAC-SHA-256, SHA-256, P-256 ECDH) all succeed, and both an MD5 digest
       # and a below-minimum RSA keygen -- which no FIPS provider serves -- fail
       # beside them. The step above reads the same verdict through the exit
@@ -969,17 +969,17 @@ jobs:
     permissions:
       contents: read
     env:
-      PSILINK_IMAGE: psi-link:egress-smoke
-      ENDPOINT_IMAGE: psi-link:egress-endpoint
+      ALCOVE_IMAGE: alcove:egress-smoke
+      ENDPOINT_IMAGE: alcove:egress-endpoint
       # The network name and subnet docs/DEPLOYMENT.md names, used literally.
-      EGRESS_NET: psilink-egress
+      EGRESS_NET: alcove-egress
       EGRESS_SUBNET: 172.31.240.0/29
       # The endpoints' own addresses, from RFC 5737's documentation range so
       # nothing here can collide with a route the runner really has. One
       # network namespace carries all three: what the allowlist matches on is
       # the destination address, and the control run reaches every one of them,
       # so a refusal below is the rule rather than a dead endpoint.
-      ENDPOINT_NETNS: psilink-endpoints
+      ENDPOINT_NETNS: alcove-endpoints
       ENDPOINT_PREFIX: "24"
       ENDPOINT_GATEWAY: 203.0.113.1
       ALLOWED_ADDR: 203.0.113.24
@@ -1010,7 +1010,7 @@ jobs:
           file: Dockerfile
           load: true
           push: false
-          tags: ${{ env.PSILINK_IMAGE }}
+          tags: ${{ env.ALCOVE_IMAGE }}
           cache-from: type=gha,scope=default
 
       # The SSH server whose host key the probe reads. It listens on the
@@ -1117,10 +1117,10 @@ jobs:
           socket.bind(53, process.env.RESOLVER_ADDRESS);
           RESOLVER
 
-          docker run -d --name psilink-endpoints --network none \
+          docker run -d --name alcove-endpoints --network none \
             "$ENDPOINT_IMAGE" /usr/sbin/sshd -D -e
 
-          pid=$(docker inspect -f '{{.State.Pid}}' psilink-endpoints)
+          pid=$(docker inspect -f '{{.State.Pid}}' alcove-endpoints)
           sudo mkdir -p /var/run/netns
           sudo ln -sf "/proc/$pid/ns/net" "/var/run/netns/$ENDPOINT_NETNS"
           sudo ip link add psi-egress-h type veth peer name psi-egress-p
@@ -1138,8 +1138,8 @@ jobs:
           sudo ip -n "$ENDPOINT_NETNS" addr show psi-egress-p
 
           # After the addresses exist, since it binds one of them by name.
-          docker run -d --name psilink-resolver \
-            --network "container:psilink-endpoints" \
+          docker run -d --name alcove-resolver \
+            --network "container:alcove-endpoints" \
             -v "$RUNNER_TEMP/resolver.mjs:/resolver.mjs:ro" \
             -e "RESOLVER_ADDRESS=$RESOLVER_ADDR" \
             -e "RESOLVER_RECORDS=$ALLOWED_HOST=$ALLOWED_ADDR,$DENIED_HOST=$DENIED_ADDR" \
@@ -1159,7 +1159,7 @@ jobs:
             for attempt in $(seq 1 20)
             do
               if timeout 60 docker run --rm --dns "$RESOLVER_ADDR" \
-                "$PSILINK_IMAGE" probe-host-key "$target" \
+                "$ALCOVE_IMAGE" probe-host-key "$target" \
                 --connect-timeout 5s >/dev/null 2>&1
               then
                 echo "$target answered on attempt $attempt"
@@ -1170,8 +1170,8 @@ jobs:
             done
             if [ "$ready" != true ]; then
               echo "$target never answered; the endpoint fixture did not start" >&2
-              docker logs psilink-endpoints || true
-              docker logs psilink-resolver || true
+              docker logs alcove-endpoints || true
+              docker logs alcove-resolver || true
               exit 1
             fi
           done
@@ -1220,11 +1220,11 @@ jobs:
             local status=0
             local -a attach=()
             # The control rows pass no --network at all, which is the doc's own
-            # "run it a second time without --network psilink-egress".
+            # "run it a second time without --network alcove-egress".
             if [ -n "$network" ]; then attach=(--network "$network"); fi
             echo "--- $label: $target"
             timeout 120 docker run --rm "${attach[@]}" --dns "$RESOLVER_ADDR" \
-              "$PSILINK_IMAGE" probe-host-key "$target" --connect-timeout 10s \
+              "$ALCOVE_IMAGE" probe-host-key "$target" --connect-timeout 10s \
               || status=$?
             if [ "$status" = "$expected" ]; then
               echo "$label: exited $status, as the recipe says it must"
@@ -1270,7 +1270,7 @@ jobs:
         if: always()
         run: |
           set +e
-          for container in psilink-endpoints psilink-resolver
+          for container in alcove-endpoints alcove-resolver
           do
             echo "--- $container"
             docker logs "$container" 2>&1 | tail -n 40
@@ -1283,14 +1283,14 @@ jobs:
           sudo iptables -D DOCKER-USER -s "$EGRESS_SUBNET" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
           sudo iptables -L DOCKER-USER -n --line-numbers
 
-          docker rm -f psilink-resolver psilink-endpoints
+          docker rm -f alcove-resolver alcove-endpoints
           docker network rm "$EGRESS_NET"
           sudo ip link del psi-egress-h
           sudo rm -f "/var/run/netns/$ENDPOINT_NETNS"
           exit 0
 
   # What `ghcr.io/georgetown-mdi/alcove:latest` -- the image an operator's launcher pulls --
-  # answers, and what it ships. Setup-PsilinkFileDrop.ps1 is fetched off the
+  # answers, and what it ships. Setup-AlcoveFileDrop.ps1 is fetched off the
   # default branch on its own and runs that floating tag, which is published only
   # from a version tag: nothing locks the script to any image, so a capability can
   # be on the default branch and absent from the tag the script pulls for as long

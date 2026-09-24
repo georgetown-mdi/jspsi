@@ -34,7 +34,7 @@ let work: string;
 let exitSpy: ReturnType<typeof captureProcessExit> | undefined;
 
 beforeEach(() => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-missing-drop-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-missing-drop-"));
   exitSpy = captureProcessExit();
 });
 

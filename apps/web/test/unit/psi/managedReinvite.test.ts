@@ -4,7 +4,7 @@ import {
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -23,7 +23,7 @@ import type {
   RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
 import type { InvitationLocation } from "@psi/invitation";
-import type { InvitationToken } from "@psilink/core";
+import type { InvitationToken } from "@alcove/core";
 
 // Fast re-invite from a stored record, tested in Node: the fresh invitation is
 // composed from the record's OWN document (terms + committed send set), mints only a

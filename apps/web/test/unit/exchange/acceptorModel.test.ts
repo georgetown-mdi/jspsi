@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { UNNAMED_PARTY_LABEL } from "@psilink/core";
+import { UNNAMED_PARTY_LABEL } from "@alcove/core";
 
 import {
   ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM,
@@ -34,7 +34,7 @@ import type {
   Metadata,
   SFTPEndpoint,
   WebRTCEndpoint,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /** The "How it runs" label the ledger tests pass through; the acceptor screen
  * computes it from the endpoint and consults the ledger with it. */

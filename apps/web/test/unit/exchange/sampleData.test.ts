@@ -8,7 +8,7 @@ import {
   inferMetadata,
   isOptInLinkageKey,
   loadCSVFile,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   SAMPLE_INVITER_CSV,
@@ -19,7 +19,7 @@ import {
 import { editorFromCsv } from "@psi/inviterEditor";
 
 import type { AcquiredCsv } from "@psi/inviterEditor";
-import type { CSVRow } from "@psilink/core";
+import type { CSVRow } from "@alcove/core";
 
 const EXPECTED_COLUMNS = [
   "first_name",

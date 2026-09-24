@@ -1,6 +1,6 @@
 /** Opt-out for a run where a prerequisite is knowingly absent. */
 export const ALLOW_MISSING_PREREQUISITES_ENV =
-  "PSILINK_ALLOW_MISSING_TEST_PREREQUISITES";
+  "ALCOVE_ALLOW_MISSING_TEST_PREREQUISITES";
 
 /**
  * Whether this environment is supposed to supply every test prerequisite. CI

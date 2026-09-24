@@ -12,7 +12,7 @@ import {
   causeChainSome,
   chainDetailCauses,
   redactPrivateKeyMaterial,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * The port ssh2 dials when connect options hold none. Core omits `port` from
@@ -298,14 +298,14 @@ const NON_SSH_SHAPE_DESCRIPTION: Record<PeerAnswerShape, string> = {
 };
 
 /**
- * How the second connection was made, said once so no message implies psilink
+ * How the second connection was made, said once so no message implies Alcove
  * learned this from the failed dial or presented anything to get it. A link of
  * its own beside the recovery step rather than a sentence appended to it:
  * first-party copy is capped by the display boundary exactly as anyone else's
  * is, and a step and this together outgrow one link's budget.
  */
 const READ_PROVENANCE =
-  `psilink read this on a second connection to the same endpoint, opened ` +
+  `Alcove read this on a second connection to the same endpoint, opened ` +
   `after the dial failed and carrying no credential.`;
 
 /**
@@ -384,7 +384,7 @@ export function explainPeerIdentificationFailure(
  * diagnoses used, since a read of a different port reports on a peer the
  * dial never spoke to. Derived from ssh2's connect options -- what the
  * transport adapter's dial sequence actually holds, including on a re-dial
- * -- rather than the psilink config they were built from. Reads `host` and
+ * -- rather than the Alcove config they were built from. Reads `host` and
  * `port` because those are the fields core assigns after its default-deny
  * `providerOptions` filter, so no operator-supplied key can move the
  * endpoint out from under this. A portless config takes ssh2's own default
@@ -413,7 +413,7 @@ export function peerProbeTargetFromConnectOptions(options: {
  * rejection the caller has already put to
  * {@link isPreIdentificationDialFailure}. Called from the transport
  * adapter's dial sequence and nowhere else -- the single point every dial
- * psilink makes passes through, the host-key probe's included -- so no
+ * Alcove makes passes through, the host-key probe's included -- so no
  * entry point can grow a second read of the same peer.
  *
  * The gate is the caller's, not this function's: the caller spends a

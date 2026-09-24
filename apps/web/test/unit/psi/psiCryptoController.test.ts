@@ -14,7 +14,7 @@ import type {
   PsiWorkerInit,
   PsiWorkerRequest,
   PsiWorkerResponse,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type {
   PsiCryptoWorker,

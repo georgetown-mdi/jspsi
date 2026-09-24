@@ -5,17 +5,17 @@ title: "One consent summary for two acceptance surfaces"
 # One consent summary for two acceptance surfaces
 
 _Status: shipped. This note records why the invitation consent summary is a
-shared display model in `@psilink/core` rather than one per surface, what each
+shared display model in `@alcove/core` rather than one per surface, what each
 classified line claims on that basis, and what the arrangement does and does not
 guarantee. The escaping contract it rests on
 is specified normatively in
 [CHANNEL_SECURITY.md](../spec/CHANNEL_SECURITY.md#display-sanitization-escape-format);
-the operator-facing description of what `psilink accept` prints is in
+the operator-facing description of what `alcove accept` prints is in
 [CLI.md](../CLI.md#offline-acceptance). See
 [docs/notes/README.md](README.md)._
 
 An acceptor has two ways in: the web app's consent screen and the CLI's
-`psilink accept` prompt. Both show the inviter's proposed linkage terms and then
+`alcove accept` prompt. Both show the inviter's proposed linkage terms and then
 collect a yes. Under `psi` what is matched decides which identifiers are
 disclosed, so every matching rule is part of what is being consented to -- and
 each surface has to show all of them.
@@ -203,7 +203,7 @@ always the strict commitment.
 The classification keys on the invitation, and the invitation is the same on both
 acceptance paths. The enforcement is not. An offline acceptance writes a
 configuration whose terms mirror the inviter's `payload.send` into this party's own
-`payload.receive`, and the later `psilink exchange` falls back to that mirror as
+`payload.receive`, and the later `alcove exchange` falls back to that mirror as
 its received-column commitment where no carried subset was recorded. The
 authored-declaration case is therefore enforced on that path, and the line marks it
 as the partner's word regardless.
@@ -211,10 +211,10 @@ as the partner's word regardless.
 That understatement is deliberate. The display is rendered at consent time, before
 the run that follows is decided, and one marking serves both paths, so one of the
 two is wrong in one of the two cases. Only one of those errors costs the operator
-anything. An operator told psilink will stop a violation it will not stop plans
+anything. An operator told Alcove will stop a violation it will not stop plans
 around a check that never runs -- the failure this classification exists to
 prevent, and the same error as reading a cooperative undertaking as a
-cryptographic guarantee. An operator told psilink will not stop something it does
+cryptographic guarantee. An operator told Alcove will not stop something it does
 stop has lost a reassurance and nothing else.
 
 Making the display path-aware is not the way to close it: the path is a
@@ -294,7 +294,7 @@ The acceptor's own outbound columns and the inviting party's declared request si
 in the same part of the display, and nothing on either surface compares them. The
 comparison is real, but it is not the display's. An inviter declaring it will
 receive no payload column, against an input file whose metadata discloses some, is
-a disagreement `psilink accept` states during the input-versus-terms checking it
+a disagreement `alcove accept` states during the input-versus-terms checking it
 already performs, before the terms display and the prompt, and one
 `assertPayloadSendDisclosed` refuses at prepare time, before this party connects,
 so the columns never cross rather than being rejected once they have arrived.
@@ -371,7 +371,7 @@ above would tell it what it learns from a table it never gets -- and the
 unverified-count limit that sentence ends on has nothing to bound, the party
 reading the count being the one that declared it. The sole-receiver sentence
 states the disclosure that does happen: the result the inviting party takes away
-groups several of its own records onto one of the acceptor's, and psilink
+groups several of its own records onto one of the acceptor's, and Alcove
 presents the acceptor none of it.
 
 ### Where the acceptor's non-receipt is held, and where it is not
@@ -396,7 +396,7 @@ an `enforced` headline, which is the one error this classification exists to
 prevent. Stating it as never held would understate a run that does close it. So
 the account is three facts, not one sentence with a qualifier:
 
-- The STATEMENT says what psilink presents, which is the display withholding
+- The STATEMENT says what Alcove presents, which is the display withholding
   this client makes, and holds for every sole-receiver shape.
 - `duplicateGroupingDisplayLimit` is the `trust-contingent` entry beside it
   wherever the exchange has not closed the grouping. A limit that is a claim
@@ -492,7 +492,7 @@ surface's render test pins the tier's own wording and placement, and the absence
 of every one of its sentences from a `psi` invitation, so the presence is the
 algorithm's doing rather than the fixture's.
 
-Count-only is the mildest disclosure psilink offers and it is not zero disclosure,
+Count-only is the mildest disclosure Alcove offers and it is not zero disclosure,
 which is why the tier is more than one replacement sentence. The intersection
 count is itself a disclosure; each party's record count rides the terms exchange;
 each round frame's element count says how well the key covers the dataset; and
@@ -515,7 +515,7 @@ guarantee and what an acceptor is told it guarantees.
   above are disclosed however either party behaves, the same register as the
   own-membership disclosure a one-sided `psi` exchange has.
 - **How the count reaches a party that did not compute it** -- trust-contingent.
-  It arrives as the receiver's report, and psilink does not check it, exactly as
+  It arrives as the receiver's report, and Alcove does not check it, exactly as
   the `psi` association-table return leg does not.
 - **What a chosen input set defeats** -- trust-contingent. The claim protects a
   party against a partner contributing a genuine dataset; a crafted or differenced
@@ -638,7 +638,7 @@ their setting in the hello and a disagreement aborts both sides before any data
 moves, so an exchange that runs at all is one both parties ran in the declared mode
 -- an acceptor cannot be walked into a transcript they did not consent to. What
 becomes of that transcript once the run ends is not the run's at all: retain mode
-deletes nothing, the location is the inviting party's, and psilink is not in the
+deletes nothing, the location is the inviting party's, and Alcove is not in the
 decision. Marking the whole line `enforced` would let the second half be treated as the
 first; splitting it into two entries would put two markers on one fact and invite a
 reader to weigh them against each other. So the marker states the half the run

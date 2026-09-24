@@ -1,4 +1,4 @@
-import { loadCSVFile } from "@psilink/core";
+import { loadCSVFile } from "@alcove/core";
 
 import { replyBatchRows } from "./csvParseController";
 

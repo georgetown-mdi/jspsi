@@ -1,6 +1,6 @@
 // The PSI rounds are the only place a party reads a raw byte frame off the
 // wire and hands it to the PSI library, which rejects anything that is not a
-// byte string with its own decode message and no psilink framing. Two kinds of
+// byte string with its own decode message and no Alcove framing. Two kinds of
 // frame arrive here that the round did not ask for, so both are classified
 // before any byte reaches the library:
 //
@@ -8,7 +8,7 @@
 //     exchange best-effort sends (see sendAbort). Those refusals are one-sided,
 //     so the party reading the frame is parked on its next round and would
 //     otherwise end on a decode message naming nothing it can act on.
-//   - Any other frame, which keeps the cause it failed with behind a psilink
+//   - Any other frame, which keeps the cause it failed with behind an Alcove
 //     protocol error naming the boundary.
 import { ConnectionError } from "../connection/messageConnection";
 import { isNamedDiagnosis, PeerAbortError } from "../errors";

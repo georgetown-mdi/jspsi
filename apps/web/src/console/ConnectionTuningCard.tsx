@@ -11,7 +11,7 @@ import {
 } from "@mantine/core";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
-import { DEFAULT_MAX_RECONNECT_ATTEMPTS } from "@psilink/core";
+import { DEFAULT_MAX_RECONNECT_ATTEMPTS } from "@alcove/core";
 
 import { DisclosureSection } from "../components/DisclosureSection";
 

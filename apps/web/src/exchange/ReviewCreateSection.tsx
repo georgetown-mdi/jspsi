@@ -572,7 +572,7 @@ export function ReviewCreateSection({
             loading={configurationSaving}
             onClick={onSaveConfiguration}
           >
-            Save changes to psilink.yaml
+            Save changes to alcove.yaml
           </Button>
           <p
             role="status"

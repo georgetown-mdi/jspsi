@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
-import { TERMINAL_FRAME_DRAIN_TIMEOUT_MS } from "@psilink/core/testing";
-import type { ConnectionConfig } from "@psilink/core";
+import { TERMINAL_FRAME_DRAIN_TIMEOUT_MS } from "@alcove/core/testing";
+import type { ConnectionConfig } from "@alcove/core";
 
 import { DEFAULT_CLOSE_FLUSH_TIMEOUT_MS } from "../../src/connection/webrtc/webrtcMessageConnection";
 import {

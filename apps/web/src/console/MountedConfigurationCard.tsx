@@ -1,7 +1,7 @@
 import { Alert, Button, Stack, Text, VisuallyHidden } from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Inspects the password and mints the run token, for cmd_Setup-PsilinkFileDrop.cmd.
+# Inspects the password and mints the run token, for cmd_Setup-AlcoveFileDrop.cmd.
 #
 # This runs in a container rather than in cmd because cmd cannot inspect the
 # string safely: expanding a variable holding "&", "|" or ">" into a command

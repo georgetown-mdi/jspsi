@@ -59,7 +59,7 @@ jobs:
           # still measures `staging` -- measure a branch with `npm run
           # test:mutation` in a checkout of it.
           ref: staging
-      # Pins Node, installs from the lockfile, and builds @psilink/core. The
+      # Pins Node, installs from the lockfile, and builds @alcove/core. The
       # mutation runner needs the installed tree: Stryker's vitest runner
       # resolves vitest through the repository root's package.json.
       - uses: ./.github/actions/setup
@@ -74,4 +74,4 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: core-security-mutation-report
-          path: ${{ runner.temp }}/psilink-stryker/reports/
+          path: ${{ runner.temp }}/alcove-stryker/reports/

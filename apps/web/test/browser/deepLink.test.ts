@@ -11,14 +11,14 @@ import { createElement } from "react";
 // bound and blankets the top bar, intercepting unrelated clicks.
 import "@mantine/core/styles.css";
 
-import { encodeInvitation, generateSharedSecret } from "@psilink/core";
+import { encodeInvitation, generateSharedSecret } from "@alcove/core";
 
 import { deepLinkFor, tokenFromInput } from "@psi/invitation";
 import { AcceptorScreen } from "@exchange/AcceptorScreen";
 
 import { createAppMount } from "./renderApp";
 
-import type { InvitationToken, LinkageTerms } from "@psilink/core";
+import type { InvitationToken, LinkageTerms } from "@alcove/core";
 
 // AcceptorScreen reads the token from window.location.hash and links home, so a
 // plain-anchor Link is all this test exercises of the router boundary.

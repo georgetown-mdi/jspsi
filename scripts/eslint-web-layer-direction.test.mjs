@@ -196,15 +196,15 @@ const NESTED_PAST_SRC_SPECIFIERS = [
 // What the layers below must keep accepting: each other, the shared helpers, and
 // core itself.
 const ACCEPTED = [
-  ["src/psi", PSI, "@psilink/core"],
+  ["src/psi", PSI, "@alcove/core"],
   ["src/psi", PSI, "@utils/clientConfig"],
   ["src/psi", PSI, "@components/ColumnName"],
   ["src/psi", PSI, "./runOutputs"],
   ["src/components", COMPONENTS, "@psi/authoring/advancedInvite"],
-  ["src/jobs", JOBS, "@psilink/core"],
+  ["src/jobs", JOBS, "@alcove/core"],
   ["src/jobs", JOBS, "@utils/boundedJsonBody"],
   ["src/jobs", JOBS, "./workInputName"],
-  ["src/utils", UTILS, "@psilink/core"],
+  ["src/utils", UTILS, "@alcove/core"],
   ["src/utils", UTILS, "@jobs/intentSchemas"],
   ["src/exchange", PRODUCT, "@console/mountListing"],
   ["src/exchange", PRODUCT, "@recurring/SavedExchanges"],

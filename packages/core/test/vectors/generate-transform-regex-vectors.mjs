@@ -9,7 +9,7 @@
 //   - packages/core/test/transformRegexVectors.test.ts asserts the re2js factory
 //     reproduces these JS-RegExp outputs (byte-identical to the old engine), and
 //   - apps/web/test/browser/transformRegex.test.ts asserts the BROWSER build of
-//     @psilink/core reproduces the same outputs (the two build targets agree).
+//     @alcove/core reproduces the same outputs (the two build targets agree).
 //
 // Together those pin both acceptance criteria: in-dialect patterns are
 // byte-identical to the previous engine, and the CLI (Node) and web (browser)

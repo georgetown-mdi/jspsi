@@ -411,7 +411,7 @@ describe("verifyDualSignedRecord", () => {
   });
 
   test("a signing identity found rather than named is reported when it anchors nothing", async () => {
-    // The verifier did not claim this record is one it signed -- psilink found
+    // The verifier did not claim this record is one it signed -- Alcove found
     // the identity on its behalf -- so a non-match says only that this is not its
     // exchange, and leaves the slot unanchored rather than contradicting the run.
     const report = await verifyDualSignedRecord(await signedRecord(), {

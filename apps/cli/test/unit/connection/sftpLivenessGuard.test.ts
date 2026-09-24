@@ -5,7 +5,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   sanitizeErrorForDisplay,
   TransportOperationStalledError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   SFTP_PUT_PROGRESS_CHUNK_BYTES,

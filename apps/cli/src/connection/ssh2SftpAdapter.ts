@@ -19,7 +19,7 @@ import {
   getLoggerForVerbosity,
   retryPromise,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { createCappedSink } from "./frameSizeGuard";
 import { REPORT_LIBRARY_INCOMPATIBILITY } from "./libraryIncompatibility";
@@ -365,7 +365,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private client: Ssh2SftpClient;
   private options: Ssh2SftpClient.ConnectOptions | undefined;
   // The FULL, unmodified options the last connect() was called with -- including
-  // the psilink-specific maxReconnectAttempts that connect() strips before
+  // the alcove-specific maxReconnectAttempts that connect() strips before
   // storing this.options, plus the enforcing hostVerifier and the stored
   // credentials. Retained so mid-exchange session recovery can re-dial through
   // connect() with the same host-key pin, credentials, and reconnect bound,
@@ -1417,7 +1417,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       this.log.warn(
         `The partner's SFTP server dropped the SFTP session mid-exchange and ` +
           `it could not be re-opened, so this operation failed. This build ` +
-          `of psilink is not compatible with the installed SFTP library; ` +
+          `of Alcove is not compatible with the installed SFTP library; ` +
           `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
@@ -1432,7 +1432,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         this.log.warn(
           `The SFTP session the partner's server dropped did not close ` +
             `within ${FORCED_CLOSE_TIMEOUT_MS} ms, so it could not be ` +
-            `re-opened and this operation failed. This build of psilink may ` +
+            `re-opened and this operation failed. This build of Alcove may ` +
             `not be compatible with the installed SFTP library; ` +
             `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
         );
@@ -1447,7 +1447,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         `Closing the SFTP connection from this side, to re-open a session the ` +
           `partner's server dropped mid-exchange, failed: ` +
           `${sanitizeErrorForDisplay(error)}. The dropped session could not ` +
-          `be re-opened, so this operation failed. This build of psilink may ` +
+          `be re-opened, so this operation failed. This build of Alcove may ` +
           `not be compatible with the installed SFTP library; ` +
           `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
@@ -1462,7 +1462,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         `The SFTP connection the partner's server dropped mid-exchange did ` +
           `not close within ${FORCED_CLOSE_TIMEOUT_MS} ms of this side ` +
           `closing it, so the session was not re-opened and this operation ` +
-          `failed with the drop it already had. This build of psilink may not ` +
+          `failed with the drop it already had. This build of Alcove may not ` +
           `be compatible with the installed SFTP library; ` +
           `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
@@ -1535,12 +1535,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const replacedLiveSession = this.hasLiveSession();
     this.originalConnectOptions = options;
     const maxReconnects = this.operativeMaxReconnectAttempts();
-    // Exclude the psilink-specific key before handing options to ssh2.
+    // Exclude the alcove-specific key before handing options to ssh2.
     // FileTransportClient uses Record<string,unknown> so the interface stays
     // transport-agnostic; cast here is intentional.
     const { maxReconnectAttempts: _, ...rest } = options;
     const connectOptions = rest as Ssh2SftpClient.ConnectOptions;
-    // Route the SSH stack's own diagnostics into psilink's logger for the
+    // Route the SSH stack's own diagnostics into Alcove's logger for the
     // life of the connection this dial opens, at the trace level and nowhere
     // else (see ./sftpWireTrace). A recovery re-dial and a connection-per-poll
     // cycle start read connectOptions back from originalConnectOptions, set
@@ -1824,7 +1824,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `side, so it is left to the operating system: until that closes it, ` +
           `a later dial on this connection waits behind it with no deadline. ` +
           `Interrupt the command if it stops making progress. This build of ` +
-          `psilink is not compatible with the installed SFTP library; ` +
+          `Alcove is not compatible with the installed SFTP library; ` +
           `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
@@ -2070,7 +2070,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `teardown, and this build could not close it from this side: the ` +
           `connection is left to the operating system, may stay half-open, ` +
           `and a half-open connection can keep this process from exiting. ` +
-          `This build of psilink is not compatible with the installed SFTP ` +
+          `This build of Alcove is not compatible with the installed SFTP ` +
           `library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
@@ -2105,7 +2105,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         `The SFTP connection's transport did not close after this side ` +
           `destroyed it at teardown, so the connection may stay half-open, ` +
           `and a half-open connection can keep this process from exiting. ` +
-          `This build of psilink may not be compatible with the installed ` +
+          `This build of Alcove may not be compatible with the installed ` +
           `SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
@@ -2174,7 +2174,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           `could not close the connection from this side: the connection is ` +
           `left to the operating system, may stay half-open, and a half-open ` +
           `connection can keep this process from exiting. This build of ` +
-          `psilink is not compatible with the installed SFTP library; ` +
+          `Alcove is not compatible with the installed SFTP library; ` +
           `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
@@ -2204,7 +2204,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         `The SFTP connection's transport did not close after this side ` +
           `destroyed it at teardown, so the connection may stay half-open, ` +
           `and a half-open connection can keep this process from exiting. ` +
-          `This build of psilink may not be compatible with the installed ` +
+          `This build of Alcove may not be compatible with the installed ` +
           `SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}.`,
       );
       this.log.debug(
@@ -2418,7 +2418,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         `the connection-per-poll idle release closed the SFTP session's ` +
           `transport and the session did not clear within ` +
           `${FORCED_CLOSE_TIMEOUT_MS} ms, so the exchange cannot continue. ` +
-          `This build of psilink may not be compatible with the installed ` +
+          `This build of Alcove may not be compatible with the installed ` +
           `SFTP library; ${REPORT_LIBRARY_INCOMPATIBILITY}`,
       );
     }

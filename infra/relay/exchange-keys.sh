@@ -4,8 +4,8 @@
 # this file, which holds every read and write of the secrets table
 # (README.md, Per-exchange keys).
 
-ETC=/etc/psilink-relay
-ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
+ETC=/etc/alcove-relay
+ENV_FILE="${ALCOVE_RELAY_ENV_FILE:-$ETC/relay.env}"
 RELAY_TABLE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/relay_table.py"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }

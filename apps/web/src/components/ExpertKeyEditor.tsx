@@ -25,7 +25,7 @@ import {
 } from "@tabler/icons-react";
 import { useReducedMotion } from "@mantine/hooks";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import {
   addElement,
@@ -40,11 +40,7 @@ import { SEMANTIC_TYPE_LABELS } from "@psi/metadataEditing";
 
 import { StepListEditor } from "@components/StepListEditor";
 
-import type {
-  LinkageField,
-  LinkageKey,
-  LinkageKeyElement,
-} from "@psilink/core";
+import type { LinkageField, LinkageKey, LinkageKeyElement } from "@alcove/core";
 
 import type {
   AdvancedInviteDraft,

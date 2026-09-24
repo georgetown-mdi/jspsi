@@ -8,7 +8,7 @@ import {
   isInvitationExpired,
   resolveLinkageCardinality,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { DeploymentProfile } from "@utils/clientConfig";
 
@@ -22,7 +22,7 @@ import type {
   SFTPEndpoint,
   Standardization,
   WebRTCEndpoint,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /** The per-party data preparation the acceptor authored in its confirm-columns
  * step: the edited column metadata (semantic type + disclosure role) and

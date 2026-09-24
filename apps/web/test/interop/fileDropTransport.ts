@@ -8,7 +8,7 @@ import type {
   GetOptions,
   PutOptions,
   PutSource,
-} from "@psilink/core";
+} from "@alcove/core";
 
 const OPEN_FLAGS = {
   r: fs.constants.O_RDONLY,

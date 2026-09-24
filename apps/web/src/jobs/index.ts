@@ -1,4 +1,4 @@
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
 import {
   CONSOLE_PROFILE,

@@ -556,7 +556,7 @@ export function assertCertificateModePinsPartner(
       "receipt, keeping at most the exchange record of that disclosure -- " +
       "and, where record writing is off, nothing at all. Run this exchange " +
       "over an authenticated connection, or obtain the partner's fingerprint " +
-      "out-of-band -- they produce it with 'psilink fingerprint' -- and set " +
+      "out-of-band -- they produce it with 'alcove fingerprint' -- and set " +
       'signing.partner_fingerprint, or set signing.mode to "none" to run ' +
       "unsigned until you hold it.",
   );
@@ -650,7 +650,7 @@ export function assertLocalCertificateAuthorizesAgreedIdentity(
         `terms cannot state -- ${unstatable} -- so this run cannot finish: ` +
         "the partner authorizes the presented certificate against the name " +
         "in the agreed terms, and no terms document may name this one. " +
-        "Re-key the signing identity with 'psilink fingerprint --force " +
+        "Re-key the signing identity with 'alcove fingerprint --force " +
         "--identity' under a label the terms admit, then have every partner " +
         "re-pin the new fingerprint before receipts verify again. The agreed " +
         `terms name "${agreedIdentity}".`,
@@ -756,7 +756,7 @@ const PARTNER_CERTIFICATE_REFUSALS = {
       "match the certificate format, leaving nothing to pin and nothing to check " +
       "a receipt against. The run stopped before any linkage key or payload row " +
       "was sent. Have the partner re-share an identity produced by " +
-      "'psilink fingerprint', or set signing.mode to \"none\" to run unsigned.",
+      "'alcove fingerprint', or set signing.mode to \"none\" to run unsigned.",
   },
   absent: {
     abortReason:
@@ -779,7 +779,7 @@ const PARTNER_CERTIFICATE_REFUSALS = {
       "certificate that is not internally consistent could never sign a receipt " +
       "this exchange would accept. The run stopped before any linkage key or " +
       "payload row was sent. Have the partner re-share an identity produced by " +
-      "'psilink fingerprint'.",
+      "'alcove fingerprint'.",
   },
   unauthorizedIdentity: {
     abortReason:
@@ -805,7 +805,7 @@ const PARTNER_CERTIFICATE_REFUSALS = {
       "not match it is refused rather than trusted. The run stopped before any " +
       "linkage key or payload row was sent, and the pin on file is unchanged. " +
       "Confirm the partner's fingerprint out-of-band -- they produce it with " +
-      "'psilink fingerprint' -- and, where they regenerated their signing " +
+      "'alcove fingerprint' -- and, where they regenerated their signing " +
       "identity, replace signing.partner_fingerprint with the new value.",
   },
 } as const satisfies Partial<
@@ -847,7 +847,7 @@ export type PartnerCertificateRefusalKind = PartnerCertificateConditionKey<
 
 /**
  * Send the partner the abort `condition` calls for and return the refusal to
- * raise for it, tagged `psilinkRecoveryHintEmitted` per instance on the
+ * raise for it, tagged `alcoveRecoveryHintEmitted` per instance on the
  * convention `TransportPublishIndeterminateError` (`./errors.ts`) states: an
  * error is tagged exactly when it holds its own next step, and each of these
  * messages ends in one. The tag suppresses the CLI's generic advisory and lets
@@ -878,7 +878,7 @@ async function refusePartnerCertificate(
   await sendAbort(conn, [abortReason]);
   return withPartnerCertificateCondition(
     Object.assign(new ReceiptVerificationError(message), {
-      psilinkRecoveryHintEmitted: true,
+      alcoveRecoveryHintEmitted: true,
     }),
     condition,
   );
@@ -999,13 +999,13 @@ export async function resolvePartnerCertificateOrAbort(
  *
  * A {@link ConnectionError} of kind `protocol`, not {@link UsageError}:
  * the contradiction is between two documents the partner authored (CLI
- * exit 69, not 64). Has `psilinkRecoveryHintEmitted` so the CLI's
+ * exit 69, not 64). Has `alcoveRecoveryHintEmitted` so the CLI's
  * hint-walker suppresses the generic "retry without re-inviting" advisory
  * -- this refusal is terminal against the held invitation and would
  * otherwise loop an unattended recurring exchange.
  */
 export class InvitationTermDivergenceError extends ConnectionError {
-  readonly psilinkRecoveryHintEmitted = true;
+  readonly alcoveRecoveryHintEmitted = true;
 
   constructor(message: string) {
     super(message, "protocol");
@@ -1242,7 +1242,7 @@ export function prepareForExchange(
   // and the exit-64 / web-display contract). Gated on an authored
   // standardization: the terms-only path (undefined) reconstructs one from the
   // terms via getDefaultStandardization above and so cannot contradict them, and
-  // is not gated. The same shared assert runs at the `psilink invite`
+  // is not gated. The same shared assert runs at the `alcove invite`
   // mint boundary, so `invite` never discloses a token this exchange would refuse.
   if (exchangeDataSpec.standardization !== undefined)
     assertStandardizationMatchesTerms(
@@ -1698,7 +1698,7 @@ function carryingExchangeRecord(
  * Whether a count-only (`psi-c`) tally this party holds arrived as the PARTNER's
  * report rather than as a figure this party computed. The receiver alone computes
  * the count; the sender's copy, when its terms entitle it to one, travels over the
- * count-report leg and is the receiver's word, which psilink does not check against
+ * count-report leg and is the receiver's word, which Alcove does not check against
  * a run of its own (docs/spec/PROTOCOL.md, PSI-C -- "The sender's knowledge of the
  * count is trust-contingent"). False for every party that computed its own count,
  * and false for a run that produced no count at all.

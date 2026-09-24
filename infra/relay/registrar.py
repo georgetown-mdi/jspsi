@@ -31,15 +31,15 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import relay_table  # noqa: E402
 
-ETC = "/etc/psilink-relay"
+ETC = "/etc/alcove-relay"
 # systemd's LoadCredential= copies the root-only files into this directory.
 CREDENTIALS = os.environ.get("CREDENTIALS_DIRECTORY")
-TOKEN_FILE = os.environ.get("PSILINK_RELAY_REGISTRAR_TOKEN_FILE") or (
+TOKEN_FILE = os.environ.get("ALCOVE_RELAY_REGISTRAR_TOKEN_FILE") or (
     os.path.join(CREDENTIALS, "registrar-token") if CREDENTIALS else ETC + "/registrar-token"
 )
-CERT_DIR = os.environ.get("PSILINK_RELAY_CERT_DIR") or (CREDENTIALS or ETC + "/certs")
-PORT = os.environ.get("PSILINK_RELAY_REGISTRAR_PORT") or "8443"
-REALM = os.environ.get("PSILINK_RELAY_REALM") or ""
+CERT_DIR = os.environ.get("ALCOVE_RELAY_CERT_DIR") or (CREDENTIALS or ETC + "/certs")
+PORT = os.environ.get("ALCOVE_RELAY_REGISTRAR_PORT") or "8443"
+REALM = os.environ.get("ALCOVE_RELAY_REALM") or ""
 
 PREFIX = "/exchanges/"
 MAX_BODY_BYTES = 1024
@@ -55,7 +55,7 @@ MAX_AGE_REFUSAL = (
 BODY_REFUSAL = 'the request body must be {"key": "<key-hex64>", "maxAgeDays": <days> | null}; maxAgeDays is required'
 # The header verify.sh sends to register its own ids under the reserved prefix.
 # A browser cannot send it: the preflight does not allow it.
-VERIFY_RUN_HEADER = "Psilink-Relay-Verify-Run"
+VERIFY_RUN_HEADER = "Alcove-Relay-Verify-Run"
 # The journal names a request's method only from this list.
 KNOWN_METHODS = frozenset(("GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "TRACE", "CONNECT"))
 
@@ -85,7 +85,7 @@ valid_max_age_days = relay_table.valid_max_age_days
 
 
 class RegistrarHandler(http.server.BaseHTTPRequestHandler):
-    server_version = "psilink-relay-registrar"
+    server_version = "alcove-relay-registrar"
     sys_version = ""
     protocol_version = "HTTP/1.1"
     timeout = CONNECTION_TIMEOUT_SECONDS
@@ -161,7 +161,7 @@ class RegistrarHandler(http.server.BaseHTTPRequestHandler):
         self.refuse(
             401,
             "missing or wrong relay-owner token; send Authorization: Bearer <token>",
-            (("WWW-Authenticate", 'Bearer realm="psilink-relay-registrar"'),),
+            (("WWW-Authenticate", 'Bearer realm="alcove-relay-registrar"'),),
         )
         return False
 
@@ -298,9 +298,9 @@ class RegistrarServer(http.server.ThreadingHTTPServer):
 
 def main():
     if not PORT.isdigit() or int(PORT) > 65535:
-        fail_start("PSILINK_RELAY_REGISTRAR_PORT is '%s'; set it to a port number" % PORT)
+        fail_start("ALCOVE_RELAY_REGISTRAR_PORT is '%s'; set it to a port number" % PORT)
     if not REALM:
-        fail_start("PSILINK_RELAY_REALM is unset; the unit reads it from /etc/psilink-relay/relay.env")
+        fail_start("ALCOVE_RELAY_REALM is unset; the unit reads it from /etc/alcove-relay/relay.env")
     token = read_token()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -316,7 +316,7 @@ def main():
     server.token = token
     server.table_lock = threading.Lock()
     server.socket = context.wrap_socket(server.socket, server_side=True, do_handshake_on_connect=False)
-    sys.stdout.write("psilink relay registrar listening on port %d\n" % server.server_address[1])
+    sys.stdout.write("Alcove relay registrar listening on port %d\n" % server.server_address[1])
     sys.stdout.flush()
     server.serve_forever()
 

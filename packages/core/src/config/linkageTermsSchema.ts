@@ -96,7 +96,7 @@ export const MAX_TEXT_LENGTH = 1024;
  * label (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/jobs/intentSchemas.ts,
  * held equal by apps/web/test/unit/jobs/identityLabelParity.test.ts) and is
  * stricter in one direction, also refusing a leading `-`. That label and the
- * CLI's `psilink fingerprint` argument reach a certificate without passing
+ * CLI's `alcove fingerprint` argument reach a certificate without passing
  * through this schema, so each refuses this class and the text-direction one
  * ({@link TEXT_DIRECTION_MESSAGE}) at its own boundary: a label bound into a
  * certificate holds no character this document's `identity` may not.
@@ -126,7 +126,7 @@ export const TEXT_CONTROL_CHAR_MESSAGE =
  * (utils/nameControls.ts) names. The three are the party `identity`, the
  * legal-agreement `purpose`, and a payload column `description`, each written
  * into both parties' exchange records as submitted (records/exchangeRecord.ts)
- * and read there by tooling that is not psilink, where no display boundary of
+ * and read there by tooling that is not Alcove, where no display boundary of
  * ours stands. A layout scope opened in one of them outlives the value and
  * reorders the copy it is placed beside, and none of the three needs one: a
  * right-to-left sentence lays out from its own letters.
@@ -153,7 +153,7 @@ export const TEXT_DIRECTION_MESSAGE =
  * Refusal message for a party `identity` the private-key redaction would
  * replace on a consent surface. The identity is the one line of an invitation
  * a reader reads as the partner naming itself, so a marker standing there is
- * indistinguishable from one psilink placed over a key it found; the field is
+ * indistinguishable from one Alcove placed over a key it found; the field is
  * refused where the document is decoded instead
  * ({@link holdsPrivateKeyMaterial}, the same detector a transform param and a
  * transform name are held to in `config/transformParamDisplay.ts`).
@@ -283,7 +283,7 @@ export function reasonTermsCannotStateIdentity(
  * The rule is not redundant with that escaping. A name reaches each party's
  * exchange record verbatim -- the matching-basis account names each field, the
  * payload accounts each column -- and a record is read by tooling that is not
- * psilink, where no display boundary of ours stands.
+ * Alcove, where no display boundary of ours stands.
  */
 export const NAME_SHAPE_PATTERN =
   /^[^\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]*$/u;
@@ -1412,10 +1412,10 @@ export interface LinkageTerms {
    * name organization, contact info). Included verbatim in the exchange
    * record.
    *
-   * Absent when the party supplied no name: psilink invents none, so nothing
+   * Absent when the party supplied no name: Alcove invents none, so nothing
    * fills the gap and no surface stands a label in it (`partyIdentityDisplay.ts`
    * holds the marker every surface shows instead). The commands that
-   * author a durable partnership -- `psilink invite` and `psilink accept` --
+   * author a durable partnership -- `alcove invite` and `alcove accept` --
    * require one at their own interface, so the field is absent only on a run
    * that authored its terms without a name.
    *

@@ -5,7 +5,7 @@ import {
   getDefaultLinkageTerms,
   inferMetadata,
   safeParseLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   addElement,

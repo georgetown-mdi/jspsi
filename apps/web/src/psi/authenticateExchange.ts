@@ -3,14 +3,14 @@ import {
   authenticateConnection,
   causeChainSome,
   errorMessage,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type {
   AuthResult,
   ConnectionErrorKind,
   HandshakeRole,
   MessageConnection,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // ConnectionError kinds that are NOT a peer-trust problem: a handshake
 // failure holding one passes through unchanged rather than being re-tagged
@@ -101,7 +101,7 @@ export async function authenticateExchange(
     const wrapped = new ConnectionError(errorMessage(error), "security", {
       cause: error,
     });
-    // Preserve authenticateConnection's psilinkRecoveryHintEmitted tag across
+    // Preserve authenticateConnection's alcoveRecoveryHintEmitted tag across
     // the re-wrap: a tagged credential error already holds specific recovery
     // guidance, and the tag tells a higher-level handler not to add a second,
     // generic advisory. The web path threads the invitation's `expires`, so the
@@ -109,8 +109,8 @@ export async function authenticateExchange(
     // malformed-secret one) reach here and need the same preservation.
     if (hasRecoveryHint(error))
       (
-        wrapped as { psilinkRecoveryHintEmitted?: boolean }
-      ).psilinkRecoveryHintEmitted = true;
+        wrapped as { alcoveRecoveryHintEmitted?: boolean }
+      ).alcoveRecoveryHintEmitted = true;
     throw wrapped;
   }
 
@@ -146,7 +146,7 @@ function hasNonTrustConnectionError(error: unknown): boolean {
   );
 }
 
-/** Whether `error` holds authenticateConnection's `psilinkRecoveryHintEmitted`
+/** Whether `error` holds authenticateConnection's `alcoveRecoveryHintEmitted`
  * tag, set on its credential-validation and expiry errors. Per core's contract
  * a tagged message is composed only from local values and already includes
  * its recovery instructions, so a display layer may show it (sanitized)
@@ -155,7 +155,7 @@ export function hasRecoveryHint(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
-    (error as { psilinkRecoveryHintEmitted?: unknown })
-      .psilinkRecoveryHintEmitted === true
+    (error as { alcoveRecoveryHintEmitted?: unknown })
+      .alcoveRecoveryHintEmitted === true
   );
 }

@@ -4,8 +4,8 @@ import net from "node:net";
 
 import logLibrary from "loglevel";
 import { describe, expect, test } from "vitest";
-import { setLogLevel } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { setLogLevel } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { serverAuth, sftpServer } from "../sftpServer/testContext";
@@ -88,7 +88,7 @@ function createRefusingResettingListener(): {
   const server = net.createServer((socket) => {
     let answered = false;
     socket.on("error", () => {});
-    socket.write("SSH-2.0-psilink-refusing-listener\r\n");
+    socket.write("SSH-2.0-alcove-refusing-listener\r\n");
     socket.on("data", () => {
       if (!answered) {
         answered = true;
@@ -196,7 +196,7 @@ describe("an ssh2 client error outside any operation", () => {
   test("a reset behind a refused dial is not a second failure", async () => {
     const listener = createRefusingResettingListener();
     // A `getLoggerForVerbosity` logger is never more verbose than the root live
-    // when it is built (`@psilink/core/testing`, `withCapturedLogs`), so the
+    // when it is built (`@alcove/core/testing`, `withCapturedLogs`), so the
     // root is raised before the adapter is constructed -- otherwise the trace
     // arm would be a level that emits nothing and the case could not tell
     // "routed to trace" from "never raised".

@@ -14,7 +14,7 @@ import {
   checkValueConstraints,
   runPipeline,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { isStepValid } from "@psi/standardizationAuthoring";
 
@@ -24,7 +24,7 @@ import type {
   FieldValue,
   LinkageField,
   StandardizationStep,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /** Render one cleaned value as a chip with any advisory constraint badges
  * beside it. The value is the operator's own data (local CSV), shown sanitized for

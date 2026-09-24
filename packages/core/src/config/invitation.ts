@@ -463,7 +463,7 @@ export interface InvitationToken {
    * addition is in principle incompatible. The split-directory
    * `inbound_path`/`outbound_path` pair on the sftp and filedrop endpoints,
    * and the `relay` locator on the webrtc endpoint, were added without
-   * bumping the version, since psilink was pre-release with no decoder
+   * bumping the version, since Alcove was pre-release with no decoder
    * deployed. A strict-endpoint addition made AFTER a release ships
    * MUST bump the version (or otherwise stage compat).
    */
@@ -547,7 +547,7 @@ export interface InvitationToken {
 
 // The params width bound the decode fold applies, mirrored from
 // linkageTermsSchema.ts's PARAMS_WIDTH_BOUND (kept module-private there, so
-// the bound and the schema below both stay off @psilink/core's wholesale
+// the bound and the schema below both stay off @alcove/core's wholesale
 // public export).
 // Both derive the value from the one shared MAX_PARAMS_ENTRIES constant, so
 // they cannot drift: an over-MAX_PARAMS_ENTRIES params record is left verbatim
@@ -584,7 +584,7 @@ const PARAMS_WIDTH_BOUND: ReadonlyMap<string, number> = new Map([
  * token's other fields and the strict connection-endpoint credential allowlist
  * are unaffected.
  *
- * Kept off `@psilink/core`'s public export by design: a `z.preprocess` that
+ * Kept off `@alcove/core`'s public export by design: a `z.preprocess` that
  * throws breaks `.safeParse()`'s non-throwing contract, so no external caller
  * hits a surprise throw. Its consumers are {@link InvitationTokenSchema} and
  * the terms-update schema (`termsUpdate.ts`), both through `.parse()`; a
@@ -636,7 +636,7 @@ const InvitationTokenBodySchema = z.object({
   // Each name also holds NAME_SHAPE_PATTERN (`nameValue`), as the terms' own
   // payload column names do. An acceptance writes this list into the operator's
   // configuration as `expected_payload_columns`, where it is read by the
-  // operator's editor and by tooling that is not psilink, so a partner's
+  // operator's editor and by tooling that is not Alcove, so a partner's
   // control or text-direction character is refused at decode rather than
   // escaped at a display sink it never reaches.
   //
@@ -779,11 +779,11 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> =
  *
  * Mint-only, not a tightening of {@link InvitationTokenSchema}: an omitted
  * declaration beside a split endpoint remains a valid token to DECODE, since
- * absence means "nothing declared" and every psilink read path derives the
+ * absence means "nothing declared" and every Alcove read path derives the
  * retention from the endpoint's shape rather than the declaration
  * (`summarizeInvitation` ORs {@link endpointRequiresRetainedFiles} into its
  * disclosure; the accept paths seed the retain trio from the same predicate).
- * Refusing at decode would reject a foreign token psilink already handles and
+ * Refusing at decode would reject a foreign token Alcove already handles and
  * displays correctly.
  */
 const MintedInvitationTokenSchema: z.ZodType<InvitationToken> =
@@ -806,7 +806,7 @@ const MintedInvitationTokenSchema: z.ZodType<InvitationToken> =
 /**
  * Default invitation lifetime in seconds: one hour. An invitation minted with no
  * explicit lifetime takes this bound, per the "default expiration window of 1
- * hour" in docs/SECURITY_DESIGN.md. Both inviters -- the CLI's `psilink invite`
+ * hour" in docs/SECURITY_DESIGN.md. Both inviters -- the CLI's `alcove invite`
  * and the web app -- reference this one value so their defaults cannot drift.
  */
 export const INVITATION_LIFETIME_SECONDS = 60 * 60;
@@ -853,7 +853,7 @@ const CHECKSUM_CHARS = 6;
  * This is the boundary that transitively bounds every untrusted field at
  * decode, so no per-field check has to do oversized-input work; the per-field
  * length bounds in linkageTermsSchema.ts are defense-in-depth atop it.
- * {@link encodeInvitation} enforces the same cap on its output, so psilink
+ * {@link encodeInvitation} enforces the same cap on its output, so Alcove
  * never produces a token it could not itself decode.
  */
 export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
@@ -873,10 +873,10 @@ export const MAX_RAW_INVITATION_LENGTH = 2 * MAX_ENCODED_INVITATION_LENGTH;
  * checksum gives no security guarantee; the key exchange handles
  * authentication.
  *
- * The single point every psilink invitation is emitted through, so it validates
+ * The single point every Alcove invitation is emitted through, so it validates
  * against {@link MintedInvitationTokenSchema} -- strictly stronger than the
  * schema {@link decodeInvitation} parses, by the split-endpoint retain
- * declaration it requires. A token psilink would not itself emit is refused
+ * declaration it requires. A token Alcove would not itself emit is refused
  * here rather than at each caller's own gate.
  *
  * Uses `btoa`/`atob` and `globalThis.crypto.subtle.digest`

@@ -1,4 +1,4 @@
-import { WorkerPsiEngine } from "@psilink/core";
+import { WorkerPsiEngine } from "@alcove/core";
 
 import { errorFromWorkerEvent } from "./workerEventError";
 
@@ -9,7 +9,7 @@ import type {
   PsiWorkerInit,
   PsiWorkerRequest,
   PsiWorkerResponse,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * Off-main-thread PSI crypto for the web app: the CPU-bound elliptic-curve masking
@@ -19,7 +19,7 @@ import type {
  * analogue of the CLI's `worker_threads` offload).
  *
  * This is the BROWSER SPAWN ADAPTER for the runtime-agnostic PSI worker boundary in
- * `@psilink/core`: core's {@link WorkerPsiEngine} turns each crypto call into a
+ * `@alcove/core`: core's {@link WorkerPsiEngine} turns each crypto call into a
  * request/response round trip with a worker reached through a {@link PsiWorkerHandle},
  * and core's `servePsiWorker` runs the crypto on the worker side. This module wires
  * a Web Worker into that boundary (the CLI wires a `worker_threads` worker into the same

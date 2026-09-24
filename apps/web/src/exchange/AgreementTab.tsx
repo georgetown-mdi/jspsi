@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { Alert, Checkbox, TextInput } from "@mantine/core";
 
-import { MAX_NAME_LENGTH, MAX_TEXT_LENGTH } from "@psilink/core";
+import { MAX_NAME_LENGTH, MAX_TEXT_LENGTH } from "@alcove/core";
 
 import styles from "@styles/app.module.css";
 

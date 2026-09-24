@@ -20,7 +20,7 @@
 //
 //   1. The module ids rolldown resolves in the client and ssr environments,
 //      recorded by the plugin apps/web/vite.config.ts installs when this check
-//      sets PSILINK_DEPLOY_GRAPH_RECORD. This is the half that sees the signaling
+//      sets ALCOVE_DEPLOY_GRAPH_RECORD. This is the half that sees the signaling
 //      broker, which enters through a route module inside the ssr bundle.
 //   2. The `sources` of every sourcemap Nitro emits under apps/web/.output. This
 //      is the half that sees Nitro's own server pass -- the custom entry and what
@@ -80,7 +80,7 @@ export const BUILD_OUTPUT = "apps/web/.output";
  * module-id recorder. Named in both places and nowhere else; a rename that
  * misses one side leaves the record empty, which REQUIRED_GRAPH_ROOTS fails on.
  */
-export const RECORD_ENV = "PSILINK_DEPLOY_GRAPH_RECORD";
+export const RECORD_ENV = "ALCOVE_DEPLOY_GRAPH_RECORD";
 
 // The build this check measures: the app's own build script, so what runs here
 // is what CI and a developer run rather than a bespoke invocation shaped to be
@@ -127,7 +127,7 @@ export const BUILD_PRODUCTS = [
     product: "packages/core/dist/",
     sources: "packages/core/src/",
     reason:
-      "the apps consume @psilink/core from its built dist/ (CONTRIBUTING.md, Building), so the bundlers read the bundle and never the sources it was built from",
+      "the apps consume @alcove/core from its built dist/ (CONTRIBUTING.md, Building), so the bundlers read the bundle and never the sources it was built from",
   },
 ];
 
@@ -322,7 +322,7 @@ function runBuild(repoRoot, recordPath) {
  * prepared tree without paying for a real build.
  */
 export function collectGraph(repoRoot, { build = runBuild } = {}) {
-  const scratch = mkdtempSync(join(tmpdir(), "psilink-deploy-graph-"));
+  const scratch = mkdtempSync(join(tmpdir(), "alcove-deploy-graph-"));
   const recordPath = join(scratch, "module-ids.json");
   try {
     build(repoRoot, recordPath);

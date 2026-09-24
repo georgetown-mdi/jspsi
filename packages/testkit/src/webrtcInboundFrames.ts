@@ -14,7 +14,7 @@
 // arriving in chunks.
 //
 // The set lives here rather than in either test tree because both apps need it and
-// neither may import the other, and rather than behind `@psilink/core/testing`
+// neither may import the other, and rather than behind `@alcove/core/testing`
 // because it is built with the real `peerjs-js-binarypack` packer, which
 // `packages/core` does not declare in its `dependencies` -- putting it there would
 // inline a copy of the wire codec into core's published `dist/testing.*`
@@ -34,9 +34,9 @@ import {
   MAX_WEBRTC_STRING_BYTES,
   describeFrameStructureRefusal,
   scanFrameStructure,
-} from "@psilink/core";
+} from "@alcove/core";
 
-import type { FrameStructureRefusal } from "@psilink/core";
+import type { FrameStructureRefusal } from "@alcove/core";
 import type { Unpackable } from "peerjs-js-binarypack";
 
 /** The two limits `scanFrameStructure` measures a frame against. A fixture has
@@ -168,7 +168,7 @@ const refusedFrames: Record<
   },
   "unbacked-elements": {
     label: "an array32 declaring a million elements over one packed value",
-    frame: concatBytes([array32Header(1_000_000), packValue("psilink")]),
+    frame: concatBytes([array32Header(1_000_000), packValue("alcove")]),
     limits: PRODUCTION_LIMITS,
   },
   "total-elements": {
@@ -197,7 +197,7 @@ function binaryFrame(n: number): ArrayBuffer {
  * SAME reduced limits, so a side that refuses too much fails as loudly as one that
  * refuses too little; then in-protocol frames at the production limits, the shapes a
  * reassembler has to deliver for an exchange to complete. (Core's differential suite
- * holds the exhaustive enumeration of what psilink sends; these are the
+ * holds the exhaustive enumeration of what Alcove sends; these are the
  * representative shapes, driven here through the transports rather than the scan
  * alone.) */
 const admittedValues: Array<{

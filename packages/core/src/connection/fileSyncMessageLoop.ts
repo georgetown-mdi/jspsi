@@ -384,7 +384,7 @@ export class FileSyncMessageLoop {
         ),
         {
           cause: this.indeterminatePublish.error,
-          psilinkRecoveryHintEmitted: true,
+          alcoveRecoveryHintEmitted: true,
         },
       );
 
@@ -562,7 +562,7 @@ export class FileSyncMessageLoop {
               `afterwards. ${CLEAN_DIRECTORY_RESTART_REMEDY}`,
             { cause: renameErr },
           ),
-          { psilinkRecoveryHintEmitted: true },
+          { alcoveRecoveryHintEmitted: true },
         );
       }
       if (!deps.options().retainFiles) deps.responsibleFiles.add(outName);
@@ -924,7 +924,7 @@ export class FileSyncMessageLoop {
                     `unrecognized wire ` +
                     `format (envelope version byte ${parseErr.foundVersion}, ` +
                     `not this build's ${MESSAGE_ENVELOPE_VERSION}); the partner ` +
-                    `is likely running an incompatible psilink version, and ` +
+                    `is likely running an incompatible Alcove version, and ` +
                     `both parties must run the same version`,
                 );
               // Any other envelope failure (truncation, unknown type, out-of-

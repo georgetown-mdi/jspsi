@@ -4,7 +4,7 @@ import {
   MAX_ERROR_CAUSE_DEPTH,
   errorWithPartnerCauseLinks,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
 
@@ -88,7 +88,7 @@ import type {
   JobSigningPaths,
 } from "./intentSchemas";
 
-import type { ExchangeRecordOutcome, PartnerOriginText } from "@psilink/core";
+import type { ExchangeRecordOutcome, PartnerOriginText } from "@alcove/core";
 import type {
   LoadedConfigurationResponse,
   OpenedMountedConfiguration,
@@ -1818,14 +1818,14 @@ function openedConfigurationWarning(
 ): string | undefined {
   if (opened === undefined)
     return (
-      "The console has no record of the psilink.yaml you opened, so the " +
+      "The console has no record of the alcove.yaml you opened, so the " +
       "recurring-run configuration for this run holds only the settings " +
       "shown on these pages. To include the file's other settings, open the " +
       "configuration again and start a new run."
     );
   if (mountedConfigurationUnchanged(dataRoot, opened.source)) return undefined;
   return (
-    "The psilink.yaml in your working folder changed after you opened it. " +
+    "The alcove.yaml in your working folder changed after you opened it. " +
     "This run and its recurring-run configuration use the settings as you " +
     "opened them, not the changed file. To use the changed file, open the " +
     "configuration again and start a new run."

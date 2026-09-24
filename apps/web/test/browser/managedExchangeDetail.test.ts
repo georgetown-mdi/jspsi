@@ -6,7 +6,7 @@ import {
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { page, userEvent } from "vitest/browser";
 
@@ -67,7 +67,7 @@ import type {
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { ParkedResultsRead } from "@psi/parkedResultsStore";
 import type { UnfiledDisclosureRead } from "@psi/unfiledDisclosureStore";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 // The managed exchange detail sections, rendered: the read-only configuration with
 // its re-invite affordance (never an edit control over the terms), the editable
@@ -2298,7 +2298,7 @@ describe("recovering an accounting this version cannot read", () => {
     // Nor the opposite direction's copy: this build is the current one, so
     // nothing here tells the operator to reload a page that is behind.
     expect(
-      page.getByText("older version of psilink", { exact: false }).query(),
+      page.getByText("older version of Alcove", { exact: false }).query(),
     ).toBeNull();
   });
 
@@ -2345,7 +2345,7 @@ describe("recovering an accounting this version cannot read", () => {
       await downloads.settled();
       expect(downloads.captured).toHaveLength(1);
       expect(downloads.captured[0].fileName).toMatch(
-        /^psilink-disclosures-stored-.*\.json$/,
+        /^alcove-disclosures-stored-.*\.json$/,
       );
       // Deep equality against what was staged at rest: the file loses no entry
       // and no field, which is the export's only claim.
@@ -2732,7 +2732,7 @@ describe("an accounting a newer version of the app filed", () => {
 
     await expect
       .element(
-        page.getByText("running an older version of psilink", { exact: false }),
+        page.getByText("running an older version of Alcove", { exact: false }),
       )
       .toBeInTheDocument();
     // The remedy, and the one cost of taking it on a surface that sits below the

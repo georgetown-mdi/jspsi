@@ -1,7 +1,7 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import { page, userEvent } from "vitest/browser";
 
@@ -139,7 +139,7 @@ describe("read-failed recovery listing", () => {
     await rawPut({
       ...good,
       id: "zzz-bad-record",
-      schemaVersion: "psilink-managed-exchange/v4",
+      schemaVersion: "alcove-managed-exchange/v5",
     });
     // Precondition: the strict list read rejects wholesale on the bad record.
     await expect(listManagedExchanges()).rejects.toThrow();
@@ -196,7 +196,7 @@ describe("read-failed recovery listing", () => {
     await rawPut({
       ...good,
       id: "zzz-bad-record",
-      schemaVersion: "psilink-managed-exchange/v4",
+      schemaVersion: "alcove-managed-exchange/v5",
     });
 
     app.render(createElement(SavedExchanges));
@@ -216,7 +216,7 @@ describe("read-failed recovery listing", () => {
     await rawPut({
       ...good,
       id: "zzz-bad-record",
-      schemaVersion: "psilink-managed-exchange/v4",
+      schemaVersion: "alcove-managed-exchange/v5",
     });
 
     app.render(createElement(SavedExchanges));
@@ -243,7 +243,7 @@ describe("recovery listing: the delete confirm's custody notes", () => {
     await rawPut({
       ...good,
       id: "zzz-bad-record",
-      schemaVersion: "psilink-managed-exchange/v4",
+      schemaVersion: "alcove-managed-exchange/v5",
     });
     if (seedState) await seedState(good);
     await expect(listManagedExchanges()).rejects.toThrow();
@@ -330,7 +330,7 @@ describe("recovery listing: the delete confirm's custody notes", () => {
     await expect
       .element(
         page.getByText(
-          "The psilink.yaml and .psilink.key you saved still run this exchange",
+          "The alcove.yaml and .alcove.key you saved still run this exchange",
           { exact: false },
         ),
       )
@@ -346,7 +346,7 @@ describe("recovery listing: the delete confirm's custody notes", () => {
       .toBeInTheDocument();
     expect(
       page
-        .getByText("The psilink.yaml and .psilink.key you saved", {
+        .getByText("The alcove.yaml and .alcove.key you saved", {
           exact: false,
         })
         .query(),
@@ -387,7 +387,7 @@ describe("the import this surface offers works from the read-failed state", () =
     await rawPut({
       ...good,
       id: "zzz-bad-record",
-      schemaVersion: "psilink-managed-exchange/v4",
+      schemaVersion: "alcove-managed-exchange/v5",
     });
     await expect(listManagedExchanges()).rejects.toThrow();
 
@@ -399,7 +399,7 @@ describe("the import this surface offers works from the read-failed state", () =
       page.elementLocator(
         document.querySelector('input[type="file"]') as HTMLElement,
       ),
-      new File([bytes], "psilink-managed-backup-2026-07-14.json", {
+      new File([bytes], "alcove-managed-backup-2026-07-14.json", {
         type: "application/json",
       }),
     );

@@ -7,7 +7,7 @@ import {
   generateSharedSecret,
   prepareForExchange,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   JobApiRequestError,
@@ -28,7 +28,7 @@ import {
 import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 import { failureFor } from "@exchange/useInviterExchange";
 
-import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
+import type { CSVRow, LinkageTerms, Metadata } from "@alcove/core";
 import type { JobInputSource } from "@psi/jobClient/serverJobExchangeDriver";
 
 const WORK_FILE: JobInputSource = {
@@ -111,7 +111,7 @@ describe("failureFor", () => {
         new Error(
           "shared secret expired at 2026-07-08T19:32:00.000Z; obtain a new invitation",
         ),
-        { psilinkRecoveryHintEmitted: true },
+        { alcoveRecoveryHintEmitted: true },
       ),
     );
     expect(failure.category).toBe("security");
@@ -397,13 +397,10 @@ describe("failureFor", () => {
   });
 
   test.each([
-    [
-      MOUNTED_KEY_FILE_ABSENT_REFUSAL,
-      "Your working folder has no .psilink.key",
-    ],
+    [MOUNTED_KEY_FILE_ABSENT_REFUSAL, "Your working folder has no .alcove.key"],
     [
       MOUNTED_KEY_FILE_INVALID_REFUSAL,
-      "The .psilink.key in your working folder cannot be read",
+      "The .alcove.key in your working folder cannot be read",
     ],
   ] as const)(
     "a run refused over the key file beside the configuration (%s) names that file",
@@ -423,7 +420,7 @@ describe("failureFor", () => {
       );
       expect(failure.category).toBe("config");
       expect(failure.title).toBe(title);
-      expect(failure.message).toContain("beside psilink.yaml");
+      expect(failure.message).toContain("beside alcove.yaml");
       expect(failure.message).toContain("create a new invitation");
     },
   );

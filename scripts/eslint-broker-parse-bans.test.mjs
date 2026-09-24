@@ -22,7 +22,7 @@ import {
 } from "./eslint-strip-type-aware-layer.mjs";
 
 // Coverage of the parse bans the repo-root eslint.config.mjs carries over
-// packages/peerjs-broker/src: untrusted JSON is decoded through @psilink/core's
+// packages/peerjs-broker/src: untrusted JSON is decoded through @alcove/core's
 // parseBoundedJson, and a secret-bearing document through the same package's
 // sensitive-parse chokepoint. This is the tree with an unauthenticated adversary
 // in front of it -- the signaling socket parses whatever an internet client

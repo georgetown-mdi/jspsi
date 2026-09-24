@@ -16,7 +16,7 @@ import {
   parseExchangeSpec,
   safeParseMetadata,
   setDiagnosticSink,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   FIELD_DOCS,
@@ -76,7 +76,7 @@ log.setLevel("silent");
 
 const tmpDirs: string[] = [];
 function scratchDir(): string {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-init-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-init-"));
   tmpDirs.push(dir);
   return dir;
 }
@@ -153,7 +153,7 @@ test("renderConfigTemplate: defaults are pre-filled and the active body parses",
 
 test("renderConfigTemplate: the delimiter init was given is written into the template", async () => {
   // The run that names a delimiter leaves it in the file, so the recurring
-  // `psilink exchange` that file governs reads and writes by it with no flag.
+  // `alcove exchange` that file governs reads and writes by it with no flag.
   const template = renderConfigTemplate(
     await buildTemplateData(undefined, "Org", DEFAULT_LINKAGE_RULE_SET, "|"),
   );
@@ -187,7 +187,7 @@ test("renderConfigTemplate: every shipped rule set round-trips as its own citati
     const warnings: string[] = [];
     warnOnLinkageRuleSetCitationDrift(
       parsed.linkageTerms,
-      "psilink.yaml",
+      "alcove.yaml",
       { warn: (message: string) => warnings.push(message) },
       "held-alone",
       "decline-to-reuse",
@@ -480,7 +480,7 @@ test("buildTemplateData: `-` at an interactive terminal with nothing piped is a 
 
 test("buildTemplateData: an unreadable input file is a usage error (exit 64)", async () => {
   await expect(
-    buildTemplateData("/nonexistent/psilink-init-input.csv", "Org"),
+    buildTemplateData("/nonexistent/alcove-init-input.csv", "Org"),
   ).rejects.toBeInstanceOf(UsageError);
 });
 
@@ -501,7 +501,7 @@ test("resolveInitInput: a second positional is a usage error", () => {
 test("decideOverwrite: a free path is a create, without prompting", async () => {
   const dir = scratchDir();
   const confirm = vi.fn(async () => true);
-  const decision = await decideOverwrite(path.join(dir, "psilink.yaml"), {
+  const decision = await decideOverwrite(path.join(dir, "alcove.yaml"), {
     interactive: true,
     confirm,
   });
@@ -511,7 +511,7 @@ test("decideOverwrite: a free path is a create, without prompting", async () => 
 
 test("decideOverwrite: an existing path is an overwrite on an interactive yes", async () => {
   const dir = scratchDir();
-  const target = path.join(dir, "psilink.yaml");
+  const target = path.join(dir, "alcove.yaml");
   fs.writeFileSync(target, "old\n");
   const decision = await decideOverwrite(target, {
     interactive: true,
@@ -522,7 +522,7 @@ test("decideOverwrite: an existing path is an overwrite on an interactive yes", 
 
 test("decideOverwrite: declining preserves the file (skip)", async () => {
   const dir = scratchDir();
-  const target = path.join(dir, "psilink.yaml");
+  const target = path.join(dir, "alcove.yaml");
   fs.writeFileSync(target, "old\n");
   const decision = await decideOverwrite(target, {
     interactive: true,
@@ -533,7 +533,7 @@ test("decideOverwrite: declining preserves the file (skip)", async () => {
 
 test("decideOverwrite: an existing path with no interactive prompt fails closed (exit 64)", async () => {
   const dir = scratchDir();
-  const target = path.join(dir, "psilink.yaml");
+  const target = path.join(dir, "alcove.yaml");
   fs.writeFileSync(target, "old\n");
   await expect(
     decideOverwrite(target, { interactive: false, confirm: async () => true }),
@@ -549,7 +549,7 @@ test("decideOverwrite: an existing path with no interactive prompt fails closed 
 function argvFor(overrides: Record<string, unknown>): Arguments {
   return {
     _: [],
-    $0: "psilink",
+    $0: "alcove",
     "log-level": "silent",
     ...overrides,
   } as unknown as Arguments;
@@ -557,7 +557,7 @@ function argvFor(overrides: Record<string, unknown>): Arguments {
 
 test("handler: writes a parseable template and no key file, then exits 0", async () => {
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -567,7 +567,7 @@ test("handler: writes a parseable template and no key file, then exits 0", async
   expect(exit).not.toHaveBeenCalled();
   expect(fs.existsSync(configFile)).toBe(true);
   // No key file is created by init.
-  expect(fs.readdirSync(dir)).toEqual(["psilink.yaml"]);
+  expect(fs.readdirSync(dir)).toEqual(["alcove.yaml"]);
   // The written file is a valid config skeleton.
   parseExchangeSpec(YAML.parse(fs.readFileSync(configFile, "utf8")));
 });
@@ -578,7 +578,7 @@ test("handler: the identity it writes unasked is one no resolver accepts", async
   // hand-edited everywhere but this field mints an invitation under it. Run
   // against a non-interactive stdin, which is what leaves the field unasked.
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   vi.spyOn(process, "exit").mockImplementation((() => {}) as never);
 
   await withStdin(streamOf(""), () =>
@@ -614,7 +614,7 @@ test("handler: the identity it writes unasked is one no resolver accepts", async
 
 test("handler: at a terminal with no --identity, it asks and writes the answer", async () => {
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   promptFreeTextMock.mockResolvedValue("  Jane Smith, Agency A  ");
   const exit = vi
     .spyOn(process, "exit")
@@ -629,7 +629,7 @@ test("handler: at a terminal with no --identity, it asks and writes the answer",
   expect(exit).not.toHaveBeenCalled();
   expect(promptFreeTextMock).toHaveBeenCalledTimes(1);
   expect(promptFreeTextMock).toHaveBeenCalledWith(INIT_IDENTITY_QUESTION);
-  // Why psilink asks rather than naming the party itself, on the terminal the
+  // Why Alcove asks rather than naming the party itself, on the terminal the
   // question is asked on -- and never on stdout, which holds result data.
   expect(stderrWrites.join("")).toContain(IDENTITY_PROMPT_PREAMBLE);
   expect(stdoutWrites.join("")).toBe("");
@@ -637,7 +637,7 @@ test("handler: at a terminal with no --identity, it asks and writes the answer",
     YAML.parse(fs.readFileSync(configFile, "utf8")),
   ).linkageTerms;
   // Trimmed as a flag value is, and a label the resolvers take: the answer the
-  // operator typed is what a later `psilink invite` over this file mints under.
+  // operator typed is what a later `alcove invite` over this file mints under.
   expect(identity).toBe("Jane Smith, Agency A");
   expect(resolveInvitationIdentity(identity, configFile)).toBe(
     "Jane Smith, Agency A",
@@ -649,7 +649,7 @@ test("handler: with no terminal it asks nothing and writes the placeholder", asy
   // untouched by the question: nothing is asked and the scaffold has the
   // placeholder, so a scripted init behaves as it did before there was a prompt.
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -670,7 +670,7 @@ test("handler: --identity at a terminal is answered by the flag, not a question"
   // The flag stays the scripted path: supplying it is what keeps the question
   // from being asked, terminal or not.
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -692,7 +692,7 @@ test("handler: a blank answer leaves the placeholder to fill in by hand", async 
   // scaffold it has always written, so an operator who has not settled the
   // wording still gets a template rather than a refusal.
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   promptFreeTextMock.mockResolvedValue("   ");
   const exit = vi
     .spyOn(process, "exit")
@@ -717,7 +717,7 @@ test("handler: the placeholder typed at the question is refused, writing nothing
   // not a name is refused wherever it comes from -- typing it back at the
   // question is not a way around the guard.
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   promptFreeTextMock.mockResolvedValue(`  ${PLACEHOLDER_IDENTITY}  `);
   const exit = vi
     .spyOn(process, "exit")
@@ -735,11 +735,11 @@ test("handler: the placeholder typed at the question is refused, writing nothing
 });
 
 test("handler: declining the overwrite asks for no identity", async () => {
-  // Nothing is asked on a path that writes no file: psilink remembers an answer
+  // Nothing is asked on a path that writes no file: Alcove remembers an answer
   // only in the configuration it was already going to write, so a run that
   // leaves the existing one alone has nowhere to put one.
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configFile, "old contents\n");
   promptConfirmMock.mockResolvedValue(false);
   const exit = vi
@@ -758,7 +758,7 @@ test("handler: declining the overwrite asks for no identity", async () => {
 
 test("handler: --log-file is accepted and the config is still written", async () => {
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   const logFile = path.join(dir, "init.log");
   const exit = vi
     .spyOn(process, "exit")
@@ -776,7 +776,7 @@ test("handler: --log-file is accepted and the config is still written", async ()
 
 test("handler: an input file infers metadata and standardization into the file", async () => {
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   const input = path.join(dir, "in.csv");
   fs.writeFileSync(input, SAMPLE_CSV);
   const exit = vi
@@ -800,7 +800,7 @@ test("handler: a file appearing after the check fails closed (exit 64)", async (
   // error rather than clobber. Forced via the write mock since a real filesystem
   // race is not reproducible in a unit test.
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   writeFileOwnerOnlyMock.mockImplementationOnce(() => {
     throw new FileExistsError(configFile);
   });
@@ -823,7 +823,7 @@ test("handler: a file appearing after the check fails closed (exit 64)", async (
 
 test("handler: an existing file with no terminal fails closed (exit 64), unchanged", async () => {
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configFile, "old contents\n");
   const exit = vi
     .spyOn(process, "exit")
@@ -838,7 +838,7 @@ test("handler: an existing file with no terminal fails closed (exit 64), unchang
 
 test("handler: declining the interactive overwrite leaves the file untouched", async () => {
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configFile, "old contents\n");
   promptConfirmMock.mockResolvedValue(false);
   const exit = vi
@@ -856,7 +856,7 @@ test("handler: declining the interactive overwrite leaves the file untouched", a
 
 test("handler: confirming the interactive overwrite replaces the file", async () => {
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   fs.writeFileSync(configFile, "old contents\n");
   promptConfirmMock.mockResolvedValue(true);
   const exit = vi
@@ -879,7 +879,7 @@ test("handler: confirming the interactive overwrite replaces the file", async ()
 
 test("handler: a malformed input file exits 64", async () => {
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -903,7 +903,7 @@ test("handler: an unrecognized --log-level exits 64", async () => {
 
   await initHandler(
     argvFor({
-      "config-file": path.join(dir, "psilink.yaml"),
+      "config-file": path.join(dir, "alcove.yaml"),
       "log-level": "loud",
     }),
   );
@@ -916,7 +916,7 @@ test("handler: a mistyped --flag exits 64 naming it, writing no config", async (
   // positionals; it must be rejected before any file is written, not absorbed as
   // an input path.
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);
@@ -942,7 +942,7 @@ test("handler: a `-`-leading input positional is not treated as an option", asyn
   // resolveInitInput/buildTemplateData, which rejects it as an unreadable file
   // (exit 64) -- not the unknown-option path, and never a silently-dropped flag.
   const dir = scratchDir();
-  const configFile = path.join(dir, "psilink.yaml");
+  const configFile = path.join(dir, "alcove.yaml");
   const exit = vi
     .spyOn(process, "exit")
     .mockImplementation((() => {}) as never);

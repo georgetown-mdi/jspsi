@@ -26,12 +26,12 @@ const SERVICE_WORKER_URL = "/serviceWorker.js";
 
 /** The message that makes a waiting worker take over now. Mirrored by
  * `SKIP_WAITING_MESSAGE` in `apps/web/public/serviceWorker.js`. */
-export const SKIP_WAITING_MESSAGE = "psilink-skip-waiting";
+export const SKIP_WAITING_MESSAGE = "alcove-skip-waiting";
 
 /** The message that has the worker cache every route's code, not just the
  * shell's. Mirrored by `WARM_ROUTES_MESSAGE` in
  * `apps/web/public/serviceWorker.js`. */
-export const WARM_ROUTES_MESSAGE = "psilink-warm-routes";
+export const WARM_ROUTES_MESSAGE = "alcove-warm-routes";
 
 /** The subset of `ServiceWorker` this module drives. Structural, so a test can
  * supply a plain object in place of a real worker. */

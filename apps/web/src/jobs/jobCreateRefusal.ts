@@ -21,11 +21,11 @@ export const SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL =
 export const SFTP_FINGERPRINT_LIST_REFUSAL = "sftp-fingerprint-list";
 
 /** The token for a run of the opened configuration refused because the
- * working folder holds no `.psilink.key` beside it. */
+ * working folder holds no `.alcove.key` beside it. */
 export const MOUNTED_KEY_FILE_ABSENT_REFUSAL = "mounted-key-file-absent";
 
 /** The token for a run of the opened configuration refused because the
- * `.psilink.key` beside it cannot be read as a key file. */
+ * `.alcove.key` beside it cannot be read as a key file. */
 export const MOUNTED_KEY_FILE_INVALID_REFUSAL = "mounted-key-file-invalid";
 
 /** The token for a signed run of the opened configuration refused because

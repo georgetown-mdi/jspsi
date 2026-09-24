@@ -1,8 +1,8 @@
 import {
   ALLOW_MISSING_PREREQUISITES_ENV,
   prerequisitesAreRequired,
-} from "@psilink/testkit/prerequisiteGate";
-import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
+} from "@alcove/testkit/prerequisiteGate";
+import { loopbackTlsCert } from "@alcove/testkit/loopbackTlsCert";
 
 export { ALLOW_MISSING_PREREQUISITES_ENV, prerequisitesAreRequired };
 

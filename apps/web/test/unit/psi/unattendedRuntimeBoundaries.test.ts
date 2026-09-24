@@ -7,7 +7,7 @@ import {
   registerAppShell,
   resetAppShellUpdate,
 } from "@utils/appShellUpdate";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   buildManagedExchangeRecord,

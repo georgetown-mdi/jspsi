@@ -28,7 +28,7 @@ import type {
   Metadata,
   SemanticType,
   StandardizationStep,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   JobRendezvousConfig,
   ProfiledJobInput,

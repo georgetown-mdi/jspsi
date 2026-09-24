@@ -1,5 +1,5 @@
 // The published declaration files, as a consumer's TypeScript reads them: the
-// built `@psilink/core` and `@psilink/core/testing`, not this source tree. Plain
+// built `@alcove/core` and `@alcove/core/testing`, not this source tree. Plain
 // JavaScript because that is what the artifacts are.
 //
 // PreparedExchange, ExchangeResult, and the StandardizedDataset class the first

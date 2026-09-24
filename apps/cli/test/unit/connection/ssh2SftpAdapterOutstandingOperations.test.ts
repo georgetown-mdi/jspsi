@@ -8,7 +8,7 @@ import {
   TransportOperationStalledError,
   TransportPublishIndeterminateError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../../src/connection/ssh2SftpAdapter";
 import { SFTP_PUT_PROGRESS_CHUNK_BYTES } from "../../../src/connection/sftpLivenessGuard";
@@ -661,9 +661,9 @@ describe("an operation outstanding across a session transition", () => {
         "not compatible with the installed SFTP library",
       );
       for (const message of messages) {
-        expect(message).toContain("'psilink --version'");
+        expect(message).toContain("'alcove --version'");
         expect(message).toContain(
-          "https://github.com/georgetown-mdi/jspsi/issues",
+          "https://github.com/georgetown-mdi/alcove/issues",
         );
       }
     } finally {

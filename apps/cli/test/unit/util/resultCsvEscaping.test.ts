@@ -13,14 +13,14 @@ import {
   toCommittedPayload,
   toRetainedResult,
   verifyExchangeRecord,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   AssociationTable,
   CSVRow,
   LinkageTerms,
   Metadata,
   PartnerPayload,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { writeOutput } from "../../../src/util/dataIo";
 
@@ -109,7 +109,7 @@ function resultTable(): { headers: string[]; rows: Array<Array<string>> } {
 const tempDirs: string[] = [];
 
 function tempResultPath(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-result-csv-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-result-csv-"));
   tempDirs.push(dir);
   return path.join(dir, "results.csv");
 }
@@ -188,8 +188,8 @@ test("writeOutput: each field is quoted once, not escaped a second time", async 
 
 test("writeOutput: the stdout branch and the OUTPUT_FILE branch write identical bytes", async () => {
   // A quoted field cannot be produced on one branch and not the other: both take
-  // the same already-escaped fields and join them the same way, so `psilink
-  // exchange input.csv > results.csv` and `psilink exchange input.csv results.csv`
+  // the same already-escaped fields and join them the same way, so `alcove
+  // exchange input.csv > results.csv` and `alcove exchange input.csv results.csv`
   // differ only in the file's permissions.
   const { headers, rows } = resultTable();
   const file = tempResultPath();

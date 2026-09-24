@@ -9,7 +9,7 @@ import {
   TransportOperationStalledError,
   UsageError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../../src/connection/ssh2SftpAdapter";
 import {

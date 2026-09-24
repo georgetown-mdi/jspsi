@@ -1,6 +1,6 @@
 import { fittedCauseLink } from "../causeLink";
 
-import type { WebRTCConnectionConfig } from "@psilink/core";
+import type { WebRTCConnectionConfig } from "@alcove/core";
 import type { RTCPeerConnection } from "werift";
 
 /**

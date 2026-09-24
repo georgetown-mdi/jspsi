@@ -1,7 +1,7 @@
 name: Nightly Live WebRTC Interop
 
 # Scheduled nightly run of the live CLI-to-browser WebRTC leg
-# (apps/web/test/liveWebrtc): a real `psilink` process and a real browser peer
+# (apps/web/test/liveWebrtc): a real `alcove` process and a real browser peer
 # completing one WebRTC PSI exchange through the standalone signaling broker,
 # with each side's association table asserted and each side's clean-close wait
 # measured.
@@ -47,7 +47,7 @@ jobs:
     name: Live CLI-to-browser WebRTC exchange
     runs-on: ubuntu-latest
     # Bound the job: it drives a real browser, a real broker and a real
-    # `psilink` process, workloads that can wedge in ways the leg's own
+    # `alcove` process, workloads that can wedge in ways the leg's own
     # timeouts do not all catch. The leg itself measures well under a minute
     # once provisioned; the rest of this budget is the browser provisioning
     # below and its own 22-minute bound.
@@ -61,7 +61,7 @@ jobs:
           # A manual dispatch instead takes the ref it was dispatched on, so a
           # fix can be confirmed on its own branch before it lands.
           ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || 'staging' }}
-      # Pins Node, installs from the lockfile, and builds @psilink/core.
+      # Pins Node, installs from the lockfile, and builds @alcove/core.
       - uses: ./.github/actions/setup
       # The party on the CLI side of this leg is the real command-line program,
       # so it has to be built; the leg refuses to start without it rather than

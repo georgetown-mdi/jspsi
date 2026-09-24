@@ -97,7 +97,7 @@ export function Lobby() {
   return (
     <AppPage>
       <main className={styles.lobby}>
-        <h1>psilink - private record linkage</h1>
+        <h1>Alcove - encrypted matching and sharing</h1>
         <p className={styles.tagline}>
           Find the records you both hold - without either of you seeing the
           other&apos;s data.
@@ -183,13 +183,13 @@ export function Lobby() {
           First time here?{" "}
           <Anchor
             inherit
-            href="https://github.com/georgetown-mdi/jspsi#readme"
+            href="https://github.com/georgetown-mdi/alcove#readme"
             target="_blank"
             rel="noreferrer"
           >
             Instructions and documentation
           </Anchor>{" "}
-          cover what psilink does, how to run an exchange, and the sample data
+          cover what Alcove does, how to run an exchange, and the sample data
           for practicing.
         </p>
         <p className={`${styles.sub} ${styles.small}`}>
@@ -230,7 +230,7 @@ export function Lobby() {
         <div className={styles.howItWorks}>
           <p>
             <strong>How it works.</strong> Each of you keeps your file on your
-            own machine. psilink compares cryptographic fingerprints of the
+            own machine. Alcove compares cryptographic fingerprints of the
             fields you match on - a private set intersection - so only the
             records you both hold are revealed, and only to the people the terms
             name. Your browser connects directly to your partner&apos;s.

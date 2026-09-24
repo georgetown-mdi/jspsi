@@ -3,11 +3,11 @@
 
 import { describe, expect, test } from "vitest";
 
-import { runPipeline } from "@psilink/core";
+import { runPipeline } from "@alcove/core";
 
 // The companion to packages/core/test/transformRegexVectors.test.ts: it runs
 // the same checked-in transform-regex vectors through the browser build of
-// @psilink/core in real Chromium, proving the CLI (Node) and web (browser)
+// @alcove/core in real Chromium, proving the CLI (Node) and web (browser)
 // builds derive byte-identical values for every partner transform pattern.
 // re2js is pure JS, so the same engine runs on both targets.
 //

@@ -2,7 +2,7 @@
 // Core barrel wildcard check, run by static_checks.yaml on every PR.
 //
 // packages/core/src/main.ts is a curated list of named exports: what
-// @psilink/core publishes is decided one name at a time, and a symbol whose
+// @alcove/core publishes is decided one name at a time, and a symbol whose
 // only callers outside core are test files belongs on the ./testing subpath
 // instead. One `export * from "./someModule"` line undoes that -- the barrel
 // goes back to publishing whatever its modules happen to export, and every

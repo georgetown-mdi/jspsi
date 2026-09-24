@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   getFreePort,
@@ -43,12 +43,12 @@ describe.skipIf(!hasBuild)(
     let port = 0;
 
     beforeAll(async () => {
-      dataRoot = mkdtempSync(join(tmpdir(), "psilink-wp2-data-"));
-      inputDir = mkdtempSync(join(tmpdir(), "psilink-wp2-input-"));
-      rendezvousDir = mkdtempSync(join(tmpdir(), "psilink-wp2-rdv-"));
+      dataRoot = mkdtempSync(join(tmpdir(), "alcove-wp2-data-"));
+      inputDir = mkdtempSync(join(tmpdir(), "alcove-wp2-input-"));
+      rendezvousDir = mkdtempSync(join(tmpdir(), "alcove-wp2-rdv-"));
       // The built server runs as an ordinary user here, so relocate the
       // pasted-credential scratch dir off the root-owned default it uses in-image.
-      scratchDir = mkdtempSync(join(tmpdir(), "psilink-wp2-cred-"));
+      scratchDir = mkdtempSync(join(tmpdir(), "alcove-wp2-cred-"));
       writeFileSync(join(inputDir, "mounted.csv"), SOURCE_CSV);
 
       port = await getFreePort();

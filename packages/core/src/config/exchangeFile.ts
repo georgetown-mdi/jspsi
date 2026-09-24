@@ -128,14 +128,14 @@ export interface ExchangeFileInput {
   standardization?: Standardization;
   /**
    * This party's SEND-side disclosure commitment (its own column namespace) --
-   * the top-level `disclosed_payload_columns` a later recurring `psilink
+   * the top-level `disclosed_payload_columns` a later recurring `alcove
    * exchange` verifies its metadata still discloses. Optional; omit to reconcile
    * lazily.
    */
   disclosedPayloadColumns?: string[];
   /**
    * This party's RECEIVE-side commitment (the partner's column namespace) -- the
-   * top-level `expected_payload_columns` a later `psilink exchange` enforces it
+   * top-level `expected_payload_columns` a later `alcove exchange` enforces it
    * receives. Optional; omit to reconcile lazily.
    */
   expectedPayloadColumns?: string[];
@@ -144,7 +144,7 @@ export interface ExchangeFileInput {
   outboundPayloadConsent?: OutboundPayloadConsent;
   /**
    * The `deduplicate` an accepted invitation declared for the PARTNER's own side
-   * -- the top-level `expected_partner_deduplicate` a later `psilink exchange`
+   * -- the top-level `expected_partner_deduplicate` a later `alcove exchange`
    * holds the presented value to. Optional; omit where no invitation was accepted
    * (there is then no declaration to bind).
    */
@@ -299,7 +299,7 @@ export function assembleExchangeSpec(
  * the CLI's `saveConfig` uses.
  *
  * The secret never enters the file: there is no `authentication` block --
- * the CLI injects the shared secret from `.psilink.key` at runtime, and
+ * the CLI injects the shared secret from `.alcove.key` at runtime, and
  * the secret rides ONLY the invitation code. For an SFTP locator, the one
  * SSH identity field the operator must supply (`username`) is seeded with
  * the {@link PLACEHOLDER_SSH_USERNAME} placeholder, so a downloaded

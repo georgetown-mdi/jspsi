@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { CSV_DELIMITER_DETECT, csvDelimiterRefusal } from "@psilink/core";
+import { CSV_DELIMITER_DETECT, csvDelimiterRefusal } from "@alcove/core";
 
 import {
   CSV_DELIMITER_OPTIONS,

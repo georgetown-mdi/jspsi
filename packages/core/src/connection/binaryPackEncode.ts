@@ -18,7 +18,7 @@
 // fails there rather than at a partner's browser
 // (docs/spec/DEPENDENCY_PINS.md).
 //
-// A value kind the library encodes but psilink never sends -- a Date, a class
+// A value kind the library encodes but Alcove never sends -- a Date, a class
 // instance, a Blob -- is refused rather than guessed at, since a guess that
 // misses is a silently corrupt frame. So is a frame that holds itself: that walk
 // has no end, so the cycle is refused as soon as it is reached rather than left
@@ -134,7 +134,7 @@ function isByteArray(value: object): value is ArrayBufferView {
 }
 
 /** Is `value` a plain object, the only shape BinaryPack writes as a map here?
- * A class instance is one to the library and is refused here instead: psilink
+ * A class instance is one to the library and is refused here instead: Alcove
  * sends none, and admitting one would encode whatever own keys it happened to
  * have. */
 function isPlainObject(value: object): value is Record<string, unknown> {

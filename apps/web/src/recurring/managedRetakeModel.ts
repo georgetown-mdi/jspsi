@@ -34,7 +34,7 @@ export const RETAKE_LEAD =
   "being able to connect to your partner.";
 
 /** Which file to choose, why, and what the wrong one costs. Every command-line run
- * writes the secret it rotated to back into `.psilink.key`, so that file is where
+ * writes the secret it rotated to back into `.alcove.key`, so that file is where
  * the partnership's current secret is after a run there. The file holds nothing
  * naming the exchange it belongs to, so nothing here can tell this exchange's key
  * file from another exchange's or from a stale copy of it, and whichever is chosen
@@ -42,9 +42,9 @@ export const RETAKE_LEAD =
  * and where the right file is; it does not refuse the operator's choice. */
 export const RETAKE_KEY_FILE_NOTE =
   "If that machine has run this exchange since you handed it off, choose the " +
-  ".psilink.key file you saved there -- each run changes the shared secret and " +
+  ".alcove.key file you saved there -- each run changes the shared secret and " +
   "writes it to that file, so it holds the one your partner expects. Take it " +
-  "from the folder holding this exchange's psilink.yaml: every exchange's key " +
+  "from the folder holding this exchange's alcove.yaml: every exchange's key " +
   "file has that same name, and the one you choose replaces the only copy of " +
   "the secret this browser has for this exchange. Another exchange's file, or " +
   "an older copy of this one, leaves this exchange unable to connect to your " +
@@ -81,8 +81,8 @@ const RETAKE_REFUSALS: Record<
   "unreadable-key-file": {
     title: "That file could not be read",
     reason:
-      "This is not a .psilink.key file this app can read. Check that you chose " +
-      "the .psilink.key from the machine running this exchange, and that it " +
+      "This is not a .alcove.key file this app can read. Check that you chose " +
+      "the .alcove.key from the machine running this exchange, and that it " +
       "was not modified. Nothing changed here.",
   },
   "run-in-flight": {
@@ -97,7 +97,7 @@ const RETAKE_REFUSALS: Record<
     reason:
       "This exchange is no longer in this browser -- it was deleted, or " +
       "cleared along with the browser's storage -- so there is nothing here to " +
-      "take back. It still runs from the psilink.yaml and .psilink.key you " +
+      "take back. It still runs from the alcove.yaml and .alcove.key you " +
       "saved; set the exchange up again with your partner if you do not have " +
       "them.",
   },

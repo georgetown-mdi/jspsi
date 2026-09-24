@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 850" role="img" aria-label="psilink component diagram: core library, applications, and external systems">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 850" role="img" aria-label="Alcove component diagram: core library, applications, and external systems">
   <style>
     text { font-family: -apple-system, "Segoe UI", ui-sans-serif, system-ui, sans-serif; }
     .lane-label { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; fill: #5a6472; }

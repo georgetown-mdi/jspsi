@@ -3,13 +3,13 @@
 
 import { describe, expect, test } from "vitest";
 
-import { computeKexKeys, createMessagePipe } from "@psilink/core/testing";
-import { runKex } from "@psilink/core";
+import { computeKexKeys, createMessagePipe } from "@alcove/core/testing";
+import { runKex } from "@alcove/core";
 
 import vectorsRaw from "../../../../packages/core/test/vectors/kex-vectors.json?raw";
 
 // The companion to packages/core/test/kex.test.ts: runs the same checked-in
-// key-exchange vectors through the browser build of @psilink/core in real
+// key-exchange vectors through the browser build of @alcove/core in real
 // Chromium, so a CLI peer (Node) and a web peer (browser) derive an identical
 // session from an identical transcript.
 //

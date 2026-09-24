@@ -1,4 +1,4 @@
-import { getLogger, parseBoundedJson } from "@psilink/core";
+import { getLogger, parseBoundedJson } from "@alcove/core";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
@@ -19,7 +19,7 @@ import type { JobApiClient } from "@psi/jobClient/serverJobExchangeDriver";
 const log = getLogger("consoleJobAttachment");
 
 /** The localStorage key the console's last-created job id is written under. */
-const STORAGE_KEY = "psilink-console-last-job";
+const STORAGE_KEY = "alcove-console-last-job";
 
 /** The stored record's schema version; a value under any other version is treated
  * as absent (a forward/backward-incompatible record is discarded, not migrated). */

@@ -54,6 +54,11 @@ export const CHECKS = [
       "Every Markdown link target and heading anchor across the repository resolves.",
   },
   {
+    script: "check:no-legacy-names",
+    description:
+      "No tracked file or path holds the product's earlier name outside the reasoned allowlist; past its expiry date the check fails until it is deleted.",
+  },
+  {
     script: "check:contributing",
     description:
       "CONTRIBUTING.md stays a quickstart: no heading outside its allowlist, no node_modules/ source path.",
@@ -76,7 +81,7 @@ export const CHECKS = [
   {
     script: "check:image-capabilities",
     description:
-      "Every psilink argument vector the file-drop support scripts use has an image_smoke.yaml capability gate exercising it.",
+      "Every Alcove argument vector the file-drop support scripts use has an image_smoke.yaml capability gate exercising it.",
   },
   {
     script: "check:enforcement-claims",

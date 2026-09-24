@@ -366,7 +366,7 @@ test("buildOutputTable refuses a delimiter that is not a single character", () =
 const baseSpec = {
   connection: {
     channel: "filedrop",
-    path: "/tmp/psilink",
+    path: "/tmp/alcove",
   },
   linkage_terms: {
     version: "1.0.0",

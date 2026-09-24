@@ -1,7 +1,7 @@
 import net from "node:net";
 import tls from "node:tls";
 
-import type { LoopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
+import type { LoopbackTlsCert } from "@alcove/testkit/loopbackTlsCert";
 import type { Socket } from "node:net";
 import type { Server, TLSSocket } from "node:tls";
 
@@ -17,7 +17,7 @@ import type { Server, TLSSocket } from "node:tls";
  * itself, keeps driving the real vendored broker's own standalone entry
  * point unchanged; the leg only adds a scheme in front of it.
  *
- * The certificate is the throwaway one `@psilink/testkit/loopbackTlsCert`
+ * The certificate is the throwaway one `@alcove/testkit/loopbackTlsCert`
  * mints; a party dialing this front trusts only this one certificate, via
  * `NODE_EXTRA_CA_CERTS` in that process alone.
  */

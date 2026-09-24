@@ -1,6 +1,6 @@
 import { SPLIT_DIRECTORY_RETAIN_REQUIREMENT } from "./sftpConnectionForm";
 
-import type { SFTPEndpoint } from "@psilink/core";
+import type { SFTPEndpoint } from "@alcove/core";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 /**

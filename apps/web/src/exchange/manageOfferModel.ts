@@ -27,7 +27,7 @@ import {
   MAX_TEXT_LENGTH,
   MAX_TOKEN_MAX_AGE_DAYS,
   deriveOutboundPayloadConsent,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
 import { RETENTION_NOTE_PROBLEM } from "@psi/receiptsModel";
@@ -45,7 +45,7 @@ import type {
   Standardization,
   WebRTCEndpoint,
   WebRTCExchangeLocator,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ManagedExchangeSide,
   NewManagedExchange,

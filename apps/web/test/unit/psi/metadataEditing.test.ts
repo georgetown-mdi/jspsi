@@ -6,7 +6,7 @@ import {
   inferMetadata,
   isDisclosedToPartner,
   preparePayload,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   applyDisclosure,
@@ -22,7 +22,7 @@ import {
   setColumnTypeForMatching,
 } from "../../../src/psi/metadataEditing.js";
 
-import type { ColumnMetadata, Metadata } from "@psilink/core";
+import type { ColumnMetadata, Metadata } from "@alcove/core";
 
 import type { DisclosureChoice } from "../../../src/psi/metadataEditing.js";
 

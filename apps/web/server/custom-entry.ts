@@ -14,7 +14,7 @@ import "#nitro-internal-pollyfills";
 import { useNitroApp, useRuntimeConfig } from "nitropack/runtime";
 import { toNodeListener } from "h3";
 
-import { getLogger, setLogLevel } from "@psilink/core";
+import { getLogger, setLogLevel } from "@alcove/core";
 
 import {
   bootSftpCredentialScratchDir,

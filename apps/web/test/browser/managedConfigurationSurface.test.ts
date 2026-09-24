@@ -7,7 +7,7 @@ import {
   getDefaultLinkageTerms,
   parseExchangeSpec,
   parseSensitiveYaml,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { page } from "vitest/browser";
 
@@ -77,7 +77,7 @@ describe("the surface of an imported configuration", () => {
 
     await expect
       .element(
-        page.getByText("without the .psilink.key file it runs under", {
+        page.getByText("without the .alcove.key file it runs under", {
           exact: false,
         }),
       )
@@ -90,7 +90,7 @@ describe("the surface of an imported configuration", () => {
     ).toBe(null);
   });
 
-  test("downloads the psilink.yaml the command line loads", async () => {
+  test("downloads the alcove.yaml the command line loads", async () => {
     const created = await createManagedExchange(configurationOnly());
     const downloads = captureDownloads();
     try {
@@ -279,7 +279,7 @@ describe("the surface of a configuration on a channel this app does not run", ()
   });
 
   test("names a signing block as the reason it does not run here", async () => {
-    const identityFile = "@/run/signing/psilink-signing-identity.json";
+    const identityFile = "@/run/signing/alcove-signing-identity.json";
     const created = await createManagedExchange({
       ...configurationOnly(),
       exchangeFile: {
@@ -331,7 +331,7 @@ describe("the surface of a configuration on a channel this app does not run", ()
     app.render(createElement(ManagedRunSurface, { id: created.id }));
 
     await expect
-      .element(page.getByText("Files psilink reads when it runs"))
+      .element(page.getByText("Files Alcove reads when it runs"))
       .toBeInTheDocument();
     await expect
       .element(
@@ -354,9 +354,7 @@ describe("the list row of an imported configuration", () => {
 
     await expect
       .element(
-        page.getByText(
-          "Configuration only - edit it here, run it with psilink",
-        ),
+        page.getByText("Configuration only - edit it here, run it with Alcove"),
       )
       .toBeInTheDocument();
     await expect

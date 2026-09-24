@@ -4,7 +4,7 @@ import {
   keepFirstPartyLineBreaks,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   ConsoleSentinel,

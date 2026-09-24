@@ -28,7 +28,7 @@ export const BUILD_COMMAND = "npm run build -w apps/web";
 
 /** Set to `1` to run the integration project without a production build: the
  * built-server suites skip instead of failing it (see requireProdBuild.ts). */
-export const ALLOW_MISSING_BUILD_ENV = "PSILINK_ALLOW_MISSING_WEB_BUILD";
+export const ALLOW_MISSING_BUILD_ENV = "ALCOVE_ALLOW_MISSING_WEB_BUILD";
 
 /** The single build-presence predicate, probed at import: the guard fails the
  * project on it, and every suite that drives the built server gates itself on

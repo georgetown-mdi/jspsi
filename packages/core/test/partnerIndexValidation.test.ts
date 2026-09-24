@@ -776,7 +776,7 @@ test("a repeat under the ascending rule is reported as the repeat", () => {
 // stays injective MODULO the grouping this party sent, so a repeat is admitted
 // between two entries that named ONE (round, position) and refused between two
 // that named different ones. The rule is driven end to end over a live exchange in
-// psiLinkManyToOne.test.ts; these are its two halves at the check itself.
+// linkManyToOne.test.ts; these are its two halves at the check itself.
 
 const refusalFrom = (run: () => void): unknown => {
   try {

@@ -50,14 +50,14 @@ import type {
 } from "./managedLocalStateShape";
 import type { ManagedCronExport } from "./managedCronExport";
 
-/** The download filename `psilink-managed-backup-<date>.json`, the date the local
+/** The download filename `alcove-managed-backup-<date>.json`, the date the local
  * calendar day of `at`, mirroring the exchange-file filename discipline so repeated
  * exports have distinct dates. */
 export function managedBackupFileName(at: Date): string {
   const year = at.getFullYear();
   const month = String(at.getMonth() + 1).padStart(2, "0");
   const day = String(at.getDate()).padStart(2, "0");
-  return `psilink-managed-backup-${year}-${month}-${day}.json`;
+  return `alcove-managed-backup-${year}-${month}-${day}.json`;
 }
 
 /** The platform boundaries a backup export drives, injected so the intent stays

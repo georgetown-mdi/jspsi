@@ -21,7 +21,7 @@ import {
   signReceiptContent,
   toRetainedResult,
   verifyExchangeRecord,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   parseCertificateDocument,
@@ -47,7 +47,7 @@ import type {
   SignedReceiptPartyReport,
   SigningIdentity,
   VerificationKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 type ExchangeRecordInputs = Parameters<typeof buildExchangeRecord>[0];
 
@@ -173,7 +173,7 @@ describe("parseRecordDocument", () => {
     const { record } = await fixtures();
     const bumped = JSON.stringify({
       ...record,
-      version: "psilink-exchange-record/v1",
+      version: "alcove-exchange-record/v1",
     });
     const parsed = parseRecordDocument(bumped);
     expect(parsed.kind).toBe("unrecognized-version");
@@ -218,7 +218,7 @@ describe("parseKeysDocument", () => {
     const { keys } = await fixtures();
     const bumped = JSON.stringify({
       ...keys,
-      version: "psilink-exchange-keys/v2",
+      version: "alcove-exchange-keys/v3",
     });
     const parsed = parseKeysDocument(bumped);
     expect(parsed.kind).toBe("unrecognized-version");
@@ -370,7 +370,7 @@ const EMPTY_CELL_PAYLOAD = {
   rows: [[""]],
 } as unknown as CanonicalValue;
 
-// The notes beside the verdict are psilink's own sentences, and the operator
+// The notes beside the verdict are Alcove's own sentences, and the operator
 // acts on the second half of one -- what to set, what to re-supply. The
 // per-value cap is sized for a single untrusted fragment, so the note slot is
 // exempt from it while anything a supplied file chose keeps it.
@@ -680,7 +680,7 @@ describe("parseSignedRecordDocument", () => {
     );
     expect(parsed.kind).toBe("malformed");
     if (parsed.kind === "malformed")
-      expect(parsed.message).toContain("psilink-receipt-<stamp>.json");
+      expect(parsed.message).toContain("alcove-receipt-<stamp>.json");
   });
 
   test("an error-bearing malformed input never echoes control bytes", () => {
@@ -720,7 +720,7 @@ describe("parseCertificateDocument", () => {
     if (parsed.kind === "signing-identity") {
       expect(parsed.message).toContain("private signing key");
       expect(parsed.message).toContain(
-        "psilink fingerprint --export-certificate",
+        "alcove fingerprint --export-certificate",
       );
       expect(parsed.message).not.toContain(identity.privateKey.d);
     }
@@ -757,7 +757,7 @@ describe("parseCertificateDocument", () => {
     );
     expect(parsed.kind).toBe("unrecognized-version");
     if (parsed.kind === "unrecognized-version")
-      expect(parsed.message).toContain("psilink-signing-cert/v2");
+      expect(parsed.message).toContain("alcove-signing-cert/v3");
   });
 
   test("a certificate whose self-signature does not verify is malformed", async () => {
@@ -798,7 +798,7 @@ describe("pinnedFingerprintProblem", () => {
   test("a malformed pin is its own error, not a certificate that does not match", () => {
     const problem = pinnedFingerprintProblem("not-a-fingerprint");
     expect(problem).toContain("43 characters");
-    expect(problem).toContain("psilink fingerprint");
+    expect(problem).toContain("alcove fingerprint");
   });
 });
 

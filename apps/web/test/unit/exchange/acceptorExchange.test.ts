@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { acceptorInitialColumnsState } from "@exchange/acceptorColumnsModel";
 import { prepareAcceptorExchange } from "@exchange/acceptorExchange";
 
-import type { CSVRow, LinkageTerms, Metadata } from "@psilink/core";
+import type { CSVRow, LinkageTerms, Metadata } from "@alcove/core";
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 
 // Two single-element name keys plus a payload the inviter sends, adopted verbatim

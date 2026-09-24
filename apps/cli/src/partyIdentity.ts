@@ -1,4 +1,4 @@
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
 import { promptFreeText, writePromptLine } from "./util/prompt";
 
@@ -10,7 +10,7 @@ const PARTNER_READS_IT =
   "The identity is the name your partner reads in the agreed linkage terms";
 
 /**
- * The placeholder `psilink init` writes into a fresh template when given no
+ * The placeholder `alcove init` writes into a fresh template when given no
  * `--identity`, and the one value no resolver here accepts. It sits beside
  * the resolvers rather than the template writer, so the written and refused
  * values share one definition.
@@ -49,7 +49,7 @@ function normalizeSuppliedIdentity(identity: string | undefined): string {
  * placeholder rather than a name.
  */
 export const IDENTITY_STILL_PLACEHOLDER =
-  `"${PLACEHOLDER_IDENTITY}" is the placeholder psilink init writes where a ` +
+  `"${PLACEHOLDER_IDENTITY}" is the placeholder alcove init writes where a ` +
   "name belongs, so it is refused exactly as no identity at all. " +
   `Pass ${IDENTITY_FLAG_HELP} naming this party. ` +
   `${PARTNER_READS_IT}, the invitation, and the disclosure record.`;
@@ -118,7 +118,7 @@ export function keptConfigurationIdentityRequired(configPath: string): string {
 export function configuredIdentityStillPlaceholder(configPath: string): string {
   return (
     `linkage_terms.identity in ${configPath} is still ` +
-    `"${PLACEHOLDER_IDENTITY}", the placeholder psilink init writes where a ` +
+    `"${PLACEHOLDER_IDENTITY}", the placeholder alcove init writes where a ` +
     "name belongs, so it is refused exactly as an absent one. " +
     `${PARTNER_READS_IT}, so replace it there with this party's name, ` +
     `organization, and contact -- ${FLAG_CANNOT_STAND_IN}`
@@ -132,7 +132,7 @@ export function configuredIdentityStillPlaceholder(configPath: string): string {
  *
  * There is no fallback: a run with no flag, or a blank value (e.g. an unset
  * `$ORG` in `--identity "$ORG"`), stops rather than defaulting to system
- * state such as the account psilink runs as, because the partner reads this
+ * state such as the account Alcove runs as, because the partner reads this
  * label as the operator's own chosen name.
  *
  * {@link PLACEHOLDER_IDENTITY} is refused alongside blank: the schema
@@ -176,7 +176,7 @@ export function optionalIdentity(
 export const IDENTITY_PROMPT_PREAMBLE = `${PARTNER_READS_IT}, the invitation, and the disclosure record.`;
 
 /**
- * The question `psilink init` asks. It states what a blank answer does, because
+ * The question `alcove init` asks. It states what a blank answer does, because
  * blank is not a refusal here: the template is a scaffold to hand-edit, so an
  * operator who has not settled the wording yet gets {@link PLACEHOLDER_IDENTITY}
  * to replace, exactly as a run with no terminal to ask at does.
@@ -186,7 +186,7 @@ export const INIT_IDENTITY_QUESTION =
   "by hand later:";
 
 /**
- * The question `psilink accept` asks. It has no blank-answer note because
+ * The question `alcove accept` asks. It has no blank-answer note because
  * blank is absence and an acceptance will not proceed unnamed
  * ({@link IDENTITY_REQUIRED}): it authors a durable partnership the partner
  * reads a name off.
@@ -241,7 +241,7 @@ export async function identityFromFlagOrPrompt(
  * the placeholder are refused elsewhere in this module.
  *
  * The value comes back VERBATIM: a certificate authorizes an exact
- * identity string, and every later `psilink exchange` reads the
+ * identity string, and every later `alcove exchange` reads the
  * configuration's own bytes, so a trimmed copy would name the partnership
  * differently in the invitation than in the runs under it.
  */
@@ -297,7 +297,7 @@ export function termsUpdateIdentityRequired(configPath: string): string {
 }
 
 /**
- * This party's identity label for `psilink update` and `psilink apply`: the
+ * This party's identity label for `alcove update` and `alcove apply`: the
  * configuration's own `linkage_terms.identity`, refused where blank or still
  * the placeholder, as {@link resolveInvitationIdentity} refuses it.
  */

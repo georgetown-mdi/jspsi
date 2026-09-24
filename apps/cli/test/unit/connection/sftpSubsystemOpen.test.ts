@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS, TimeoutError } from "@psilink/core";
+import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS, TimeoutError } from "@alcove/core";
 
 import {
   subsystemOpenTimeoutMs,

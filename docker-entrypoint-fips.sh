@@ -9,7 +9,7 @@
 #     by running the engagement probe the image ships and reading its exit
 #     status, and by nothing else. The probe is a Node process under the image's
 #     own configuration, so it exercises the same libcrypto the `node` that runs
-#     psilink does, at the parameter shapes psilink itself passes; it requires
+#     Alcove does, at the parameter shapes Alcove itself passes; it requires
 #     fips.so mapped into that process and an MD5 digest and a below-minimum RSA
 #     keygen failing beside the successful calls, so a success served by the
 #     default provider cannot read as engagement. The Amazon Linux `openssl` CLI
@@ -47,9 +47,9 @@ fi
 # which are worth showing on the failure path and noise on the success one, so
 # it is captured whole and replayed rather than read.
 if engagement_report=$(node /app/fips-probe/image-engagement.mjs 2>&1); then
-  echo "[psilink] FIPS provider active: this container's crypto is served by the Amazon Linux 2023 OpenSSL FIPS provider, ${module_clause} (probed in this container at startup)" >&2
+  echo "[Alcove] FIPS provider active: this container's crypto is served by the Amazon Linux 2023 OpenSSL FIPS provider, ${module_clause} (probed in this container at startup)" >&2
 else
-  echo "[psilink] WARNING: the startup probe did not find this container's crypto being served by the FIPS provider this image was built around (${module_clause}). This image's cryptography is not running in the module it was built around. The probe reported:" >&2
+  echo "[Alcove] WARNING: the startup probe did not find this container's crypto being served by the FIPS provider this image was built around (${module_clause}). This image's cryptography is not running in the module it was built around. The probe reported:" >&2
   printf '%s\n' "$engagement_report" >&2
 fi
 
@@ -61,13 +61,13 @@ fi
 
 case "$fips_enabled" in
 1)
-  echo "[psilink] host kernel FIPS mode: enabled" >&2
+  echo "[Alcove] host kernel FIPS mode: enabled" >&2
   ;;
 0)
-  echo "[psilink] WARNING: the host kernel is not in FIPS mode (/proc/sys/crypto/fips_enabled is 0). Whatever the provider report above says, a deployment outside host FIPS mode does not meet the module's own operating conditions. Enable FIPS mode on the host, or treat this run as carrying no FIPS claim." >&2
+  echo "[Alcove] WARNING: the host kernel is not in FIPS mode (/proc/sys/crypto/fips_enabled is 0). Whatever the provider report above says, a deployment outside host FIPS mode does not meet the module's own operating conditions. Enable FIPS mode on the host, or treat this run as carrying no FIPS claim." >&2
   ;;
 *)
-  echo "[psilink] WARNING: the host kernel's FIPS mode could not be read (/proc/sys/crypto/fips_enabled is absent or unreadable), so this container cannot tell whether the host is in FIPS mode. A kernel built without CONFIG_CRYPTO_FIPS has no such file. Treat this run as carrying no FIPS claim unless you know otherwise." >&2
+  echo "[Alcove] WARNING: the host kernel's FIPS mode could not be read (/proc/sys/crypto/fips_enabled is absent or unreadable), so this container cannot tell whether the host is in FIPS mode. A kernel built without CONFIG_CRYPTO_FIPS has no such file. Treat this run as carrying no FIPS claim unless you know otherwise." >&2
   ;;
 esac
 

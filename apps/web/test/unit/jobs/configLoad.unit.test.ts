@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { stringify as stringifyYaml } from "yaml";
 
-import { getDefaultLinkageTerms, snakeizeKeys } from "@psilink/core";
+import { getDefaultLinkageTerms, snakeizeKeys } from "@alcove/core";
 
 import {
   ConfigurationLoadRefusedError,
@@ -23,7 +23,7 @@ import { composeSftpConfigSpec } from "@jobs/intentConfig";
 
 import { testSftpServerEntry, validSftpIntent } from "../../utils/jobFixtures";
 
-import type { ExchangeSpec } from "@psilink/core";
+import type { ExchangeSpec } from "@alcove/core";
 
 // The mount load's server half: what it reads, what it refuses, what it
 // discloses, and which settings it reports holding without an editor.
@@ -44,7 +44,7 @@ function terms() {
   return getDefaultLinkageTerms("County Health");
 }
 
-/** The document a CLI `psilink invite --save` writes for an sftp exchange, as
+/** The document a CLI `alcove invite --save` writes for an sftp exchange, as
  * the file spells it. */
 function savedSftpDocument(
   overrides: Record<string, unknown> = {},
@@ -145,7 +145,7 @@ describe("what the load discloses", () => {
         signing: {
           mode: "certificate",
           partner_fingerprint: PARTNER_FINGERPRINT,
-          identity_file: "/home/operator/.psilink/identity.json",
+          identity_file: "/home/operator/.alcove/identity.json",
           receipt_output: "/home/operator/receipts/latest.json",
         },
       }),
@@ -161,7 +161,7 @@ describe("what the load discloses", () => {
       savedSftpDocument({
         signing: {
           mode: "certificate",
-          identity_file: "/home/operator/.psilink/identity.json",
+          identity_file: "/home/operator/.alcove/identity.json",
           receipt_output: "/home/operator/receipts/latest.json",
         },
       }),
@@ -217,7 +217,7 @@ describe("what the load discloses", () => {
     );
     expect(message).toContain("shared_secret and expires");
     expect(message).toContain("remove those lines and open it again");
-    expect(message).toContain(".psilink.key file beside the configuration");
+    expect(message).toContain(".alcove.key file beside the configuration");
   });
 
   test("an absent file is present: false with no error", () => {
@@ -238,14 +238,14 @@ describe("a mounted file the load cannot open", () => {
   });
 
   function mountDir(): string {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-configload-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-configload-"));
     dirs.push(dir);
     return dir;
   }
 
   function unreadableMountDir(): string {
     const dir = mountDir();
-    const filePath = path.join(dir, "psilink.yaml");
+    const filePath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(filePath, "connection: {}");
     fs.chmodSync(filePath, 0o000);
     return dir;
@@ -279,26 +279,26 @@ describe("a mounted file the load cannot open", () => {
 
   test("a directory at the config path refuses the same way as unreadable", () => {
     const dir = mountDir();
-    fs.mkdirSync(path.join(dir, "psilink.yaml"));
+    fs.mkdirSync(path.join(dir, "alcove.yaml"));
     expect(refusalFrom(dir)).toBe(refusalFrom(unreadableMountDir()));
   });
 
-  test("a directory named psilink.yaml refuses as unreadable", () => {
+  test("a directory named alcove.yaml refuses as unreadable", () => {
     const dir = mountDir();
-    fs.mkdirSync(path.join(dir, "psilink.yaml"));
+    fs.mkdirSync(path.join(dir, "alcove.yaml"));
     const message = refusalFrom(dir);
     expect(message).toContain("could not");
     expect(message).not.toContain("too large");
   });
 
-  test("a FIFO named psilink.yaml refuses as unreadable, without blocking", () => {
+  test("a FIFO named alcove.yaml refuses as unreadable, without blocking", () => {
     // A plain open() of a FIFO for reading blocks until a writer opens it; with
     // no writer ever attached here, a blocking open would wedge this
     // synchronous server. The load must open non-blocking so the refusal
     // returns promptly instead.
     let mkfifoAvailable = true;
     const dir = mountDir();
-    const filePath = path.join(dir, "psilink.yaml");
+    const filePath = path.join(dir, "alcove.yaml");
     try {
       execFileSync("mkfifo", [filePath]);
     } catch {
@@ -317,7 +317,7 @@ describe("a mounted file the load cannot open", () => {
 
   test("an over-large file refuses by size, distinctly from unreadable", () => {
     const dir = mountDir();
-    fs.writeFileSync(path.join(dir, "psilink.yaml"), "x".repeat(1_000_001));
+    fs.writeFileSync(path.join(dir, "alcove.yaml"), "x".repeat(1_000_001));
     const message = refusalFrom(dir);
     expect(message).toContain("too large");
     expect(message).not.toMatch(/\/tmp/);
@@ -326,13 +326,13 @@ describe("a mounted file the load cannot open", () => {
 
   test("a file of exactly the cap plus one byte refuses as over-large", () => {
     const dir = mountDir();
-    fs.writeFileSync(path.join(dir, "psilink.yaml"), "x".repeat(1_000_001));
+    fs.writeFileSync(path.join(dir, "alcove.yaml"), "x".repeat(1_000_001));
     expect(refusalFrom(dir)).toContain("too large");
   });
 
   test("a file of exactly the cap is read rather than refused by size", () => {
     const dir = mountDir();
-    fs.writeFileSync(path.join(dir, "psilink.yaml"), "x".repeat(1_000_000));
+    fs.writeFileSync(path.join(dir, "alcove.yaml"), "x".repeat(1_000_000));
     expect(refusalFrom(dir)).not.toContain("too large");
   });
 });
@@ -403,9 +403,9 @@ describe("a configuration on a channel the console does not conduct", () => {
   });
 
   function mountHolding(document: Record<string, unknown>): string {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-configload-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-configload-"));
     dirs.push(dir);
-    fs.writeFileSync(path.join(dir, "psilink.yaml"), stringifyYaml(document));
+    fs.writeFileSync(path.join(dir, "alcove.yaml"), stringifyYaml(document));
     return dir;
   }
 
@@ -455,9 +455,9 @@ describe("a configuration on a channel the console does not conduct", () => {
     const opened = openMountedConfiguration(dir).opened;
     if (opened === undefined) throw new Error("the load opened nothing");
     expect(mountedConfigurationUnchanged(dir, opened.source)).toBe(true);
-    fs.appendFileSync(path.join(dir, "psilink.yaml"), "# edited\n");
+    fs.appendFileSync(path.join(dir, "alcove.yaml"), "# edited\n");
     expect(mountedConfigurationUnchanged(dir, opened.source)).toBe(false);
-    fs.rmSync(path.join(dir, "psilink.yaml"));
+    fs.rmSync(path.join(dir, "alcove.yaml"));
     expect(mountedConfigurationUnchanged(dir, opened.source)).toBe(false);
   });
 
@@ -503,7 +503,7 @@ describe("what the load refuses", () => {
     let nested: Record<string, unknown> = { host: "sftp.partner.example" };
     for (let depth = 0; depth < 300; depth += 1) nested = { server: nested };
     const message = refusal({ connection: nested });
-    expect(message).toContain("not a psilink exchange configuration");
+    expect(message).toContain("not an Alcove exchange configuration");
     expect(message).not.toContain("sftp.partner.example");
   });
 
@@ -598,7 +598,7 @@ describe("the settings the console holds without an editor", () => {
         signing: {
           mode: "certificate",
           partner_fingerprint: PARTNER_FINGERPRINT,
-          identity_file: "/home/operator/.psilink/identity.json",
+          identity_file: "/home/operator/.alcove/identity.json",
           receipt_output: "/out/receipt.json",
         },
       }),
@@ -681,7 +681,7 @@ describe("a setting inside a block the composition writes", () => {
     document.connection = { ...connection, ...stated };
     const message = refusal(document);
     expect(message).toContain(field);
-    expect(message).toContain("psilink on the command line");
+    expect(message).toContain("Alcove on the command line");
   });
 
   test("the refusal names the setting only, never its value", () => {

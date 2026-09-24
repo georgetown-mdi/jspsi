@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { generateSharedSecret } from "@psilink/core";
+import { generateSharedSecret } from "@alcove/core";
 
 import {
   BACKUP_NOT_PAIR_REASON,
@@ -36,11 +36,11 @@ describe("sorting the chosen files", () => {
   });
 
   test("one file that is not a key file is imported on its own", () => {
-    const file = named("psilink.yaml");
+    const file = named("alcove.yaml");
     expect(managedImportFileChoice([file])).toEqual({ kind: "one", file });
   });
 
-  test.each([".psilink.key", "psilink.key", "PSILINK.KEY"])(
+  test.each([".alcove.key", "alcove.key", "ALCOVE.KEY"])(
     "%s chosen alone is refused, naming the configuration to add",
     (name) => {
       expect(managedImportFileChoice([named(name)])).toEqual({
@@ -51,27 +51,27 @@ describe("sorting the chosen files", () => {
   );
 
   test("a configuration and a key file are a pair, in either order", () => {
-    const configurationFile = named("psilink.yaml");
-    const keyFile = named(".psilink.key");
+    const configurationFile = named("alcove.yaml");
+    const keyFile = named(".alcove.key");
     const pair = { kind: "pair", configurationFile, keyFile };
     expect(managedImportFileChoice([configurationFile, keyFile])).toEqual(pair);
     expect(managedImportFileChoice([keyFile, configurationFile])).toEqual(pair);
   });
 
-  test.each([
-    [["psilink.yaml", "other.yaml"]],
-    [[".psilink.key", "psilink.key"]],
-  ])("two files that are not one of each (%o) are refused", (names) => {
-    expect(managedImportFileChoice(names.map(named))).toEqual({
-      kind: "refused",
-      reason: NOT_A_PAIR_REASON,
-    });
-  });
+  test.each([[["alcove.yaml", "other.yaml"]], [[".alcove.key", "alcove.key"]]])(
+    "two files that are not one of each (%o) are refused",
+    (names) => {
+      expect(managedImportFileChoice(names.map(named))).toEqual({
+        kind: "refused",
+        reason: NOT_A_PAIR_REASON,
+      });
+    },
+  );
 
   test("more than two files are refused", () => {
     expect(
       managedImportFileChoice(
-        ["psilink.yaml", ".psilink.key", "backup.json"].map(named),
+        ["alcove.yaml", ".alcove.key", "backup.json"].map(named),
       ),
     ).toEqual({ kind: "refused", reason: TOO_MANY_FILES_REASON });
   });
@@ -121,7 +121,7 @@ describe("what the pair import says", () => {
       /^That exchange/,
     );
     expect(custodyUnreadablePairImportReason("Riverbend")).toContain(
-      "psilink.yaml and .psilink.key again",
+      "alcove.yaml and .alcove.key again",
     );
   });
 });

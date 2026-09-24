@@ -9,18 +9,18 @@ import {
   getLogger,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   EntityClusterSummary,
   ExchangeStageDefinition,
   ResolvedMatching,
-} from "@psilink/core";
+} from "@alcove/core";
 
 const log = getLogger("event-stream");
 
 /**
  * The fixed file descriptor the opt-in machine-readable event stream is written
- * to. Not configurable: a supervisor spawns psilink with descriptor 3 wired to a
+ * to. Not configurable: a supervisor spawns Alcove with descriptor 3 wired to a
  * pipe it reads, so a constant is the contract. stdout (fd 1) and stderr (fd 2)
  * are untouched -- the event stream is a third channel, so a supervisor reads
  * structured events without parsing the human log or corrupting the CSV result.
@@ -261,7 +261,7 @@ export interface ErrorEvent extends EventBase {
   message: string;
   /**
    * Present and `true` when {@link message} holds its own next step, read off
-   * core's `psilinkRecoveryHintEmitted` tag ({@link errorStatesItsOwnNextStep}).
+   * core's `alcoveRecoveryHintEmitted` tag ({@link errorStatesItsOwnNextStep}).
    * A supervisor showing fixed copy for this category shows the message
    * instead, and adds no advisory of its own; absent, it has no such
    * assurance. Omitted rather than emitted `false`, so the field is the
@@ -479,7 +479,7 @@ function copyClusterSummary(
 }
 
 /**
- * Whether a failure holds core's `psilinkRecoveryHintEmitted` tag anywhere in
+ * Whether a failure holds core's `alcoveRecoveryHintEmitted` tag anywhere in
  * its cause chain. The chain is walked for the reason the stderr path walks it
  * (`apps/cli/src/protocol.ts`): a wrap of a tagged failure still states the
  * next step the tag promises.
@@ -490,8 +490,8 @@ export function errorStatesItsOwnNextStep(error: unknown): boolean {
   return causeChainSome(
     error,
     (link) =>
-      (link as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted === true,
+      (link as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted === true,
   );
 }
 
@@ -528,9 +528,9 @@ export function assertEventStreamFdOpen(): void {
   } catch {
     throw new UsageError(
       `--event-stream was given but file descriptor ${EVENT_STREAM_FD} is not ` +
-        "open; spawn psilink with that descriptor wired to a pipe your " +
+        "open; spawn Alcove with that descriptor wired to a pipe your " +
         "supervisor reads, or drop --event-stream. Format: " +
-        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/spec/" +
+        "https://github.com/georgetown-mdi/alcove/blob/main/docs/spec/" +
         "CLI_EVENTS.md",
     );
   }

@@ -17,7 +17,7 @@
  * seat's own blocked-reason sentence where the gate is a disabled button).
  */
 
-import type { LinkageField, LinkageTermsVerdict } from "@psilink/core";
+import type { LinkageField, LinkageTermsVerdict } from "@alcove/core";
 
 /** Carried by every refusal shape, since a file separated by something other than
  * the delimiter it was read by reaches either of them: it reads as one column,

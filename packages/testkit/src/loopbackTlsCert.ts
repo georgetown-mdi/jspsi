@@ -44,7 +44,7 @@ export function requireLoopbackTlsCert(): LoopbackTlsCert {
 }
 
 function mintLoopbackTlsCert(): LoopbackTlsCert | null {
-  const dir = mkdtempSync(join(tmpdir(), "psilink-loopback-tls-"));
+  const dir = mkdtempSync(join(tmpdir(), "alcove-loopback-tls-"));
   try {
     execFileSync(
       "openssl",

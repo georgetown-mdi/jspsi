@@ -7,7 +7,7 @@ import type {
   GenerateOutput,
   StageDefinition,
 } from "./exchangeLifecycle";
-import type { PsiProgress, ResolvedMatching } from "@psilink/core";
+import type { PsiProgress, ResolvedMatching } from "@alcove/core";
 
 /** The typed lifecycle events a driver emits over a single run, plus the run's
  * {@link AbortSignal}. This is the whole surface a consumer sees: a driver runs

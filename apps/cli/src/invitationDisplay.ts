@@ -15,7 +15,7 @@ import {
   summarizeInvitation,
   UNRECOGNIZED_TRANSFORM_NOTE,
   unshownDeclaredNamesLine,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { singlePassDisclosureNotice } from "./onlineBootstrap";
 import { writePromptLine } from "./util/prompt";
@@ -29,7 +29,7 @@ import type {
   InvitationSummary,
   LinkageRuleSetCitationVerdict,
   getLogger,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * Where one rendered line of the consent surface is written. The renderer takes
@@ -116,7 +116,7 @@ export function marked(
  * The label one half of a cited rule set takes: its own wording plus this
  * build's verdict on that half, from the shared table. It replaces the
  * basis marker on these two lines -- what an operator needs beside a set
- * name is whether psilink could check it and what it found, not the
+ * name is whether Alcove could check it and what it found, not the
  * enforced/partner's-word vocabulary {@link marked} uses elsewhere.
  *
  * The verdict sits on the LABEL, like {@link marked}: the set name and
@@ -176,7 +176,7 @@ function displayRuleSetCitation(
  * acceptance with no input file, so the resolved spec has no metadata to
  * prepare from.
  *
- * It names the checkpoint that resolves this later: `psilink exchange`
+ * It names the checkpoint that resolves this later: `alcove exchange`
  * derives the set from the input file it is given (the config's metadata
  * if one was written, else the CSV header) and shows it for confirmation
  * before anything is sent. It also names the unattended case, where that
@@ -415,7 +415,7 @@ function displayLinkageKey(
       // literal slice phrase when faithful, else the glossary description.
       // An unrecognized function has neither and would otherwise print
       // like a recognized rule minus one line -- indistinguishable from
-      // one psilink understands. Mark it instead, so an unexplained rule
+      // one Alcove understands. Mark it instead, so an unexplained rule
       // is as explicit as an inapplicable one.
       if (transform.effect !== undefined)
         emit(`            matches on ${transform.effect}`);
@@ -446,7 +446,7 @@ function displayLinkageKey(
  *
  * The categories the keys draw on are what the run computes, so they take
  * the enforced marker; the standards under them are the inviter's own
- * undertaking that psilink warns about rather than filters on, so they sit
+ * undertaking that Alcove warns about rather than filters on, so they sit
  * under their own trust-contingent heading rather than displaying as rules
  * the exchange applies. The allowed-character class is a partner-authored
  * regular expression, never paraphrased as a vetted allow-list -- a

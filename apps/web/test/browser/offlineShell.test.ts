@@ -1,7 +1,7 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import { page } from "vitest/browser";
 
@@ -119,7 +119,7 @@ describe("the shell says what is unavailable", () => {
     // announced.
     expect(offlineTitle().query()).toBeNull();
     expect(
-      page.getByText("A new version of psilink is ready").query(),
+      page.getByText("A new version of Alcove is ready").query(),
     ).toBeNull();
   });
 

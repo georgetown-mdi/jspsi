@@ -11,7 +11,7 @@ import {
   VisuallyHidden,
 } from "@mantine/core";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import { fetchSecretsEntries } from "@psi/jobClient/sftpAuthoringClient";
 
@@ -155,7 +155,7 @@ function renderListing(
         restart the console -- see the{" "}
         <Anchor
           inherit
-          href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
+          href="https://github.com/georgetown-mdi/alcove/blob/main/docs/DEPLOYMENT.md"
           target="_blank"
           rel="noreferrer"
         >

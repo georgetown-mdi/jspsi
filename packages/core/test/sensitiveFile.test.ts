@@ -16,7 +16,7 @@ import {
 // A distinctive credential value that must never appear in a displayed
 // message.
 const SECRET = "S3cr3tCredentialValue_2026";
-const LABEL = "config file /tmp/psilink.yaml";
+const LABEL = "config file /tmp/alcove.yaml";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -110,7 +110,7 @@ test("the warning channel really leaks by default (guards the suppression test)"
 // inside a label falls on. A label composed as a plain string is text nobody
 // marked and keeps the escape; one composed through the mark names a path the
 // OPERATOR chose and renders as they typed it.
-const WINDOWS_CONFIG_PATH = "C:\\psilink\\psilink.yaml";
+const WINDOWS_CONFIG_PATH = "C:\\alcove\\alcove.yaml";
 const markedLabel = messageWithOperatorText`config file ${operatorSuppliedText(
   WINDOWS_CONFIG_PATH,
 )}`;
@@ -151,7 +151,7 @@ test("a marked label leaves a control character unrenderable", () => {
   // The mark states who chose the bytes, not that they are safe to emit: an ESC
   // opening an ANSI sequence still reaches the operator as a printable marker.
   const message = messageWithOperatorText`config file ${operatorSuppliedText(
-    "C:\\psilink\\\u001b[2Kyaml",
+    "C:\\alcove\\\u001b[2Kyaml",
   )}`;
   let caught: unknown;
   try {

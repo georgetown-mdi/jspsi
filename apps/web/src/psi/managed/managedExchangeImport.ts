@@ -5,14 +5,14 @@
  *
  * - The app's own BACKUP artifact is a take-over that installs it as the one
  *   owner on this device (the rest of this header).
- * - A command-line `psilink.yaml` installs a CONFIGURATION-ONLY record: settings
+ * - A command-line `alcove.yaml` installs a CONFIGURATION-ONLY record: settings
  *   to edit and export again, with no secret and no run here (see
  *   {@link ./managedCommandLineImport.ts}). It reconciles against nothing -- it
  *   brings no secret to match a stored record on -- and stamps no marker: the
  *   import marker is evidence of a restored secret, and the backup marker
  *   attests a file this browser restores a secret from. A file holding neither
  *   is that record's own backup, on the machine that runs it.
- * - A command-line `psilink.yaml` WITH the `.psilink.key` beside it installs a
+ * - A command-line `alcove.yaml` WITH the `.alcove.key` beside it installs a
  *   runnable record ({@link importManagedCommandLinePair}), reconciled against
  *   the store on the backup leg's own rule: the same secret is the same
  *   exchange.
@@ -81,7 +81,7 @@
  * path (see {@link ./managedFailureTiers.ts}).
  */
 
-import { parseSensitiveYaml } from "@psilink/core";
+import { parseSensitiveYaml } from "@alcove/core";
 
 import {
   MAX_ARTIFACT_IMPORT_BYTES,
@@ -429,7 +429,7 @@ export class ManagedImportBackupNotConfigurationError extends Error {
 /**
  * Import a file the operator chose, whichever of the two it is: the app's own
  * backup artifact ({@link importManagedExchange}), or a command-line
- * `psilink.yaml` installed as a configuration-only record
+ * `alcove.yaml` installed as a configuration-only record
  * ({@link readManagedCommandLineConfiguration}). Nothing is written on a
  * refusal by either leg.
  *
@@ -517,7 +517,7 @@ const defaultPairDeps: ManagedPairImportDeps = {
 };
 
 /**
- * Import a command-line `psilink.yaml` and the `.psilink.key` beside it as a
+ * Import a command-line `alcove.yaml` and the `.alcove.key` beside it as a
  * runnable managed exchange. Both files are read in full before the store is
  * reached ({@link readManagedCommandLinePair}), so a refusal of either writes
  * nothing. The record is then reconciled on the backup import's rule -- a

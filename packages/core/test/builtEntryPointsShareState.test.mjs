@@ -1,5 +1,5 @@
 // The published entry points, driven as a consumer gets them: the built
-// `@psilink/core` and `@psilink/core/testing`, not this source tree. Plain
+// `@alcove/core` and `@alcove/core/testing`, not this source tree. Plain
 // JavaScript because that is what the artifacts are.
 //
 // The fan-out listing is module state the testing entry's lever rewrites and the
@@ -20,11 +20,11 @@ import {
   StandardizedField,
   buildKeyStrings,
   getLogger,
-} from "@psilink/core";
+} from "@alcove/core";
 import {
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   withNoListedFanOutFunctions,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 
 beforeAll(() => {
   const staleness = describeCoreDistStaleness();

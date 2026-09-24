@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
 import {
   readSmbMountInput,
@@ -10,11 +10,11 @@ const COMPLETE = {
   SMB_SERVER: "files.example.org",
   SMB_SHARE: "exchange",
   SMB_PATH: "dropbox/q3",
-  SMB_USER: "svc-psilink",
+  SMB_USER: "svc-alcove",
   SMB_DOMAIN: "AGENCY",
   SMB_PASS: "correct horse",
   SMB_DIALECT: "SMB3",
-  SMB_MARKER: "psilink-check.txt",
+  SMB_MARKER: "alcove-check.txt",
   SMB_TOKEN: "abc123",
 };
 
@@ -24,11 +24,11 @@ describe("the environment contract", () => {
       server: "files.example.org",
       share: "exchange",
       subdirectory: "dropbox/q3",
-      username: "svc-psilink",
+      username: "svc-alcove",
       domain: "AGENCY",
       password: "correct horse",
       dialect: "SMB3",
-      marker: "psilink-check.txt",
+      marker: "alcove-check.txt",
       token: "abc123",
     });
   });
@@ -128,7 +128,7 @@ describe("values that would change what a command means are refused", () => {
 describe("the mount-side inputs", () => {
   test("read the marker and token, both optional", () => {
     expect(readSmbMountInput(COMPLETE)).toEqual({
-      marker: "psilink-check.txt",
+      marker: "alcove-check.txt",
       token: "abc123",
     });
     expect(readSmbMountInput({})).toEqual({ marker: "", token: "" });

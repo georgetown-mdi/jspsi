@@ -231,7 +231,7 @@ function walkFixture(
   files: Record<string, string>,
   entry: string,
 ): ReturnType<typeof importGraph> {
-  const base = mkdtempSync(join(tmpdir(), "psilink-browser-safe-"));
+  const base = mkdtempSync(join(tmpdir(), "alcove-browser-safe-"));
   fixtureRoots.push(base);
   const tree = treeAt(base);
   for (const [path, source] of Object.entries(files)) {
@@ -343,8 +343,8 @@ describe("the walk resolves every alias apps/web/tsconfig.json declares", () => 
     expect(unresolved).toEqual([]);
     expect(
       bare,
-      "@psilink/core matches the `@*` catch-all and resolves to no app source, so the walk must fall back to node resolution and leave it alone",
-    ).toContain("@psilink/core");
+      "@alcove/core matches the `@*` catch-all and resolves to no app source, so the walk must fall back to node resolution and leave it alone",
+    ).toContain("@alcove/core");
   });
 });
 
@@ -371,7 +371,7 @@ describe("the walk counts a Node builtin in either spelling", () => {
 
   test("an ordinary package does not", () => {
     expect(isNodeBuiltin("zod")).toBe(false);
-    expect(isNodeBuiltin("@psilink/core")).toBe(false);
+    expect(isNodeBuiltin("@alcove/core")).toBe(false);
   });
 });
 

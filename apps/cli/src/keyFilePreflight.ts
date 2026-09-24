@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
 /**
  * Pre-flight validation for an authenticated exchange's key-file path, run
@@ -140,12 +140,12 @@ export function preflightKeyFilePath(
   //
   // Sweep stale probe files left by an earlier SIGKILL'd/OOM'd run so the
   // directory does not accumulate zero-byte litter, matching the exact name
-  // pattern (`.psilink-write-probe-<pid>-<8 hex chars>`) so an unrelated
+  // pattern (`.alcove-write-probe-<pid>-<8 hex chars>`) so an unrelated
   // file with this prefix is not unlinked. Safe on POSIX even against a
   // concurrent run's open probe (unlink does not invalidate its fd); on
   // Windows a peer's open probe cannot be unlinked (EPERM, swallowed) and
   // is left as cosmetic litter for the next sweep.
-  const PROBE_NAME_RE = /^\.psilink-write-probe-\d+-[0-9a-f]{8}$/;
+  const PROBE_NAME_RE = /^\.alcove-write-probe-\d+-[0-9a-f]{8}$/;
   try {
     for (const entry of fs.readdirSync(parent)) {
       if (PROBE_NAME_RE.test(entry)) {
@@ -163,7 +163,7 @@ export function preflightKeyFilePath(
      * message. */
   }
   const probeName =
-    `.psilink-write-probe-${process.pid}-` + crypto.randomUUID().slice(0, 8);
+    `.alcove-write-probe-${process.pid}-` + crypto.randomUUID().slice(0, 8);
   const probePath = path.join(parent, probeName);
   let probeFd: number | undefined;
   try {
@@ -176,7 +176,7 @@ export function preflightKeyFilePath(
       `keyFilePath parent directory ${parent} is not writable: ` +
         (err instanceof Error ? err.message : String(err)) +
         ". Restore write access -- the directory's owner as well as its " +
-        "permissions, since in a container psilink runs as its own account " +
+        "permissions, since in a container Alcove runs as its own account " +
         "and a mounted directory keeps the owner it has outside -- before " +
         "running the exchange, otherwise saveKeyFile would fail after a " +
         "successful key exchange and both parties would need to re-invite.",

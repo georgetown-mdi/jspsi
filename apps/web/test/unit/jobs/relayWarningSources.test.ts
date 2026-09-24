@@ -74,8 +74,8 @@ async function degradationsFromChild(options: {
   await awaitJobTerminalState((onTerminal) =>
     spawnExchangeJob({
       binaryPath: STUB_CLI_PATH,
-      configPath: path.join(workdir, "psilink.yaml"),
-      keyPath: path.join(workdir, ".psilink.key"),
+      configPath: path.join(workdir, "alcove.yaml"),
+      keyPath: path.join(workdir, ".alcove.key"),
       inputPath: path.join(workdir, "input.csv"),
       outputPath: path.join(workdir, "output.csv"),
       recordPath: path.join(workdir, "record.json"),

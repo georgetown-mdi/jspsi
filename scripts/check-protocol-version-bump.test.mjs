@@ -92,7 +92,7 @@ function fixtureTree({
   pins = {},
   extraVectors = {},
 }) {
-  const root = mkdtempSync(resolve(tmpdir(), "psilink-protocol-pin-"));
+  const root = mkdtempSync(resolve(tmpdir(), "alcove-protocol-pin-"));
   temporaryRoots.push(root);
   const write = (relative, content) => {
     mkdirSync(resolve(root, dirname(relative)), { recursive: true });
@@ -147,7 +147,7 @@ describe("the release marker the rule arms on", () => {
 
   it("reads an absent, empty, or non-string manifest version as none", () => {
     expect(manifestVersion('{"version":"0.1.0"}')).toBe("0.1.0");
-    expect(manifestVersion('{"name":"psilink"}')).toBeUndefined();
+    expect(manifestVersion('{"name":"alcove"}')).toBeUndefined();
     expect(manifestVersion('{"version":""}')).toBeUndefined();
     expect(manifestVersion('{"version":2}')).toBeUndefined();
   });

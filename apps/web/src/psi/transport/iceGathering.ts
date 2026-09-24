@@ -1,4 +1,4 @@
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError } from "@alcove/core";
 
 import type { DataConnection } from "peerjs";
 

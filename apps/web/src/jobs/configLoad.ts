@@ -1,5 +1,5 @@
 /**
- * Reading the command-line `psilink.yaml` the operator mounted into the
+ * Reading the command-line `alcove.yaml` the operator mounted into the
  * console's working directory, so the authoring forms start from the
  * configuration they already run rather than from an empty form.
  *
@@ -18,7 +18,7 @@
  * - a `connection` on a channel outside {@link OPENED_CHANNELS};
  * - an `authentication` block holding a shared secret or an expiry, which
  *   belong in the key file rather than the document: a run of the opened
- *   configuration uses the `.psilink.key` beside it ({@link ./mountedKeyFile});
+ *   configuration uses the `.alcove.key` beside it ({@link ./mountedKeyFile});
  * - one of the records whose absence turns an enforcement off that a run
  *   composed here could not state back ({@link assertRecordsSurvive});
  * - a setting inside a block the composition writes, which the export could not
@@ -49,7 +49,7 @@ import {
   parseSensitiveYaml,
   safeParseExchangeSpec,
   snakeizeKey,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   namedFieldList,
@@ -66,7 +66,7 @@ import type {
   ExchangeSpec,
   FileSyncOptions,
   SigningConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   JobExchangeIntentBase,
   JobFiledropExchangeIntent,
@@ -94,20 +94,20 @@ export class ConfigurationLoadRefusedError extends Error {
   }
 }
 
-/** The message reaching the operator when a `psilink.yaml` sits in the mount
+/** The message reaching the operator when an `alcove.yaml` sits in the mount
  * but the console could not open it as a file -- a permission, a non-regular
  * file, or a read error. Names neither the OS error nor the container path:
  * the operator can see both in their own mount. */
 const UNREADABLE_CONFIGURATION_MESSAGE =
-  "A psilink.yaml is in your working folder, but the console could not " +
+  "An alcove.yaml is in your working folder, but the console could not " +
   "read it. Check that it is a regular file with read permission, then " +
   "open it again.";
 
-/** The message reaching the operator when a `psilink.yaml` sits in the mount
+/** The message reaching the operator when an `alcove.yaml` sits in the mount
  * but exceeds {@link MAX_CONFIGURATION_FILE_BYTES}. */
 const OVER_LARGE_CONFIGURATION_MESSAGE =
-  "The psilink.yaml in your working folder is too large to be an " +
-  "exchange configuration. Check that it is the file psilink runs " +
+  "The alcove.yaml in your working folder is too large to be an " +
+  "exchange configuration. Check that it is the file Alcove runs " +
   "under, then open it again.";
 
 /** A channel the console opens a configuration on. */
@@ -509,7 +509,7 @@ function assertHeldSettingsSurvive(document: ExchangeSpec): void {
       (lost.length === 1 ? "it" : "them") +
       ": " +
       lost.join(", ") +
-      ". Run this configuration with psilink on the command line instead.",
+      ". Run this configuration with Alcove on the command line instead.",
   );
 }
 
@@ -547,7 +547,7 @@ function assertRecordsSurvive(document: ExchangeSpec): void {
       " the console cannot run and cannot keep, and each one turns off a " +
       "check this exchange is held to: " +
       lost.join(", ") +
-      ". Run this configuration with psilink on the command line instead.",
+      ". Run this configuration with Alcove on the command line instead.",
   );
 }
 
@@ -563,7 +563,7 @@ function parsedYaml(source: string): unknown {
     return parseSensitiveYaml(source, "mounted exchange configuration");
   } catch {
     throw new ConfigurationLoadRefusedError(
-      "The psilink.yaml in your working folder could not be read as YAML. " +
+      "The alcove.yaml in your working folder could not be read as YAML. " +
         "Check the file for a formatting mistake, then open it again.",
     );
   }
@@ -581,9 +581,9 @@ function parsedDocument(raw: unknown): ExchangeSpec {
   const fields = refusedDocumentFields(parsed.error, raw);
   throw new ConfigurationLoadRefusedError(
     fields.length === 0
-      ? "The psilink.yaml in your working folder is not a psilink exchange " +
+      ? "The alcove.yaml in your working folder is not an Alcove exchange " +
           "configuration. Check the file, then open it again."
-      : "The psilink.yaml in your working folder is not a valid psilink " +
+      : "The alcove.yaml in your working folder is not a valid Alcove " +
           "configuration. " +
           (fields.length === 1 ? "Fix this setting" : "Fix these settings") +
           " in the file, then open it again: " +
@@ -599,14 +599,14 @@ function openedChannel(document: ExchangeSpec): OpenedChannel {
   if (!OPENED_CHANNELS.has(channel))
     throw new ConfigurationLoadRefusedError(
       `This configuration runs over ${channel}, which the console cannot ` +
-        "open. Run it with psilink on the command line instead.",
+        "open. Run it with Alcove on the command line instead.",
     );
   return channel;
 }
 
 /**
  * Refuse an `authentication` block holding the secret or its expiry. A run of
- * the opened configuration uses the `.psilink.key` beside it, whose secret the
+ * the opened configuration uses the `.alcove.key` beside it, whose secret the
  * CLI rotates at each run, so a secret in the document is a value the run
  * would neither use nor be able to keep. `token_max_age_days` is not
  * refused: the console's max-age control starts from it, and a run composes
@@ -623,7 +623,7 @@ function assertNoStatedSecret(document: ExchangeSpec): void {
   throw new ConfigurationLoadRefusedError(
     "This configuration's authentication block states " +
       named.join(" and ") +
-      ". The shared secret and its expiry belong in the .psilink.key file " +
+      ". The shared secret and its expiry belong in the .alcove.key file " +
       "beside the configuration, not in the configuration itself, so remove " +
       (named.length === 1 ? "that line" : "those lines") +
       " and open it again.",
@@ -882,7 +882,7 @@ export interface OpenedMountedConfiguration {
 }
 
 /**
- * Open the configuration mounted at `<dataRoot>/psilink.yaml`: the response
+ * Open the configuration mounted at `<dataRoot>/alcove.yaml`: the response
  * body, and the configuration as opened, which a run of it composes from
  * rather than from a later read of the mount. An absent file is
  * `present: false` and no error: a console whose operator has authored nothing
@@ -991,14 +991,14 @@ export function mountedUnconductedDocument(dataRoot: string): ExchangeSpec {
   const source = mountedConfigurationSource(dataRoot);
   if (source === null)
     throw new ConfigurationLoadRefusedError(
-      "Your working folder no longer holds a psilink.yaml to save these " +
+      "Your working folder no longer holds an alcove.yaml to save these " +
         "changes to. Put the configuration back, then open it again.",
     );
   const document = mountedConfigurationDocument(source);
   const { channel } = document.connection;
   if (isJobChannel(channel))
     throw new ConfigurationLoadRefusedError(
-      `The psilink.yaml in your working folder has changed since you opened ` +
+      `The alcove.yaml in your working folder has changed since you opened ` +
         `it, and runs over ${channel} now. Close the configuration and open ` +
         "it again.",
     );

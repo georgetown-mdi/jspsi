@@ -136,8 +136,8 @@ test("binds the address and port the environment names", async () => {
   const port = await releasedPort();
   broker = await startBrokerProcess({
     env: {
-      PSILINK_BROKER_HOST: "127.0.0.1",
-      PSILINK_BROKER_PORT: String(port),
+      ALCOVE_BROKER_HOST: "127.0.0.1",
+      ALCOVE_BROKER_PORT: String(port),
     },
   });
   expect(broker.port).toBe(port);

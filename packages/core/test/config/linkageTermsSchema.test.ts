@@ -1856,7 +1856,7 @@ test("parses snake_case keys from disk", () => {
 });
 
 test("transform params keys are normalized (params are not opaque)", () => {
-  // Unlike connection.provider_options, a transform `params` block is psilink's
+  // Unlike connection.provider_options, a transform `params` block is Alcove's
   // own function vocabulary and follows the snake_case-YAML -> camelCase-TS
   // convention: the standardizing-function library reads camelCase param keys.
   const result = parseLinkageTerms({
@@ -2245,7 +2245,7 @@ test.each(BIDI_CONTROLS)(
 // --- Party identity private-key rule -----------------------------------------
 // A party `identity` holding private-key material is refused where the document
 // is decoded, rather than displayed on a consent surface as the redaction marker
-// psilink puts in a key's place. The rule reaches this one field: the other
+// Alcove puts in a key's place. The rule reaches this one field: the other
 // free-text values keep the redaction they already had.
 
 // An obviously fake key block written on one line, since the identity refuses a
@@ -2356,7 +2356,7 @@ test("the reason names the class and no part of the label", () => {
 test("what the identity refusal removes: a marker the partner declared", () => {
   // The summary is built from terms that never passed a decode, so it still
   // shows what the refusal above keeps off the consent surface: a marker a
-  // reader would read as psilink redacting a key it found.
+  // reader would read as Alcove redacting a key it found.
   const summary = summarizeInvitation({
     linkageTerms: {
       ...parseLinkageTerms(base),
@@ -3327,7 +3327,7 @@ test("a bare consumer of the schema inherits that bound", () => {
     result = ExchangeSpecSchema.safeParse({
       connection: {
         channel: "sftp",
-        server: { host: "sftp.example.org", username: "psilink" },
+        server: { host: "sftp.example.org", username: "alcove" },
       },
       linkageTerms: deepParamsTerms(20_000),
     });

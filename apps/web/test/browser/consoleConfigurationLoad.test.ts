@@ -8,7 +8,7 @@ import { createElement } from "react";
 
 import "@mantine/core/styles.css";
 
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   CLOSE_CONFIGURATION_LABEL,
@@ -43,7 +43,7 @@ vi.mock("@tanstack/react-router", async () =>
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
-  psilinkVersion: () => undefined,
+  alcoveVersion: () => undefined,
 }));
 
 vi.mock("@psi/transport/rendezvous", async () =>
@@ -256,7 +256,7 @@ describe("the load offer on the file step", () => {
 
   test("a refusal shows the console's own text and offers no partial form", async () => {
     const error =
-      "The psilink.yaml in your working folder is not a psilink exchange " +
+      "The alcove.yaml in your working folder is not an Alcove exchange " +
       "configuration. Check the file, then open it again.";
     stubConfigRoute({ status: 400, body: { error } });
     app.render(createElement(InviterScreen));
@@ -355,7 +355,7 @@ describe("the open configuration over the files it is derived across", () => {
       .element(disclosureToggle(/Connection tuning/))
       .not.toBeInTheDocument();
     await page
-      .getByRole("button", { name: "Save changes to psilink.yaml" })
+      .getByRole("button", { name: "Save changes to alcove.yaml" })
       .click();
     await expect
       .element(page.getByText(CONFIGURATION_SAVED).first())
@@ -545,7 +545,7 @@ describe("the divergence warning on the step that resolves it", () => {
     await goToColumns({ ...COMMITTED, channel: "webrtc" });
     await expect
       .element(
-        page.getByText(/psilink on the command line refuses to run the file/),
+        page.getByText(/Alcove on the command line refuses to run the file/),
       )
       .toBeInTheDocument();
     expect(page.getByText(/a run started here is refused/).query()).toBeNull();
@@ -627,7 +627,7 @@ describe("the review step of an opened configuration's run", () => {
       opened === "inviter" ? "partner" : "inviter",
     );
     await expect
-      .element(page.getByText(/psilink update/).first())
+      .element(page.getByText(/alcove update/).first())
       .toBeInTheDocument();
     await expect
       .element(page.getByText(EDITED_TERMS_TITLE).first())
@@ -638,7 +638,7 @@ describe("the review step of an opened configuration's run", () => {
 
     await userEvent.selectOptions(direction, opened);
     await expect
-      .element(page.getByText(/psilink update/).first())
+      .element(page.getByText(/alcove update/).first())
       .not.toBeInTheDocument();
   });
 });

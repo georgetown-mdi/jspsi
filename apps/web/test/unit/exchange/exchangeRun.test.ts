@@ -4,8 +4,8 @@ import {
   CONFIRMING_PROTOCOL_STAGE_ID,
   SINGLE_PASS_STAGE_IDS,
   getDefaultLinkageTerms,
-} from "@psilink/core";
-import { minimalPreparedExchange } from "@psilink/core/testing";
+} from "@alcove/core";
+import { minimalPreparedExchange } from "@alcove/core/testing";
 
 import {
   BEFORE_START_STAGE_ID,
@@ -28,11 +28,7 @@ import {
   timelineSteps,
 } from "@exchange/exchangeRun";
 
-import type {
-  PreparedExchange,
-  PsiOperation,
-  PsiProgress,
-} from "@psilink/core";
+import type { PreparedExchange, PsiOperation, PsiProgress } from "@alcove/core";
 import type { ExchangeRun } from "@exchange/exchangeRun";
 
 // stagesFor and describeExchangeStages beneath it read only the linkage terms

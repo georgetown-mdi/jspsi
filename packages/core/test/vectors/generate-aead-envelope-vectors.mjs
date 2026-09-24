@@ -22,7 +22,7 @@ const ENVELOPE_VERSION = 1;
 const TYPE_JSON = 0;
 const TYPE_BINARY = 1;
 const IV_SEQ_OFFSET = 4;
-const INFO_PREFIX = "psilink-aead-v1:";
+const INFO_PREFIX = "alcove-aead-v2:";
 const SESSION_KEY = Buffer.alloc(32, 0x42);
 const SALT = Buffer.alloc(32, 0x00);
 

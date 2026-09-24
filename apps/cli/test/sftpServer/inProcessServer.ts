@@ -6,7 +6,7 @@ import path from "node:path";
 import ssh2 from "ssh2";
 import type { Attributes, Connection, SFTPWrapper } from "ssh2";
 
-import { computeHostKeyFingerprint } from "@psilink/core";
+import { computeHostKeyFingerprint } from "@alcove/core";
 
 import { COUNTED_SFTP_OPS, createSftpSessionControls } from "./sessionControls";
 import type {
@@ -194,7 +194,7 @@ function publicKeyOf(generated: { public: string }): {
 export async function startInProcessSftpServer(): Promise<InProcessSftpServer> {
   const parties = makeParties();
   const backingDir = await fsp.mkdtemp(
-    path.join(os.tmpdir(), "psilink-sftp-inproc-"),
+    path.join(os.tmpdir(), "alcove-sftp-inproc-"),
   );
   const hostKey = makeKeyPair();
 

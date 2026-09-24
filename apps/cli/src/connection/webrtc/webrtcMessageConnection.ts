@@ -2,7 +2,7 @@ import {
   ConnectionError,
   QueuedMessageConnection,
   asConnectionError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { BoundedInboundFrames } from "./inboundBounds";
 import {
@@ -13,7 +13,7 @@ import {
 import { openWebRtcPeerSession } from "./weriftPeer";
 
 import type { WebRtcPeerOptions, WebRtcPeerSession } from "./weriftPeer";
-import type { MessageConnection } from "@psilink/core";
+import type { MessageConnection } from "@alcove/core";
 import type { RTCDataChannel } from "werift";
 
 /**

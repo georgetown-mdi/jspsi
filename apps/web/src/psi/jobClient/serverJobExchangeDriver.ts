@@ -4,7 +4,7 @@ import {
   getLogger,
   joinErrorCauseChain,
   parseBoundedJson,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   MAX_JOB_STATUS_RESPONSE_BYTES,
@@ -29,7 +29,7 @@ import type {
   OwnColumnSelection,
   ResolvedMatching,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { ExchangeDriver, ExchangeDriverEvents } from "../exchangeDriver";
 import type {
   ExchangeErrorCategory,
@@ -324,7 +324,7 @@ export class RelayedTerminalError extends Error {
 /**
  * The relayed terminal failure whose own message states the next step, built
  * for an `error` event carrying `recoveryHint` (docs/spec/CLI_EVENTS.md). It
- * holds core's `psilinkRecoveryHintEmitted` tag, so {@link hasRecoveryHint}
+ * holds core's `alcoveRecoveryHintEmitted` tag, so {@link hasRecoveryHint}
  * answers for a relayed failure exactly as it does for one this browser raised,
  * and the seat shows the message rather than fixed copy that would contradict
  * it.
@@ -333,7 +333,7 @@ export class RelayedTerminalError extends Error {
  * values, and the relay escapes every one before it crosses.
  */
 export class RelayedSelfExplainingError extends RelayedTerminalError {
-  readonly psilinkRecoveryHintEmitted = true;
+  readonly alcoveRecoveryHintEmitted = true;
 
   constructor(message: string) {
     super(message);

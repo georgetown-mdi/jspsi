@@ -25,11 +25,11 @@ const INPUT: SmbProbeInput = {
   server: "files.example.org",
   share: "exchange",
   subdirectory: "dropbox",
-  username: "svc-psilink",
+  username: "svc-alcove",
   domain: "AGENCY",
   password: PASSWORD,
   dialect: "",
-  marker: "psilink-check.txt",
+  marker: "alcove-check.txt",
   token: "abc123",
 };
 
@@ -192,9 +192,9 @@ describe("a healthy file drop", () => {
     const probeDeps = deps(healthyReply);
     await runProbe(INPUT, probeDeps);
     const commands = probeDeps.calls.map((call) => commandOf(call.args));
-    expect(commands).toContain("put psilink-check.txt psilink-check.txt");
+    expect(commands).toContain("put alcove-check.txt alcove-check.txt");
     // The probe file it created is removed; the marker is not.
-    expect(commands).toContain("del psilink-probe-abc123.tmp.renamed");
+    expect(commands).toContain("del alcove-probe-abc123.tmp.renamed");
   });
 });
 
@@ -219,7 +219,7 @@ describe("the credential never becomes an argv value", () => {
         expect(call.authFile?.ownerOnly).toBe(true);
       else expect(call.authFile?.mode).toBe(0o600);
       expect(call.authFile?.contents).toBe(
-        `username=svc-psilink\npassword=${PASSWORD}\ndomain=AGENCY\n`,
+        `username=svc-alcove\npassword=${PASSWORD}\ndomain=AGENCY\n`,
       );
     }
     expect(fs.existsSync(withAuth[0].authFile?.path ?? "")).toBe(false);
@@ -231,7 +231,7 @@ describe("the subdirectory is entered with -D, never a -c command", () => {
     const probeDeps = deps(healthyReply);
     await runProbe(INPUT, probeDeps);
     const staged = probeDeps.calls.filter((call) =>
-      commandOf(call.args)?.startsWith("put psilink-probe"),
+      commandOf(call.args)?.startsWith("put alcove-probe"),
     );
     expect(staged.length).toBe(1);
     expect(staged[0].args).toContain("-D");
@@ -244,10 +244,10 @@ describe("the subdirectory is entered with -D, never a -c command", () => {
     const probeDeps = deps(healthyReply);
     await runProbe(INPUT, probeDeps);
     const put = probeDeps.calls.find((call) =>
-      commandOf(call.args)?.startsWith("put psilink-probe"),
+      commandOf(call.args)?.startsWith("put alcove-probe"),
     );
     expect(commandOf(put?.args ?? [])).toBe(
-      "put psilink-probe-abc123.tmp psilink-probe-abc123.tmp",
+      "put alcove-probe-abc123.tmp alcove-probe-abc123.tmp",
     );
     expect(put?.cwd).toBeTypeOf("string");
   });
@@ -323,7 +323,7 @@ describe("staged failures", () => {
     // What it wrote (or tried to) is swept before it returns, even on the
     // failure path: the share belongs to someone else.
     expect(probeDeps.calls.map((call) => commandOf(call.args))).toContain(
-      "del psilink-probe-abc123.tmp",
+      "del alcove-probe-abc123.tmp",
     );
   });
 
@@ -519,14 +519,14 @@ describe("inputs that change the shape of the run", () => {
     const report = await runProbe({ ...INPUT, marker: "" }, probeDeps);
     expect(checkById(report, "marker").status).toBe("skipped");
     for (const call of probeDeps.calls)
-      expect(commandOf(call.args) ?? "").not.toContain("psilink-check.txt");
+      expect(commandOf(call.args) ?? "").not.toContain("alcove-check.txt");
   });
 
   test("a marker the share refuses is a skip, not a failure", async () => {
     const report = await runProbe(
       INPUT,
       deps((args) =>
-        commandOf(args)?.startsWith("put psilink-check") === true
+        commandOf(args)?.startsWith("put alcove-check") === true
           ? { code: 1, output: "NT_STATUS_ACCESS_DENIED" }
           : healthyReply(args),
       ),
@@ -586,7 +586,7 @@ describe("every skipped record explains itself", () => {
       await runProbe(
         INPUT,
         deps((args) =>
-          commandOf(args) === "put psilink-check.txt psilink-check.txt"
+          commandOf(args) === "put alcove-check.txt alcove-check.txt"
             ? { code: 1, output: "NT_STATUS_ACCESS_DENIED putting file" }
             : healthyReply(args),
         ),
@@ -636,7 +636,7 @@ describe("local cleanup does not depend on the remote", () => {
       const authPath = authPathOf(args);
       if (authPath !== undefined) authDir = path.dirname(authPath);
       const command = commandOf(args) ?? "";
-      if (command.startsWith("del psilink-probe-") && !command.includes("*"))
+      if (command.startsWith("del alcove-probe-") && !command.includes("*"))
         throw new Error("runner died");
       return healthyReply(args);
     });

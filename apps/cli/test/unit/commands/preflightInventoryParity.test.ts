@@ -4,7 +4,7 @@ import {
   PREFLIGHT_INVENTORY,
   dispositionReason,
   preflightIds,
-} from "@psilink/testkit/preflightInventory";
+} from "@alcove/testkit/preflightInventory";
 
 import * as hostKeyTrust from "../../../src/hostKeyTrust";
 import * as keyFilePreflight from "../../../src/keyFilePreflight";
@@ -15,11 +15,11 @@ import * as signingIdentityDivergence from "../../../src/signingIdentityDivergen
 import * as valueConstraintWarnings from "../../../src/commands/valueConstraintWarnings";
 import { applyConnectionOverrides } from "../../../src/config";
 
-import type { PreflightId } from "@psilink/testkit/preflightInventory";
-import type { ConnectionConfig } from "@psilink/core";
+import type { PreflightId } from "@alcove/testkit/preflightInventory";
+import type { ConnectionConfig } from "@alcove/core";
 
 // This is the CLI half of the preflight parity inventory
-// (`@psilink/testkit/preflightInventory`, whose header holds the whole
+// (`@alcove/testkit/preflightInventory`, whose header holds the whole
 // argument and the closure test's stated limit). `packages/` cannot import
 // `apps/`, so binding a row to its enforcing code belongs in this app's test
 // tree. The console half is apps/web/test/unit/console/preflightInventoryParity.test.ts,

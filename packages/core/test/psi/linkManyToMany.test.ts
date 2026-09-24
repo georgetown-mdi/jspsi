@@ -90,7 +90,7 @@ function makeParticipant(role: "starter" | "joiner"): PSIParticipant {
 
 // Interpose on one party's INBOUND frames, leaving both parties' own behavior
 // untouched, so a deviation stands in for a partner that computes the protocol
-// correctly right up to the frame under test. Mirrors psiLinkManyToOne.test.ts.
+// correctly right up to the frame under test. Mirrors linkManyToOne.test.ts.
 type Deviation = (frame: unknown) => unknown;
 
 function deviatingInbound(

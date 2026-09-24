@@ -2,14 +2,14 @@ import {
   getLogger,
   redactAndSanitizeForDisplay,
   summarizeDatasetConstraintViolations,
-} from "@psilink/core";
-import type { PreparedExchange } from "@psilink/core";
+} from "@alcove/core";
+import type { PreparedExchange } from "@alcove/core";
 
 /**
  * Report the value-level constraint violations a prepared dataset's cleaned
  * values trip, as advisory log lines on the CLI's exchange/prepare path.
  *
- * The detection lives in `@psilink/core`'s
+ * The detection lives in `@alcove/core`'s
  * {@link summarizeDatasetConstraintViolations} -- the SAME per-value check the web
  * workbench renders as badges -- so the two surfaces cannot drift on what counts as
  * a violation; this wrapper owns only the CLI message wording and the field-name

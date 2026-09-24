@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "vitest";
 import WebSocket from "ws";
 
-import { Errors } from "@psilink/peerjs-broker/enums";
-import { MAX_HANDSHAKE_PARAM_LENGTH } from "@psilink/peerjs-broker/services/webSocketServer/index";
+import { Errors } from "@alcove/peerjs-broker/enums";
+import { MAX_HANDSHAKE_PARAM_LENGTH } from "@alcove/peerjs-broker/services/webSocketServer/index";
 
 import {
   connectRegistered,
@@ -92,7 +92,7 @@ describe("signaling-server handshake parameter length bound", () => {
 
   test("a UUID-scale id registers and is stamped verbatim onto a relayed frame's src", async () => {
     const { wss, port } = await startHarness();
-    // psilink's rendezvous ids are 32 hex chars (deriveRendezvousPeerId); a
+    // Alcove's rendezvous ids are 32 hex chars (deriveRendezvousPeerId); a
     // PeerJS default id is a UUID (~36). Both are far below the cap.
     const id = "0123456789abcdef0123456789abcdef";
 

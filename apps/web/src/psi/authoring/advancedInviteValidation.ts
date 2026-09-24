@@ -26,7 +26,7 @@ import {
   summarizeLinkageShortfall,
   swapPairTransformsDiffer,
   termsDeclareCandidateSet,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   descriptorFor,
@@ -51,7 +51,7 @@ import type {
   CountOnlyShapeViolation,
   LinkageTerms,
   LinkageTermsVerdict,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { ImportedCitationDropCause } from "./advancedInviteTerms";
 
@@ -147,7 +147,7 @@ const UNENCODABLE_KEY_TRANSFORM_MESSAGE =
  * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. The step list marks the
  * offending row, which is where the removal happens. */
 const UNRECOGNIZED_KEY_TRANSFORM_MESSAGE =
-  "A linkage key's transform has a step psilink does not recognize, so it " +
+  "A linkage key's transform has a step Alcove does not recognize, so it " +
   "cannot run. Open that key and remove the highlighted step.";
 
 /** Shown when a key's two swapped elements have different cleaning steps: a swap
@@ -217,7 +217,7 @@ const REFUSED_PARAM_NAME_MESSAGES: Record<ParamNameRefusal, string> = {
 const REFUSED_PARAMS_SHAPE_MESSAGES: Record<string, string> = {
   [NULL_IF_BOTH_VALUE_PARAMS_MESSAGE]:
     "A linkage key's transform has a step declaring both a single value and a " +
-    "list of values. psilink accepts one or the other, not both. " +
+    "list of values. Alcove accepts one or the other, not both. " +
     REFUSED_PARAM_NAME_REMEDY,
   [PRIVATE_KEY_PARAM_MESSAGE]:
     "A linkage key's transform has a parameter holding a private key, which " +

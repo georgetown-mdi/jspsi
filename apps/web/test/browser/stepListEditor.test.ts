@@ -180,7 +180,7 @@ describe("StepListEditor: an unrecognized function marks the step", () => {
     await expect
       .element(alerts)
       .toMatchTextContent(
-        /psilink does not recognize this step's function.*Remove the step\./,
+        /Alcove does not recognize this step's function.*Remove the step\./,
       );
     // Its params still show, read-only: the operator sees what the step
     // declares, with no editable field for a param nothing here can type.

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms } from "@alcove/core";
 
 import { composeSftpConfigSpec } from "@jobs/intentConfig";
 import { validateAuthoredSftpServer } from "@jobs/sftpServer";

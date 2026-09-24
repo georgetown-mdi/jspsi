@@ -63,7 +63,7 @@ import type {
 } from "./managedLocalStateShape";
 
 /** The IndexedDB database name, under the app's origin. */
-export const MANAGED_EXCHANGE_DB_NAME = "psilink-managed-exchanges";
+export const MANAGED_EXCHANGE_DB_NAME = "alcove-managed-exchanges";
 
 /** The object store holding one {@link ManagedExchangeRecord} per key. */
 export const MANAGED_EXCHANGE_STORE_NAME = "records";
@@ -278,7 +278,7 @@ export async function putManagedExchange(
  * app upgrade has otherwise invalidated -- rejects loudly rather than loading
  * (the recovery is re-invite, not migration).
  *
- * @throws {ZodError} if the stored value is not a valid v3 record.
+ * @throws {ZodError} if the stored value is not a valid v4 record.
  */
 export async function getManagedExchange(
   id: string,
@@ -294,7 +294,7 @@ export async function getManagedExchange(
  * read rather than silently dropping it, so a corrupted or app-upgrade-
  * invalidated store surfaces rather than partially loading.
  *
- * @throws {ZodError} if any stored value is not a valid v3 record.
+ * @throws {ZodError} if any stored value is not a valid v4 record.
  */
 export async function listManagedExchanges(): Promise<
   Array<ManagedExchangeRecord>
@@ -767,7 +767,7 @@ async function spendCurrentCopy(
  * recoveries: a migration spend (`handoff` omitted) is revived by importing the
  * downloaded artifact ({@link reviveSpentManagedExchange}), while a `"command-line"`
  * hand-off downloaded files that bring back no secret -- the import reads their
- * `psilink.yaml` as a configuration only and never the key file -- so an artifact
+ * `alcove.yaml` as a configuration only and never the key file -- so an artifact
  * predating it is refused instead of reviving the copy. Re-validated
  * ({@link parseManagedLocalState}) before the write, so a malformed spent state
  * aborts the transaction rather than landing.
@@ -812,7 +812,7 @@ export type ManagedRetakeOutcome =
 
 /**
  * Take a copy handed off to the command line back: clear the spent state so the
- * record runs in this browser again, reading `key` -- the `.psilink.key` the
+ * record runs in this browser again, reading `key` -- the `.alcove.key` the
  * command-line run holds -- into the record when it has moved past the stored
  * secret.
  *
@@ -1005,7 +1005,7 @@ function markBackupOnLocalStore(
  * transaction opens, since the field-scoped transform must be synchronous.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v3 record or the edit
+ * @throws {ZodError} if the stored value is not a valid v4 record or the edit
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function updateManagedExchangeLocalFields(
@@ -1035,7 +1035,7 @@ export async function updateManagedExchangeLocalFields(
  *   configuration only ({@link runnableManagedExchangeOrRefuse}): the `id` carries
  *   no shape, so the record read inside the transaction is what the rotation is
  *   narrowed on, and the transaction aborts with the record still keyless.
- * @throws {ZodError} if the stored value is not a valid v3 record or the rotation
+ * @throws {ZodError} if the stored value is not a valid v4 record or the rotation
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeRotation(
@@ -1106,7 +1106,7 @@ export class ManagedReinviteWithheldError extends Error {
  * @throws {ManagedReinviteWithheldError} if the stored record has a standing
  *   compromise response; the transaction aborts, leaving the secret and the
  *   response as they were.
- * @throws {ZodError} if the stored value is not a valid v3 record or the rotation
+ * @throws {ZodError} if the stored value is not a valid v4 record or the rotation
  *   produces an invalid one; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeReinvite(
@@ -1268,7 +1268,7 @@ export async function persistManagedExchangeScheduleAdvance(
  * handle after a missing-file failure.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v3 record or the result is
+ * @throws {ZodError} if the stored value is not a valid v4 record or the result is
  *   invalid; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeInputHandle(
@@ -1294,7 +1294,7 @@ export async function persistManagedExchangeInputHandle(
  * scheduled run writes its results into.
  *
  * @throws {Error} if no record with `id` exists.
- * @throws {ZodError} if the stored value is not a valid v3 record or the result is
+ * @throws {ZodError} if the stored value is not a valid v4 record or the result is
  *   invalid; the transaction aborts and nothing is written.
  */
 export async function persistManagedExchangeOutputDirectory(
@@ -1438,8 +1438,8 @@ export type ManagedPairReconcileOutcome = Exclude<
 >;
 
 /**
- * Reconcile a record read from a command-line `psilink.yaml` and its
- * `.psilink.key` against the store, on the rule and in the transaction the
+ * Reconcile a record read from a command-line `alcove.yaml` and its
+ * `.alcove.key` against the store, on the rule and in the transaction the
  * backup import's {@link reviveSpentManagedExchange} uses: a stored record is
  * the same exchange when it holds the same `sharedSecret`, compared in memory.
  * A hand-off match, an unreadable sibling, and a live match refuse exactly as

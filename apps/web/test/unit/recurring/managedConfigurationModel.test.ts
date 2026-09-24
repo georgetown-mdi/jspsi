@@ -4,7 +4,7 @@ import {
   assembleExchangeSpec,
   connectionFromLocator,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   configurationOnlyLead,
@@ -22,7 +22,7 @@ import type {
   ExchangeLocator,
   ExchangeSpec,
   SFTPConnectionConfig,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 // What a configuration-only exchange's surface tells the operator, derived from
@@ -68,14 +68,14 @@ describe("why nothing here runs the exchange", () => {
 
       expect(lead).toContain(named);
       expect(lead).toContain("only live exchanges in the browser");
-      expect(lead).toContain("run it with psilink on the command line");
+      expect(lead).toContain("run it with Alcove on the command line");
     },
   );
 
   test("a webrtc configuration names the key file, not the channel", () => {
     const lead = configurationOnlyLead(configuration("webrtc"));
 
-    expect(lead).toContain(".psilink.key");
+    expect(lead).toContain(".alcove.key");
     expect(lead).not.toContain("channel:");
   });
 });
@@ -83,7 +83,7 @@ describe("why nothing here runs the exchange", () => {
 describe("a signing block this app cannot run", () => {
   const signing = {
     mode: "certificate",
-    identityFile: "@/run/signing/psilink-signing-identity.json",
+    identityFile: "@/run/signing/alcove-signing-identity.json",
     partnerFingerprint: "0123456789012345678901234567890123456789abA",
     receiptOutput: "/srv/receipts",
   } as const;
@@ -93,8 +93,8 @@ describe("a signing block this app cannot run", () => {
 
     expect(lead).toContain("states signing, which this app cannot run");
     expect(lead).toContain("does not sign exchange receipts");
-    expect(lead).toContain("run the exchange with psilink");
-    expect(lead).not.toContain(".psilink.key");
+    expect(lead).toContain("run the exchange with Alcove");
+    expect(lead).not.toContain(".alcove.key");
     for (const value of Object.values(signing))
       if (value !== "certificate") expect(lead).not.toContain(value);
   });
@@ -109,7 +109,7 @@ describe("a signing block this app cannot run", () => {
   test("the list row withholds the run for the same reason", () => {
     expect(configurationOnlyStatus(configuration("webrtc", { signing }))).toBe(
       "Configuration only - this app cannot run its signing settings, run " +
-        "it with psilink",
+        "it with Alcove",
     );
   });
 

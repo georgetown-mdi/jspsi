@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-import { redactAndSanitizeForDisplay } from "@psilink/core/untrusted-text";
+import { redactAndSanitizeForDisplay } from "@alcove/core/untrusted-text";
 
 import { CreatePeerServerWSOnly } from "./contrib/index.ts";
 import {
@@ -12,7 +12,7 @@ import { applyStandaloneUpgradeBounds } from "./standaloneUpgradeBounds.ts";
 
 import type { StandaloneOptions } from "./standaloneOptions.ts";
 
-import type { Displayable } from "@psilink/core/untrusted-text";
+import type { Displayable } from "@alcove/core/untrusted-text";
 import type { AddressInfo } from "node:net";
 
 /**
@@ -34,7 +34,7 @@ import type { AddressInfo } from "node:net";
  * `src/peerServer.ts` mounts, so what a spawning test sees is the wiring the
  * deployed app has rather than a subset of it.
  *
- * Protocol with the parent process: it prints one `psilink-broker <port>` line
+ * Protocol with the parent process: it prints one `alcove-broker <port>` line
  * on stdout once listening, then stays up until it is signalled. Nothing else
  * goes to stdout, so the parent can read the port with a single match. The line
  * reports the port alone -- the address is the operator's own instruction, while
@@ -50,10 +50,10 @@ import type { AddressInfo } from "node:net";
  */
 
 /** The line the parent matches to learn the port. */
-const READY_PREFIX = "psilink-broker";
+const READY_PREFIX = "alcove-broker";
 
 /** What marks this process's lines for an operator reading a stream several
- * processes write to. The same context `@psilink/core`'s prefixed loggers give
+ * processes write to. The same context `@alcove/core`'s prefixed loggers give
  * the broker's diagnostics in the web app, so one line shape serves both
  * embeddings -- an equality apps/cli/test/integration/webrtc/broker.test.ts
  * holds by reading a diagnostic off this runner's stderr and comparing its

@@ -9,20 +9,20 @@
 # working copy. cmd needs CRLF: with LF alone it stops at the first goto with
 # "The system cannot find the batch label specified". Storing the exact bytes
 # is what makes both delivery paths work.
-/support/windows-network-filedrop/cmd_Setup-PsilinkFileDrop.cmd -text
+/support/windows-network-filedrop/cmd_Setup-AlcoveFileDrop.cmd -text
 
 # Its container-side scripts are the opposite case -- sh does not treat a
 # carriage return as whitespace -- so they are stored LF and kept that way.
 # They are also fed through "tr -d '\r'" at run time, which covers a copy that
 # picked up CRLF some other way.
-/support/windows-network-filedrop/cmd_psilink-probe.sh -text
-/support/windows-network-filedrop/cmd_psilink-credcheck.sh -text
-/support/windows-network-filedrop/cmd_psilink-volcheck.sh -text
+/support/windows-network-filedrop/cmd_alcove-probe.sh -text
+/support/windows-network-filedrop/cmd_alcove-credcheck.sh -text
+/support/windows-network-filedrop/cmd_alcove-volcheck.sh -text
 
 # The macOS/Linux launcher is delivered as a release asset and by checkout, and
 # bash refuses a script whose shebang line ends in a carriage return. It has no
 # run-time strip to fall back on, so the stored bytes are the whole of it.
-/support/windows-network-filedrop/start-psilink.sh -text
+/support/windows-network-filedrop/start-alcove.sh -text
 
 # The image entrypoints are copied into the image from the checkout the build
 # runs in, and `sh` does not treat a carriage return as whitespace: a checkout

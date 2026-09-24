@@ -7,12 +7,12 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import {
   boundIdentityOf,
   certificateOnlyLoadCases,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 
 import { readBoundIdentity } from "@jobs/signingIdentity";
 
 // This is the console half of the certificate-only load parity set
-// (`@psilink/core/testing`, whose module header states what it holds).
+// (`@alcove/core/testing`, whose module header states what it holds).
 // `packages/` cannot import `apps/` and `apps/web` may not import `apps/cli`,
 // so each app drives the set from its own test tree; the CLI half is
 // apps/cli/test/unit/boundIdentityParity.test.ts, compared against the same
@@ -21,7 +21,7 @@ import { readBoundIdentity } from "@jobs/signingIdentity";
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bound-identity-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bound-identity-"));
 });
 
 afterEach(() => {

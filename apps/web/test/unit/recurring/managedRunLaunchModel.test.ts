@@ -2,7 +2,7 @@ import {
   LinkageTermsUnsatisfiableError,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import { describe, expect, test } from "vitest";
 
 import {

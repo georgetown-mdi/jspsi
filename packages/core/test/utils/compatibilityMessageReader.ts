@@ -6,7 +6,7 @@ import { TERMS_VALUE_DELIMITER } from "../../src/config/compatibilityMessage";
  * Returns the clause skeleton (each run collapsed to one placeholder) and
  * the raw values held -- two runs of one diagnostic, one benign and one
  * adversarial, must yield the same skeleton, proving no value can display
- * as a clause psilink itself wrote.
+ * as a clause Alcove itself wrote.
  */
 export const readMessage = (
   message: string,

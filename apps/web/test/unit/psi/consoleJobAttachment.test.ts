@@ -23,7 +23,7 @@ const SETTLED_WITH_NOTHING: FinalRunStatus = {
   exitReconciled: true,
 };
 
-const KEY = "psilink-console-last-job";
+const KEY = "alcove-console-last-job";
 
 /** Install an in-memory localStorage over the node env (which has none) and hand
  * back its backing map so a test can assert what was persisted. */

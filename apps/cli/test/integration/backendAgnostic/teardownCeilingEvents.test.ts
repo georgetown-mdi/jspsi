@@ -6,8 +6,8 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import yargs from "yargs";
 
-import { prepareForExchange } from "@psilink/core";
-import type { ExchangeSpec } from "@psilink/core";
+import { prepareForExchange } from "@alcove/core";
+import type { ExchangeSpec } from "@alcove/core";
 
 import {
   builder as exchangeBuilder,
@@ -108,7 +108,7 @@ let exitSpy: ReturnType<typeof vi.spyOn> | undefined;
 let priorExitCode: typeof process.exitCode;
 
 beforeEach(() => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-teardown-events-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-teardown-events-"));
   priorExitCode = process.exitCode;
   // A handler exits the process on failure; trap it so a failure rejects the
   // awaited parse instead of killing the worker, as the sibling command tests
@@ -141,7 +141,7 @@ function writeExchangeFixture(): void {
     metadata: prepared.metadata,
   };
   fs.mkdirSync(path.join(work, "drop"));
-  saveConfig(path.join(work, "psilink.yaml"), spec);
+  saveConfig(path.join(work, "alcove.yaml"), spec);
   saveKeyFile(path.join(work, "a.key"), { sharedSecret: INITIAL_SECRET });
   saveKeyFile(path.join(work, "b.key"), { sharedSecret: INITIAL_SECRET });
 }
@@ -157,7 +157,7 @@ function partyArgs(
     path.join(work, `${party}-input.csv`),
     path.join(work, `${party}-out.csv`),
     "--config-file",
-    path.join(work, "psilink.yaml"),
+    path.join(work, "alcove.yaml"),
     "--key-file",
     path.join(work, `${party}.key`),
     "--identity",
@@ -224,7 +224,7 @@ async function captureStderr<T>(
 
 async function runCli(argv: string[]): Promise<void> {
   await yargs(argv)
-    .scriptName("psilink")
+    .scriptName("alcove")
     .command("$0", "zero-setup exchange", zeroSetupBuilder, zeroSetupHandler)
     .command("exchange <input> [output]", "", exchangeBuilder, exchangeHandler)
     .exitProcess(false)
@@ -434,7 +434,7 @@ test(
         const { text } = await captureStderr(async () => {
           const results = await Promise.allSettled([
             runCli(
-              savingPartyArgs("a", path.join(unwritable, "psilink.yaml"), [
+              savingPartyArgs("a", path.join(unwritable, "alcove.yaml"), [
                 "--event-stream",
               ]),
             ),

@@ -8,7 +8,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   loopbackTlsCert,
   requireLoopbackTlsCert,
-} from "@psilink/testkit/loopbackTlsCert";
+} from "@alcove/testkit/loopbackTlsCert";
 
 import {
   SIGNALING_HEADERS_TIMEOUT_MS,

@@ -5,8 +5,8 @@ import {
   HOST_KEY_FINGERPRINT_REGEX,
   UsageError,
   redactAndSanitizeForDisplay,
-} from "@psilink/core";
-import type { PresentedHostKey, SFTPConnectionConfig } from "@psilink/core";
+} from "@alcove/core";
+import type { PresentedHostKey, SFTPConnectionConfig } from "@alcove/core";
 import type { PeerIdentificationDiagnosis } from "../connection/sftpPeerIdentification";
 
 import { channelFromURL } from "../connectionFromUrl";
@@ -23,7 +23,7 @@ import { configureLogging, logLevelFlag } from "../util/logging";
 import { asciiSafeJsonLine } from "../util/jsonLine";
 import { addLoggingOptions } from "../optionDefinitions";
 
-// `psilink probe-host-key` is the ssh-keyscan analogue: it connects only far
+// `alcove probe-host-key` is the ssh-keyscan analogue: it connects only far
 // enough to read the SFTP server's presented host key, then refuses before any
 // credential is offered (see FileSyncConnection.probeHostKeyFingerprint). It
 // establishes no trust on its own -- reading a key over the same untrusted
@@ -97,7 +97,7 @@ export function builder(cmd: Argv): Argv {
  * server. A neutral placeholder rather than a real account keeps even a
  * hypothetical from exposing the operator's identity.
  */
-const PROBE_USERNAME = "psilink-host-key-probe";
+const PROBE_USERNAME = "alcove-host-key-probe";
 
 /**
  * Build the minimal probe connection from an `sftp://host[:port]` URL: host,
@@ -267,7 +267,7 @@ export async function probeHostKeyLines(
 export async function handler(argv: Arguments): Promise<void> {
   // Resolve and apply the log level before the logger exists (a bad --log-level
   // or a repeated --log-file is a UsageError mapped to stderr + exit 64 here),
-  // the same bootstrap boundary as `psilink fingerprint`.
+  // the same bootstrap boundary as `alcove fingerprint`.
   const logLevel = parseOrExit(() => logLevelFlag(argv));
   const { log, close: closeLogging } = parseOrExit(() =>
     configureLogging({
@@ -288,7 +288,7 @@ export async function handler(argv: Arguments): Promise<void> {
       verbosity: (argv["verbose"] as number | undefined) ?? 0,
     });
     // The --json line is the command's sole result, so it goes to stdout via
-    // console.log (like `psilink fingerprint`), keeping a capture/pipe clean; the
+    // console.log (like `alcove fingerprint`), keeping a capture/pipe clean; the
     // human summary is a diagnostic and routes through the logger to stderr.
     if (result.stdout !== undefined) console.log(result.stdout);
     if (result.summary !== undefined) log.info(result.summary);

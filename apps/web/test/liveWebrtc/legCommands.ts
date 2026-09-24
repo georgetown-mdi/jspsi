@@ -1,4 +1,4 @@
-import { READINESS_BODY } from "@psilink/peerjs-broker/standaloneOptions";
+import { READINESS_BODY } from "@alcove/peerjs-broker/standaloneOptions";
 
 import { CLI_IDENTITY, startCliInviter } from "./cliPeer.ts";
 import { startStandaloneBroker } from "./standaloneBroker.ts";
@@ -11,7 +11,7 @@ import type { StandaloneBroker } from "./standaloneBroker.ts";
  * The Node half of the live CLI-to-browser WebRTC leg, registered as vitest
  * browser commands on the `live-webrtc` project (apps/web/vite.config.ts).
  *
- * A browser test cannot spawn a broker or a `psilink` process, and this leg
+ * A browser test cannot spawn a broker or an `alcove` process, and this leg
  * needs both standing while it runs. Commands are the channel vitest provides
  * for exactly that, and they are what lets the browser test assert BOTH
  * parties' association tables in its own body rather than in a teardown hook,
@@ -27,7 +27,7 @@ let broker: StandaloneBroker | undefined;
 let inviter: CliInviter | undefined;
 
 /**
- * Start the broker on its own loopback origin, then a `psilink invite` waiting
+ * Start the broker on its own loopback origin, then an `alcove invite` waiting
  * at it, and hand the browser peer the invitation.
  *
  * The CLI is invited over `ws://`: the broker terminates no TLS, and the page

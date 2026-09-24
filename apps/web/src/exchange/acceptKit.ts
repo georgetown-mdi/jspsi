@@ -42,7 +42,7 @@
  * of the names: a split rendezvous the console cannot name is still
  * described as two folders.
  */
-import { PLACEHOLDER_SSH_USERNAME } from "@psilink/core";
+import { PLACEHOLDER_SSH_USERNAME } from "@alcove/core";
 
 export type AcceptKitEndpoint =
   | {
@@ -102,14 +102,14 @@ interface AcceptKitInput extends AcceptKitExchange {
   /** The release version this build holds, which decides both the image tag
    * the sheet's commands name and the release page it links; see
    * {@link releaseVersion}. Absent, or in any shape but a release version, the
-   * sheet names {@link DEFAULT_PSILINK_IMAGE_TAG} and the releases index. */
+   * sheet names {@link DEFAULT_ALCOVE_IMAGE_TAG} and the releases index. */
   version?: string;
 }
 
 /** The published image the sheet's commands run. Named with its registry in
  * full, as the release launchers are, because podman requires the registry
  * prefix and docker accepts it (see `docs/RELEASES.md`). */
-const PSILINK_IMAGE_REPOSITORY = "ghcr.io/georgetown-mdi/alcove";
+const ALCOVE_IMAGE_REPOSITORY = "ghcr.io/georgetown-mdi/alcove";
 
 /**
  * The image tag the sheet names when the build holds no release version -- a
@@ -117,7 +117,7 @@ const PSILINK_IMAGE_REPOSITORY = "ghcr.io/georgetown-mdi/alcove";
  * floating tag the release publishes alongside `X.Y.Z` (`docs/RELEASES.md`),
  * the same floating tag the setup script's own `docker run` commands name.
  */
-const DEFAULT_PSILINK_IMAGE_TAG = "latest";
+const DEFAULT_ALCOVE_IMAGE_TAG = "latest";
 
 /**
  * The shape a release version has: `X.Y.Z` with semver's optional prerelease
@@ -134,11 +134,11 @@ const RELEASE_VERSION =
 
 /** The release page the launcher files are downloaded from; the same URL the
  * launchers themselves hold. */
-const PSILINK_RELEASES_URL = "https://github.com/georgetown-mdi/jspsi/releases";
+const ALCOVE_RELEASES_URL = "https://github.com/georgetown-mdi/alcove/releases";
 
 /** The command-line reference the sheet closes on. */
-const PSILINK_CLI_DOC_URL =
-  "https://github.com/georgetown-mdi/jspsi/blob/main/docs/CLI.md";
+const ALCOVE_CLI_DOC_URL =
+  "https://github.com/georgetown-mdi/alcove/blob/main/docs/CLI.md";
 
 /** The placeholder the partner replaces with the invitation string. The sheet
  * holds this and never a token: the invitation travels separately, so a
@@ -255,7 +255,7 @@ function releaseVersion(version: string | undefined): string | undefined {
  * version, so the partner runs the build their invitation was minted by, and
  * any other build names the floating tag. */
 function imageReference(version: string | undefined): string {
-  return `${PSILINK_IMAGE_REPOSITORY}:${version ?? DEFAULT_PSILINK_IMAGE_TAG}`;
+  return `${ALCOVE_IMAGE_REPOSITORY}:${version ?? DEFAULT_ALCOVE_IMAGE_TAG}`;
 }
 
 /** The release page the launcher files are downloaded from: this build's own
@@ -265,8 +265,8 @@ function imageReference(version: string | undefined): string {
  * (`docs/RELEASES.md`). */
 function releasePageUrl(version: string | undefined): string {
   return version === undefined
-    ? PSILINK_RELEASES_URL
-    : `${PSILINK_RELEASES_URL}/tag/v${version}`;
+    ? ALCOVE_RELEASES_URL
+    : `${ALCOVE_RELEASES_URL}/tag/v${version}`;
 }
 
 /** The accept command, unindented; each caller indents it to its own step.
@@ -461,10 +461,10 @@ function opening(
           ];
   return [
     RULE,
-    "PSILINK -- HOW TO ACCEPT THIS EXCHANGE",
+    "ALCOVE -- HOW TO ACCEPT THIS EXCHANGE",
     RULE,
     "",
-    "Your partner has set up a psilink record-linkage exchange with you and",
+    "Your partner has set up an Alcove record-linkage exchange with you and",
     "sent you an invitation. This sheet takes you from nothing to accepting",
     "it.",
     "",
@@ -476,19 +476,19 @@ function opening(
     ...heading("WHAT YOU NEED"),
     "Docker, installed and running. Docker Desktop (docker.com) is the",
     "usual way to get it, on Windows, macOS, and Linux alike. Nothing else:",
-    "psilink runs as a container, so there is nothing to install; what it",
+    "Alcove runs as a container, so there is nothing to install; what it",
     "writes stays in the folders you mount below.",
     "",
     "Every command below is a single line, even where it wraps on screen.",
     "On Windows, run the commands from PowerShell, not Command Prompt.",
     "",
     // Scoped to the accept command, the one place on this sheet that chooses
-    // the label: accepting writes it into psilink.yaml and the exchange
+    // the label: accepting writes it into alcove.yaml and the exchange
     // steps read it from there. The flag SHAPE is shown and the value is
     // shouted rather than plausible, since an unreplaced placeholder would
     // otherwise reach the partner as this party's name.
     ...heading("THE NAME YOUR PARTNER SEES"),
-    "psilink records a name for your side -- what your partner reads as who",
+    "Alcove records a name for your side -- what your partner reads as who",
     "they exchanged with, in the agreed terms and in the record each of you",
     "keeps. It picks none for you, so add this to the end of the accept",
     "command on this sheet:",
@@ -499,7 +499,7 @@ function opening(
     "own name, and the organization you are exchanging on behalf of. Leave",
     "it off and accepting stops and asks, rather than naming you itself.",
     "",
-    "Accepting writes that name into psilink.yaml, so the exchange command",
+    "Accepting writes that name into alcove.yaml, so the exchange command",
     "later on takes it from there and needs no flag of its own.",
     "",
     ...heading("WHICH DOCKER DO YOU HAVE?"),
@@ -508,8 +508,8 @@ function opening(
     "  * Docker Engine on Linux -- the docker your distribution packages:",
     "    read the rest of this section first.",
     "",
-    "On Docker Engine, psilink can hit 'permission denied' the moment it",
-    "tries to write in a folder you gave it. That is because psilink runs",
+    "On Docker Engine, Alcove can hit 'permission denied' the moment it",
+    "tries to write in a folder you gave it. That is because Alcove runs",
     "inside the container as a user numbered 1000 rather than as you, while",
     "a folder you mount keeps the owner it has on your machine.",
     "",
@@ -518,7 +518,7 @@ function opening(
     "",
     '  --user "$(id -u):$(id -g)"',
     "",
-    "That runs psilink as you: every folder you can use, it can use --",
+    "That runs Alcove as you: every folder you can use, it can use --",
     ...(endpoint.channel !== "filedrop"
       ? [
           "the folder holding your CSV file and the folder holding your",
@@ -545,7 +545,7 @@ function opening(
     "  sudo chown 1000:1000 .",
     "",
     "User 1000 is a number, not a name: whoever holds it on this machine",
-    "is who the folder now belongs to, and so is what psilink writes in",
+    "is who the folder now belongs to, and so is what Alcove writes in",
     "it. On your own computer that is almost certainly you. On one you",
     "share with other people it can be someone else, and the flag above",
     "is the better answer there.",
@@ -571,7 +571,7 @@ function opening(
 }
 
 /**
- * The opening of the step that repoints psilink at the partner's own copy of
+ * The opening of the step that repoints Alcove at the partner's own copy of
  * the shared folder, keyed on whether the sheet could name that folder.
  * Named, accepting wrote the inviter's name for it. Unnamed, what accepting
  * wrote is the console's own mount point, so the step calls it a placeholder
@@ -580,15 +580,15 @@ function opening(
 function repointStepOpening(named: boolean): Array<string> {
   return named
     ? [
-        "2. Point psilink at your own copy of the shared folder. Accepting wrote",
-        "   your partner's own name for the folder; what psilink needs is where",
-        "   that folder is on your machine. Open psilink.yaml and set:",
+        "2. Point Alcove at your own copy of the shared folder. Accepting wrote",
+        "   your partner's own name for the folder; what Alcove needs is where",
+        "   that folder is on your machine. Open alcove.yaml and set:",
       ]
     : [
-        "2. Point psilink at your own copy of the shared folder. Accepting wrote",
+        "2. Point Alcove at your own copy of the shared folder. Accepting wrote",
         "   a placeholder for the folder, not a name either of you chose; what",
-        "   psilink needs is where that folder is on your machine. Open",
-        "   psilink.yaml and set:",
+        "   Alcove needs is where that folder is on your machine. Open",
+        "   alcove.yaml and set:",
       ];
 }
 
@@ -598,14 +598,14 @@ function repointStepOpening(named: boolean): Array<string> {
 function splitRepointStepOpening(named: boolean): Array<string> {
   return named
     ? [
-        "2. Point psilink at your own copies of the two folders. Accepting wrote",
-        "   your partner's own names for them; what psilink needs is where those",
-        "   folders are on your machine. Open psilink.yaml and set:",
+        "2. Point Alcove at your own copies of the two folders. Accepting wrote",
+        "   your partner's own names for them; what Alcove needs is where those",
+        "   folders are on your machine. Open alcove.yaml and set:",
       ]
     : [
-        "2. Point psilink at your own copies of the two folders. Accepting wrote",
-        "   placeholders for them, not names either of you chose; what psilink",
-        "   needs is where those folders are on your machine. Open psilink.yaml",
+        "2. Point Alcove at your own copies of the two folders. Accepting wrote",
+        "   placeholders for them, not names either of you chose; what Alcove",
+        "   needs is where those folders are on your machine. Open alcove.yaml",
         "   and set:",
       ];
 }
@@ -616,7 +616,7 @@ function splitRepointStepOpening(named: boolean): Array<string> {
 function filedropAcceptStep(version: string | undefined): Array<string> {
   return [
     "1. Accept the invitation. This prints the terms, asks you to confirm,",
-    "   and on a yes writes psilink.yaml and .psilink.key into the folder:",
+    "   and on a yes writes alcove.yaml and .alcove.key into the folder:",
     "",
     `     ${acceptCommand(version)}`,
     "",
@@ -654,18 +654,18 @@ function launcherRouteLines(
     "file server also treats Docker as a different computer, so it needs its",
     "own sign-in for the share. A launcher script does all of that for you.",
     "",
-    "Download both files from the psilink release page:",
+    "Download both files from the Alcove release page:",
     "",
     `  ${releasePageUrl(version)}`,
     "",
-    "  Start-Psilink.ps1",
-    "  Setup-PsilinkFileDrop.ps1  (must sit beside it)",
+    "  Start-Alcove.ps1",
+    "  Setup-AlcoveFileDrop.ps1  (must sit beside it)",
     "",
     'Put them in a folder of their own and run, in PowerShell -- not "Run as',
     'administrator", because an elevated window cannot see the drives you',
     "mapped as yourself:",
     "",
-    "  powershell -ExecutionPolicy Bypass -File .\\Start-Psilink.ps1",
+    "  powershell -ExecutionPolicy Bypass -File .\\Start-Alcove.ps1",
     "",
     ...(split
       ? [
@@ -675,7 +675,7 @@ function launcherRouteLines(
           "wrong way round is the one mistake to watch for. It works out the",
           "real server and share behind your drive letter or DFS path, creates",
           "the Docker volume that reaches them, checks both folders, and opens",
-          "the psilink console in your browser. Paste the invitation into the",
+          "the Alcove console in your browser. Paste the invitation into the",
           "console's accept flow there, and you are done -- the rest of this",
           "sheet is for situation B.",
           "",
@@ -688,7 +688,7 @@ function launcherRouteLines(
       : [
           "It asks for your folders, works out the real server and share behind",
           "your drive letter or DFS path, creates the Docker volume that reaches",
-          "it, checks the folder, and opens the psilink console in your browser.",
+          "it, checks the folder, and opens the Alcove console in your browser.",
           "Paste the invitation into the console's accept flow there, and you are",
           "done -- the rest of this sheet is for situation B.",
           "",
@@ -702,7 +702,7 @@ function launcherRouteLines(
     "meant to be read, so your IT department can review every line before",
     "you run one. Take them from the release page above and nowhere else:",
     "that is where the release publishes them together, and the release",
-    "copy of Start-Psilink.ps1 names the exact psilink image it starts, so",
+    "copy of Start-Alcove.ps1 names the exact Alcove image it starts, so",
     "what it runs is what that release built.",
     "",
   ];
@@ -736,7 +736,7 @@ function filedropSplitBody(
     ...heading("B -- FOLDERS DOCKER CAN OPEN"),
     "Two commands, both run from the folder that holds your CSV file. Use a",
     "folder of your own, neither of the shared folders: accepting writes",
-    "psilink.yaml and .psilink.key (your key file) beside your CSV, and",
+    "alcove.yaml and .alcove.key (your key file) beside your CSV, and",
     "anything inside a shared folder can be read and changed by everyone",
     "with access to it.",
     "",
@@ -794,7 +794,7 @@ function filedropBody(
     ...heading("B -- A FOLDER DOCKER CAN OPEN"),
     "Two commands, both run from the folder that holds your CSV file. Use a",
     "folder of your own, not the shared folder itself: accepting writes",
-    "psilink.yaml and .psilink.key (your key file) beside your CSV, and",
+    "alcove.yaml and .alcove.key (your key file) beside your CSV, and",
     "anything inside the shared folder can be read and changed by everyone",
     "with access to it.",
     "",
@@ -832,7 +832,7 @@ function sftpBody(
     "The commands run from the folder that holds your CSV file.",
     "",
     "1. Accept the invitation. This prints the terms, asks you to confirm,",
-    "   and on a yes writes psilink.yaml and .psilink.key into the folder:",
+    "   and on a yes writes alcove.yaml and .alcove.key into the folder:",
     "",
     `     ${acceptCommand(version)}`,
     "",
@@ -851,12 +851,12 @@ function sftpBody(
     "   every command on this sheet, for example",
     `   -v "C:\\Users\\you\\exchange":${WORK_MOUNT}`,
     "",
-    "2. Fill in your credentials. Accepting wrote psilink.yaml with the",
+    "2. Fill in your credentials. Accepting wrote alcove.yaml with the",
     "   server and directory taken from the invitation; two things are yours",
     "   to supply, because an invitation never carries credentials:",
     "",
     // The placeholder is core's own constant, so the sheet cannot drift from
-    // what accept actually seeds into psilink.yaml.
+    // what accept actually seeds into alcove.yaml.
     `     username: ${PLACEHOLDER_SSH_USERNAME}`,
     "         Replace this placeholder with the account the SFTP server",
     "         accepts for you.",
@@ -864,18 +864,18 @@ function sftpBody(
     "     password (or private_key)",
     "         Add one under the same server: block. Point it at a file with",
     "         the @ convention rather than typing the secret into",
-    "         psilink.yaml:",
+    "         alcove.yaml:",
     "",
     "           connection:",
     "             server:",
     "               username: your-account",
     "               password: '@/run/secrets/sftp-password'",
     "",
-    "         A value beginning with @ is read from that file when psilink",
-    "         runs, so the secret stays out of psilink.yaml, out of your",
+    "         A value beginning with @ is read from that file when Alcove",
+    "         runs, so the secret stays out of alcove.yaml, out of your",
     "         shell history, and out of process listings.",
     "",
-    "   psilink never sends either one to your partner: your credential",
+    "   Alcove never sends either one to your partner: your credential",
     "   goes only from your machine to the server.",
     "",
     "3. Run the exchange. Docker sees only what you mount, so the command",
@@ -905,21 +905,21 @@ function sftpBody(
 function closing(version: string | undefined): Array<string> {
   return [
     ...heading("KEEPING THE KEY FILE"),
-    "Accepting writes .psilink.key holding the shared secret: keep it",
+    "Accepting writes .alcove.key holding the shared secret: keep it",
     "owner-only (chmod 600 on macOS or Linux) and never commit it.",
     "",
     ...heading("IF SOMETHING GOES WRONG"),
     "  * Invitations expire. If yours has, ask your partner for a new one --",
     "    nothing is lost by starting again.",
     "  * Every command prints what it did and which files it wrote.",
-    "  * Your input file itself is never sent. psilink reads it in the folder",
+    "  * Your input file itself is never sent. Alcove reads it in the folder",
     "    you mounted and writes the result beside your input; what goes to",
     "    your partner is what the accept display describes.",
     "",
     ...heading("REFERENCE"),
     "  Command-line reference:",
-    `    ${PSILINK_CLI_DOC_URL}`,
-    "  psilink image used above:",
+    `    ${ALCOVE_CLI_DOC_URL}`,
+    "  Alcove image used above:",
     `    ${imageReference(version)}`,
     "",
   ];
@@ -952,12 +952,12 @@ export function buildAcceptKit({
   return `${lines.join("\n")}\n`;
 }
 
-/** The download filename `psilink-accept-instructions-<date>.txt`, the date the
+/** The download filename `alcove-accept-instructions-<date>.txt`, the date the
  * local calendar day of `at` -- the moment the operator clicks download, which
  * can be any time the share screen is open, not the mint moment. */
 export function acceptKitFileName(at: Date): string {
   const year = at.getFullYear();
   const month = String(at.getMonth() + 1).padStart(2, "0");
   const day = String(at.getDate()).padStart(2, "0");
-  return `psilink-accept-instructions-${year}-${month}-${day}.txt`;
+  return `alcove-accept-instructions-${year}-${month}-${day}.txt`;
 }

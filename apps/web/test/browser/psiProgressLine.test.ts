@@ -6,7 +6,7 @@ import { createElement } from "react";
 
 import "@mantine/core/styles.css";
 
-import { SINGLE_PASS_STAGE_IDS } from "@psilink/core";
+import { SINGLE_PASS_STAGE_IDS } from "@alcove/core";
 
 import {
   initialRun,

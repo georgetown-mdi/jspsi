@@ -1,4 +1,4 @@
-// The apps import `@psilink/core` from its built `dist/`, never from
+// The apps import `@alcove/core` from its built `dist/`, never from
 // `packages/core/src`, so a run whose dist predates the sources it was built
 // from tests yesterday's library and reports failures that belong to the build.
 // This is the vitest `globalSetup` that turns that into one named error before a
@@ -23,7 +23,7 @@ import { join, relative } from "node:path";
 export const CORE_BUILD_COMMAND = "npm run build -w packages/core";
 
 /** Opt-out to run against the dist as it stands. */
-export const ALLOW_STALE_ENV = "PSILINK_ALLOW_STALE_CORE_DIST";
+export const ALLOW_STALE_ENV = "ALCOVE_ALLOW_STALE_CORE_DIST";
 
 /** `packages/core` of the repository this module is checked out in. */
 export const CORE_DIR = fileURLToPath(
@@ -135,10 +135,10 @@ export function formatCoreDistStaleness(
   const at = (path) => join(where, path);
   const cause =
     staleness.kind === "missing"
-      ? `@psilink/core has no built dist: ` +
+      ? `@alcove/core has no built dist: ` +
         `${staleness.missing.map(at).join(", ")} ` +
         `${staleness.missing.length === 1 ? "is" : "are"} missing.`
-      : `@psilink/core's built dist is older than its sources: ` +
+      : `@alcove/core's built dist is older than its sources: ` +
         `${at(staleness.source.path)} (${stamp(staleness.source.mtimeMs)}) is newer ` +
         `than ${at(staleness.dist.path)} (${stamp(staleness.dist.mtimeMs)}).`;
   return (

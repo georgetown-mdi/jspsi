@@ -1,5 +1,5 @@
 # The FIPS variant image's OpenSSL configuration (Dockerfile.fips installs it at
-# /etc/psilink/fips-only.cnf and points OPENSSL_CONF at it).
+# /etc/alcove/fips-only.cnf and points OPENSSL_CONF at it).
 #
 # It activates the FIPS and base providers and deliberately does NOT activate
 # the default provider, with fips=yes as the default property: an algorithm the
@@ -17,22 +17,22 @@
 # `openssl fipsinstall` is disabled, because the vendor's module carries its own
 # integrity MAC and self-tests on load.
 config_diagnostics = 1
-openssl_conf = psilink_init
-nodejs_conf = psilink_init
+openssl_conf = alcove_init
+nodejs_conf = alcove_init
 
-[psilink_init]
-providers = psilink_providers
-alg_section = psilink_algorithms
+[alcove_init]
+providers = alcove_providers
+alg_section = alcove_algorithms
 
-[psilink_algorithms]
+[alcove_algorithms]
 default_properties = fips=yes
 
-[psilink_providers]
-fips = psilink_fips
-base = psilink_base
+[alcove_providers]
+fips = alcove_fips
+base = alcove_base
 
-[psilink_fips]
+[alcove_fips]
 activate = 1
 
-[psilink_base]
+[alcove_base]
 activate = 1

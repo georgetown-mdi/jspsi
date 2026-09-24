@@ -115,7 +115,7 @@ export function SftpConnectionCard({
           <Text size="sm">{SPLIT_DIRECTORY_RETAIN_SUMMARY}</Text>
         )}
         <Text size="sm" c="dimmed">
-          The connection is not verified until the exchange runs -- psilink
+          The connection is not verified until the exchange runs -- Alcove
           checks the server's host key and signs in then. Credentials stay on
           this machine; the invitation carries only where to meet.
         </Text>
@@ -137,7 +137,7 @@ export function SftpConnectionCard({
     return (
       <Stack gap="xs" mt="xs">
         <Text size="sm">
-          This exchange will run over SFTP in your own psilink command-line tool
+          This exchange will run over SFTP in your own Alcove command-line tool
           -- it saves an exchange file to run there.
         </Text>
         <Button

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { MAX_NAME_LENGTH } from "@psilink/core";
+import { MAX_NAME_LENGTH } from "@alcove/core";
 
 import {
   emptyColumnPositions,

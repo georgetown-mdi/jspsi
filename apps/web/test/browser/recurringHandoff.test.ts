@@ -29,7 +29,7 @@ const COMMAND_HANDOFF = {
   template: {
     kind: "command",
     argv: [
-      "psilink",
+      "alcove",
       "sftp://sftp.example.gov:2222/exchange",
       "--server-username=linkage",
       "--server-host-key-fingerprint=SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -52,7 +52,7 @@ const SPACED_COMMAND_HANDOFF = {
   template: {
     kind: "command",
     argv: [
-      "psilink",
+      "alcove",
       "file:///path/to/your/shared-directory",
       "--identity=Agency A",
       "input.csv",
@@ -72,7 +72,7 @@ const CONFIG_HANDOFF = {
   usedSigningIdentity: false,
   template: {
     kind: "config",
-    argv: ["psilink", "exchange", "input.csv", "results.csv"],
+    argv: ["alcove", "exchange", "input.csv", "results.csv"],
     yaml:
       "connection:\n  channel: sftp\n  server:\n    host: sftp.example.gov\n" +
       "    password: '@/path/to/your/credential-file'\n",
@@ -130,7 +130,7 @@ describe("RecurringHandoff panel", () => {
 
     const text = () => app.container.textContent;
     // The command template, including the portable pin and the placeholder credential.
-    expect(text()).toContain("psilink sftp://sftp.example.gov:2222/exchange");
+    expect(text()).toContain("alcove sftp://sftp.example.gov:2222/exchange");
     expect(text()).toContain("--server-host-key-fingerprint=SHA256:");
     expect(text()).toContain(
       "--server-password=@/path/to/your/credential-file",
@@ -143,7 +143,7 @@ describe("RecurringHandoff panel", () => {
 
     // A Direct run has no key file to copy.
     expect(text()).toContain("no shared secret");
-    expect(text()).not.toContain(".psilink.key");
+    expect(text()).not.toContain(".alcove.key");
   });
 
   test("quotes a spaced Direct label POSIX for cron and cmd-style for Windows", async () => {
@@ -172,9 +172,9 @@ describe("RecurringHandoff panel", () => {
     const text = () => app.container.textContent;
     // The config template and the exchange command the hand-off states.
     expect(text()).toContain("channel: sftp");
-    expect(text()).toContain("psilink exchange input.csv results.csv");
+    expect(text()).toContain("alcove exchange input.csv results.csv");
     // The copy-the-key step and both scheduler snippets.
-    expect(text()).toContain(".psilink.key");
+    expect(text()).toContain(".alcove.key");
     expect(text()).toContain("0 2 * * *");
     expect(text()).toContain("schtasks /Create");
     // An unsigned run is told nothing about copying a signing identity.
@@ -186,7 +186,7 @@ describe("RecurringHandoff panel", () => {
       ...CONFIG_HANDOFF,
       template: {
         ...CONFIG_HANDOFF.template,
-        argv: ["psilink", "exchange", "clients.csv", "matches.csv"],
+        argv: ["alcove", "exchange", "clients.csv", "matches.csv"],
       },
     } satisfies JobHandoff);
     app.render(createElement(RecurringHandoff, { jobId: JOB_ID }));
@@ -197,7 +197,7 @@ describe("RecurringHandoff panel", () => {
 
     const text = () => app.container.textContent;
     expect(text()).toMatch(
-      /0 2 \* \* \* cd .* && psilink exchange clients\.csv matches\.csv/,
+      /0 2 \* \* \* cd .* && alcove exchange clients\.csv matches\.csv/,
     );
     expect(text()).toContain("schtasks /Create");
     expect(text()).not.toContain("input.csv");
@@ -215,7 +215,7 @@ describe("RecurringHandoff panel", () => {
     // Copy the identity rather than minting a new one: a fresh key would have a
     // fingerprint the partner has not pinned.
     expect(text()).toContain("Copy your signing identity into that folder");
-    expect(text()).toContain("do not run psilink fingerprint there");
+    expect(text()).toContain("do not run alcove fingerprint there");
     // The schedule accumulates a receipt trail rather than overwriting one file.
     expect(text()).toContain("timestamped receipt");
   });

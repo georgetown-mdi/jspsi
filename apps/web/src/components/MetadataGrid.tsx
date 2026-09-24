@@ -5,7 +5,7 @@ import { Select, Stack, Table, Text, VisuallyHidden } from "@mantine/core";
 import {
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   SEMANTIC_TYPES,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   DISCLOSURE_LABELS,
@@ -23,7 +23,7 @@ import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import type { SelectProps } from "@mantine/core";
 
-import type { Metadata, SemanticType } from "@psilink/core";
+import type { Metadata, SemanticType } from "@alcove/core";
 
 import type { DisclosureChoice } from "@psi/metadataEditing";
 

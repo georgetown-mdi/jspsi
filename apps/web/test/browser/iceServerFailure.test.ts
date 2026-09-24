@@ -8,7 +8,7 @@ import {
   ConnectionError,
   deriveRendezvousPeerId,
   generateSharedSecret,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { dialAsAcceptor } from "@psi/transport/rendezvous";
 import { openPeerMessageConnection } from "@psi/transport/peerMessageConnection";
@@ -37,13 +37,13 @@ vi.mock("@utils/clientConfig", () => {
       PEERJS_DEBUG_LEVEL: number;
       LOG_LEVEL: string;
       DEPLOYMENT_PROFILE: string;
-      PSILINK_VERSION: string;
+      ALCOVE_VERSION: string;
     }> {
       return Promise.resolve({
         PEERJS_DEBUG_LEVEL: 1,
         LOG_LEVEL: "INFO",
         DEPLOYMENT_PROFILE: "hosted",
-        PSILINK_VERSION: "",
+        ALCOVE_VERSION: "",
       });
     }
   }

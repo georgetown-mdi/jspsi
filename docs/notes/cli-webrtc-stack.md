@@ -201,7 +201,7 @@ floor on a transport, not an estimate of one.
 
 The wire itself -- the broker socket, the OFFER/ANSWER/CANDIDATE envelopes, the
 BinaryPack chunk framing, and the close sentinel -- is specified normatively in
-[WEBRTC_TRANSPORT.md](../spec/WEBRTC_TRANSPORT.md). It is not psilink's protocol
+[WEBRTC_TRANSPORT.md](../spec/WEBRTC_TRANSPORT.md). It is not Alcove's protocol
 to define, but two implementations have to match it exactly, which is what makes
 it spec material rather than a note's.
 

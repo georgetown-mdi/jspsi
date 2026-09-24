@@ -16,7 +16,7 @@
 import { EventEmitter } from "node:events";
 
 import logLibrary from "loglevel";
-import { setLogLevel } from "@psilink/core";
+import { setLogLevel } from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 
@@ -63,7 +63,7 @@ function withheldCloseStandIn() {
 }
 
 async function main(): Promise<void> {
-  const level = process.env.PSILINK_TEST_LOG_LEVEL ?? "trace";
+  const level = process.env.ALCOVE_TEST_LOG_LEVEL ?? "trace";
   setLogLevel(
     level === "trace" ? logLibrary.levels.TRACE : logLibrary.levels.INFO,
   );

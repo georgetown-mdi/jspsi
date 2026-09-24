@@ -9,14 +9,14 @@ import {
   redactAndRenderOperatorSuppliedText,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ConnectionConfig,
   ExchangeBootstrapResult,
   ExchangeSpec,
   LinkageStrategy,
   PreparedExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   announceRetainMode,
@@ -99,11 +99,11 @@ export function builder(cmd: Argv): Argv {
     // sourced) already fit zero-setup, so only these differ from the shared text.
     {
       "config-file":
-        "where to write psilink.yaml when --save is given (default: " +
+        "where to write alcove.yaml when --save is given (default: " +
         DEFAULT_CONFIG_PATH +
         ")",
       "key-file":
-        "where to write .psilink.key when --save is given (default: " +
+        "where to write .alcove.key when --save is given (default: " +
         DEFAULT_KEY_PATH +
         ")",
       "timestamp-in-filename":
@@ -135,7 +135,7 @@ export function builder(cmd: Argv): Argv {
         "never deleted. Use to recover a directory after a crashed or " +
         "mismatched prior run, once you have confirmed no other session is " +
         "using it. CLI-only and invocation-scoped: it is never persisted to " +
-        "psilink.yaml. Refuses on a retain-mode signal unless " +
+        "alcove.yaml. Refuses on a retain-mode signal unless " +
         "--force-retain-sweep is also set",
     })
     .option("force-retain-sweep", {
@@ -159,7 +159,7 @@ export function builder(cmd: Argv): Argv {
         "a one-to-one run of the same two files. Both parties setting it " +
         "runs a many-to-many match under either linkage strategy, where each " +
         "party's records may group the other's. " +
-        "See https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "See https://github.com/georgetown-mdi/alcove/blob/main/docs/" +
         "EXCHANGE_REFERENCE.md (linkage_terms.deduplicate).",
     })
     .option("linkage-strategy", {
@@ -171,7 +171,7 @@ export function builder(cmd: Argv): Argv {
         "cost of disclosing your full per-key value structure to the receiver " +
         "-- a consented disclosure tradeoff, not a free speed-up. Both " +
         "parties must select the same value or the exchange aborts. See " +
-        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "https://github.com/georgetown-mdi/alcove/blob/main/docs/" +
         "EXCHANGE_REFERENCE.md (linkage_terms.linkage_strategy).",
     })
     .demand(1);
@@ -265,11 +265,11 @@ export function resolvePositionals(positionals: Array<unknown>): {
     if (fs.existsSync(arg0)) {
       throw new Error(
         "input file provided without a server URL; " +
-          "did you mean 'psilink exchange INPUT_FILE'?",
+          "did you mean 'alcove exchange INPUT_FILE'?",
       );
     }
     throw new Error(
-      "input file not specified; usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
+      "input file not specified; usage: alcove URL INPUT_FILE [OUTPUT_FILE]",
     );
   }
 
@@ -281,7 +281,7 @@ export function resolvePositionals(positionals: Array<unknown>): {
     // file:// case below, the input failed to parse, so there is no URL to route
     // through redactUrlCredentials; drop it entirely. The usage hint stands in
     // for the offending value, which the operator just typed.
-    "unable to parse server URL; usage: psilink URL INPUT_FILE [OUTPUT_FILE]",
+    "unable to parse server URL; usage: alcove URL INPUT_FILE [OUTPUT_FILE]",
   );
   return { server, input: arg1, output: arg2 };
 }
@@ -310,7 +310,7 @@ async function prepareDataset(
   deduplicate: boolean,
   csvDelimiter: string | undefined,
 ): Promise<PreparedExchange> {
-  const log = getLogger("psilink");
+  const log = getLogger("alcove");
 
   const { rawRows, columns, sanitizedColumnPositions } = await loadInputRows(
     input,
@@ -346,17 +346,17 @@ async function prepareDataset(
 /**
  * Build the {@link ExchangeSpec} a `--save` zero-setup exchange persists: the
  * connection used plus the inferred linkage terms and metadata. Standardization
- * is omitted -- `psilink exchange` re-infers it from the input file on load, so
+ * is omitted -- `alcove exchange` re-infers it from the input file on load, so
  * the saved config stays minimal. `saveConfig` writes it owner-read-only.
  *
  * `observedReceivedColumns` is the received-payload set observed in the
  * exchange; when non-empty it is recorded as `expectedPayloadColumns` so a
- * later recurring `psilink exchange` fails closed on a divergent payload. An
+ * later recurring `alcove exchange` fails closed on a divergent payload. An
  * empty or absent observation records nothing (see
  * {@link observedReceivedColumnsForSave}).
  *
  * `csvDelimiter` is the delimiter this run read and wrote by, recorded so the
- * recurring `psilink exchange` the saved config governs needs no flag of its
+ * recurring `alcove exchange` the saved config governs needs no flag of its
  * own; absent when the run chose none.
  *
  * @internal exported for testing
@@ -391,7 +391,7 @@ export function buildSaveSpec(
  *
  * A throw from here does not fail the run -- the exchange already completed, so
  * the handler reports it as a persistence loss and steers the operator to
- * `psilink invite` rather than a re-run, which would conduct a second exchange.
+ * `alcove invite` rather than a re-run, which would conduct a second exchange.
  *
  * @internal exported for testing
  */
@@ -431,7 +431,7 @@ export function finalizeBootstrap(params: {
           )} and key file to ${redactAndRenderOperatorSuppliedText(
             operatorSuppliedText(keyPath),
           )}. Keep the key file ` +
-          `private. Run 'psilink exchange' for future exchanges with this ` +
+          `private. Run 'alcove exchange' for future exchanges with this ` +
           `partner.`,
       );
       return;
@@ -448,7 +448,7 @@ export function finalizeBootstrap(params: {
       throw new UsageError(
         `refusing to overwrite ${conflicts.join(", ")}, which appeared after ` +
           "the pre-flight check; the exchange itself completed, so move or " +
-          "remove that file (or pass --config-file) and run 'psilink invite' " +
+          "remove that file (or pass --config-file) and run 'alcove invite' " +
           "to set up the recurring exchange rather than re-running this one",
       );
     saveConfig(configFile, spec);
@@ -457,7 +457,7 @@ export function finalizeBootstrap(params: {
         `established. Wrote config to ${redactAndRenderOperatorSuppliedText(
           operatorSuppliedText(configFile),
         )} (no key file). To set up ` +
-        `a recurring exchange, run 'psilink invite' and share the invitation ` +
+        `a recurring exchange, run 'alcove invite' and share the invitation ` +
         `with your partner.`,
     );
     return;
@@ -469,14 +469,14 @@ export function finalizeBootstrap(params: {
     log.info(
       "your partner is trying to establish a recurring exchange, but you did " +
         "not pass --save, so nothing was saved on your end. Wait for an " +
-        "invitation from your partner ('psilink accept'), or coordinate to " +
+        "invitation from your partner ('alcove accept'), or coordinate to " +
         "re-run this exchange with --save on both sides.",
     );
     return;
   }
 
   log.info(
-    "To establish a recurring exchange with this partner, run 'psilink " +
+    "To establish a recurring exchange with this partner, run 'alcove " +
       "invite URL INPUT_FILE' and share the invitation string, or coordinate " +
       "with your partner to re-run with --save.",
   );
@@ -494,7 +494,7 @@ export function finalizeBootstrap(params: {
  * key file then failed, and the rollback of that config failed too
  * ({@link provisionLeftConfigOnDisk}): the notice names the config as written
  * and steers the operator past the conflict it would otherwise hit on the
- * `psilink invite` this notice advises.
+ * `alcove invite` this notice advises.
  */
 function unsavedBootstrapNotice(params: {
   save: boolean;
@@ -514,7 +514,7 @@ function unsavedBootstrapNotice(params: {
       `the exchange completed and its results are written, but the key file ` +
       `at ${params.keyFile} did not reach disk, so no recurring exchange is ` +
       `set up; the configuration at ${params.configFile} was written and ` +
-      `could not be removed, so move or remove it, then run 'psilink invite' ` +
+      `could not be removed, so move or remove it, then run 'alcove invite' ` +
       `and share the invitation with your partner -- do not re-run this ` +
       `exchange`
     );
@@ -526,7 +526,7 @@ function unsavedBootstrapNotice(params: {
   return (
     `the exchange completed and its results are written, but ${files} did ` +
     "not reach disk, so no recurring exchange is set up; do not re-run this " +
-    "exchange -- run 'psilink invite' and share the invitation with your " +
+    "exchange -- run 'alcove invite' and share the invitation with your " +
     "partner instead"
   );
 }
@@ -551,13 +551,13 @@ export async function handler(argv: Arguments): Promise<void> {
     ...options
   } = parsed;
 
-  // Install the sink, apply the level, and build getLogger("psilink") through the
+  // Install the sink, apply the level, and build getLogger("alcove") through the
   // shared configureLogging helper (in that order, so the logger inherits the
   // sink): the file sink when --log-file is given, otherwise the default stderr
   // sink. A missing parent directory (configureLogFile) is a UsageError reported
   // on stderr and mapped to exit 64 by parseOrExit here.
   const { log, close: closeLogging } = parseOrExit(() =>
-    configureLogging({ logLevel, logFile, name: "psilink" }),
+    configureLogging({ logLevel, logFile, name: "alcove" }),
   );
 
   try {
@@ -570,7 +570,7 @@ export async function handler(argv: Arguments): Promise<void> {
     log.warn(
       "WARNING: this exchange relies on transport-layer authentication only. " +
         "You must trust the server administrator. " +
-        "Run 'psilink invite' / 'psilink accept' to establish a recurring " +
+        "Run 'alcove invite' / 'alcove accept' to establish a recurring " +
         "exchange with application-layer encryption.",
     );
 
@@ -657,7 +657,7 @@ export async function handler(argv: Arguments): Promise<void> {
         log.warn(
           `existing ${noun} ${existing.join(", ")} will be ignored by this ` +
             "zero-setup exchange; to use saved configuration and key material, " +
-            "run 'psilink exchange' instead",
+            "run 'alcove exchange' instead",
         );
       }
     }
@@ -700,7 +700,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // so a refused run never opens a connection.
       await establishHostKeyTrust(connection, {
         verbosity,
-        loggerName: "psilink",
+        loggerName: "alcove",
         persistence: options.save
           ? { mode: "save-with-config", configPath: options.configFile }
           : { mode: "ephemeral" },
@@ -739,7 +739,7 @@ export async function handler(argv: Arguments): Promise<void> {
         output,
         csvDelimiter,
         verbosity,
-        loggerName: "psilink",
+        loggerName: "alcove",
         logFile,
         recordOutput: resolveRecordOutput({
           enabled: options.record,
@@ -776,7 +776,7 @@ export async function handler(argv: Arguments): Promise<void> {
                 save: options.save,
                 bootstrap,
                 // Record the received-payload set observed in this first exchange
-                // so a later `psilink exchange` on the saved config fails closed
+                // so a later `alcove exchange` on the saved config fails closed
                 // on a divergent payload; buildSaveSpec drops the ambiguous empty
                 // observation and stays lazy. Only persisted when this party
                 // actually saves (finalizeBootstrap).

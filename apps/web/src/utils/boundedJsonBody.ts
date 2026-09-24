@@ -1,10 +1,10 @@
-import { parseBoundedJson } from "@psilink/core";
+import { parseBoundedJson } from "@alcove/core";
 
 /**
  * The one byte-capped JSON body read the web app has, for both directions of the
  * console's job API: a route reading a browser's request body, and a browser
  * client reading the console's response body. Both are streamed under a hard
- * byte cap and parsed through `@psilink/core`'s `parseBoundedJson`, so neither
+ * byte cap and parsed through `@alcove/core`'s `parseBoundedJson`, so neither
  * direction can buffer an unbounded body or drive `JSON.parse` into the
  * uncatchable engine abort that bound forestalls (see
  * packages/core/src/utils/boundedJson.ts and

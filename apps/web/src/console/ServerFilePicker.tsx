@@ -14,7 +14,7 @@ import {
 } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import {
   fetchJobInputProfile,
@@ -316,7 +316,7 @@ function ListingView({
         the console -- see the{" "}
         <Anchor
           inherit
-          href="https://github.com/georgetown-mdi/jspsi/blob/main/docs/DEPLOYMENT.md"
+          href="https://github.com/georgetown-mdi/alcove/blob/main/docs/DEPLOYMENT.md"
           target="_blank"
           rel="noreferrer"
         >

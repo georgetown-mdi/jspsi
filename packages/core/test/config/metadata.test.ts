@@ -399,7 +399,7 @@ test("the shape refusal names the remedy and the removal behind it", () => {
   expect(METADATA_NAME_SHAPE_MESSAGE).toContain(
     "the CSV read removes these characters from a header",
   );
-  expect(METADATA_NAME_SHAPE_MESSAGE).toContain("re-run psilink init");
+  expect(METADATA_NAME_SHAPE_MESSAGE).toContain("re-run alcove init");
   expect(METADATA_NAME_SHAPE_MESSAGE).toContain(
     "delete the character from the name",
   );

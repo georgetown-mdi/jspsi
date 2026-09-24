@@ -1,4 +1,4 @@
-import { installCapturedLogsInterceptor } from "@psilink/core/testing";
+import { installCapturedLogsInterceptor } from "@alcove/core/testing";
 
 // A `setupFiles` entry, so this runs once in EACH file's worker (one process
 // per file on the `forks` pool), before the test module -- and any named

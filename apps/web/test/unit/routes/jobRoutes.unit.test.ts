@@ -42,7 +42,7 @@ import type {
   JobCreateIntent,
   JobInputFileReference,
 } from "@jobs/intentSchemas";
-import type { ExchangeRecordOutcome } from "@psilink/core";
+import type { ExchangeRecordOutcome } from "@alcove/core";
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
 
 const roots: Array<string> = [];
@@ -1232,7 +1232,7 @@ describe("POST /api/jobs and the authored sftp connection", () => {
 
   test("the create path composes the authored connection into the job config", async () => {
     // The connection material comes only from the authored entry: the composed
-    // psilink.yaml has its host and @path credential ref, and nothing
+    // alcove.yaml has its host and @path credential ref, and nothing
     // client-chosen.
     const root = tempDataRoot("routes-sftp-compose");
     roots.push(root);
@@ -1252,7 +1252,7 @@ describe("POST /api/jobs and the authored sftp connection", () => {
     })) as Response;
     expect(response.status).toBe(201);
     const { id } = (await response.json()) as { id: string };
-    const composed = fs.readFileSync(`${root}/${id}/psilink.yaml`, "utf8");
+    const composed = fs.readFileSync(`${root}/${id}/alcove.yaml`, "utf8");
     const server = composedServer(composed);
     expect(server.host).toBe("sftp.example.org");
     expect(server.password).toBe(credentialRef);
@@ -1931,7 +1931,7 @@ describe("PUT/DELETE /api/jobs/sftp (authoring the connection)", () => {
     })) as Response;
     expect(response.status).toBe(201);
     const { id } = (await response.json()) as { id: string };
-    const composed = fs.readFileSync(`${dataRoot}/${id}/psilink.yaml`, "utf8");
+    const composed = fs.readFileSync(`${dataRoot}/${id}/alcove.yaml`, "utf8");
     const server = composedServer(composed);
     expect(server.host).toBe("authored.partner.example");
     expect(server.password).toBe(`@${ref}`);
@@ -2488,7 +2488,7 @@ describe("POST /api/jobs and the key file beside the opened configuration", () =
       const root = enableJobApi();
       fs.mkdirSync(root, { recursive: true });
       if (keyFile !== undefined)
-        fs.writeFileSync(path.join(root, ".psilink.key"), keyFile);
+        fs.writeFileSync(path.join(root, ".alcove.key"), keyFile);
       const response = (await handlersOf(CreateRoute).POST({
         request: createRequest(openedIntent()),
         params: {},

@@ -1,9 +1,9 @@
-// The verdict `psilink doctor` produces, in both of its renderings: the
+// The verdict `alcove doctor` produces, in both of its renderings: the
 // machine-readable JSON a launcher consumes and the human-readable check lines
 // an operator reads. The two are built from one record set so a check cannot be
 // reported one way to a script and another way to a person.
 
-import { redactPrivateKeyMaterial } from "@psilink/core";
+import { redactPrivateKeyMaterial } from "@alcove/core";
 
 import { asciiSafeJsonLine } from "../util/jsonLine";
 

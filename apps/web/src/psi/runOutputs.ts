@@ -4,9 +4,9 @@ import {
   resultCsvDelimiter,
   serializeExchangeRecord,
   serializeVerificationKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
-import type { ExchangeResult, PreparedExchange } from "@psilink/core";
+import type { ExchangeResult, PreparedExchange } from "@alcove/core";
 import type { ExchangeOutputs } from "./exchangeLifecycle";
 
 /** The console run's downloadable artifacts: the lifecycle's outputs widened with
@@ -144,9 +144,9 @@ export function buildRunOutputs(
       const stamp = recordFileStamp(result.audit.record.createdAt);
       generated.record = {
         recordUrl: jsonUrl(serializeExchangeRecord(result.audit.record)),
-        recordFileName: `psilink-record-${stamp}.json`,
+        recordFileName: `alcove-record-${stamp}.json`,
         keysUrl: jsonUrl(serializeVerificationKeys(result.audit.keys)),
-        keysFileName: `psilink-record-${stamp}.keys.json`,
+        keysFileName: `alcove-record-${stamp}.keys.json`,
       };
     }
     return generated;

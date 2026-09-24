@@ -67,7 +67,7 @@ function expectSameBytes(value: unknown, label: string): void {
   expectSameBytesAs(oracleBytes(value), value, label);
 }
 
-/** The iteration map psilink sends after the PSI round: one entry per matched
+/** The iteration map Alcove sends after the PSI round: one entry per matched
  * record (packages/core/src/psi/link.ts, `exchangeMappedElements`). */
 function iterationMap(
   n: number,

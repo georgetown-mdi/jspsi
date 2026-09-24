@@ -1,7 +1,7 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import { page, userEvent } from "vitest/browser";
 
@@ -575,7 +575,7 @@ describe("saved list route: delete is a fully supported, always-available action
     await expect
       .element(
         page.getByText(
-          "psilink.yaml and .psilink.key you saved still run this exchange",
+          "alcove.yaml and .alcove.key you saved still run this exchange",
           { exact: false },
         ),
       )
@@ -668,7 +668,7 @@ describe("saved list route: delete is a fully supported, always-available action
         page.getByText("Handed off to the command line", { exact: false }),
       )
       .toBeInTheDocument();
-    // The exported psilink.yaml and .psilink.key are not the artifact the import
+    // The exported alcove.yaml and .alcove.key are not the artifact the import
     // flow accepts, so this row must not point the operator at one.
     expect(
       page.getByText("restore it from the backup", { exact: false }).query(),
@@ -782,7 +782,7 @@ describe("saved list route: a populated list imports a command-line configuratio
     expect(document.querySelectorAll('input[type="file"]')).toHaveLength(1);
   });
 
-  test("a psilink.yaml lands beside the listed exchanges as a configuration only", async () => {
+  test("an alcove.yaml lands beside the listed exchanges as a configuration only", async () => {
     const listed = await createRunnableExchange(newExchange());
     const configuration = composeManagedCronExport(
       await createRunnableExchange(
@@ -794,7 +794,7 @@ describe("saved list route: a populated list imports a command-line configuratio
       .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
-    await chooseFile(configuration, "psilink.yaml");
+    await chooseFile(configuration, "alcove.yaml");
 
     await expect
       .poll(async () => (await listManagedExchanges()).length)
@@ -825,7 +825,7 @@ describe("saved list route: a populated list imports a command-line configuratio
       .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
-    await chooseFile(backup, "psilink-managed-backup-2026-07-11.json");
+    await chooseFile(backup, "alcove-managed-backup-2026-07-11.json");
 
     await expect
       .element(page.getByText("That exchange was handed off"))
@@ -849,7 +849,7 @@ describe("saved list route: a backup reconciles against the exchange it holds", 
     if (input === undefined) throw new Error(`no file input for ${accept}`);
     await userEvent.upload(
       page.elementLocator(input),
-      new File([bytes], "psilink-managed-backup.json"),
+      new File([bytes], "alcove-managed-backup.json"),
     );
   }
 
@@ -1061,7 +1061,7 @@ describe("saved list route: a backup reconciles against the exchange it holds", 
   });
 });
 
-describe("saved list route: a psilink.yaml imports with the .psilink.key beside it", () => {
+describe("saved list route: an alcove.yaml imports with the .alcove.key beside it", () => {
   /** Choose `files` in the one file input the surface renders, as one pick. */
   async function chooseFiles(
     files: Array<{ bytes: string; name: string }>,
@@ -1127,8 +1127,8 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
       .toBeInTheDocument();
 
     await chooseFiles([
-      { bytes: configuration, name: "psilink.yaml" },
-      { bytes: key, name: ".psilink.key" },
+      { bytes: configuration, name: "alcove.yaml" },
+      { bytes: key, name: ".alcove.key" },
     ]);
 
     await expect
@@ -1161,8 +1161,8 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
         });
       };
       const files = [
-        { bytes: configuration, name: "psilink.yaml" },
-        ...(withKey ? [{ bytes: key, name: ".psilink.key" }] : []),
+        { bytes: configuration, name: "alcove.yaml" },
+        ...(withKey ? [{ bytes: key, name: ".alcove.key" }] : []),
       ];
       app.render(createElement(SavedExchanges));
       const control = page.getByRole("button", {
@@ -1191,7 +1191,7 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
       .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
-    await chooseFiles([{ bytes: configuration, name: "psilink.yaml" }]);
+    await chooseFiles([{ bytes: configuration, name: "alcove.yaml" }]);
 
     await expect
       .poll(async () => (await listManagedExchanges()).length)
@@ -1212,10 +1212,10 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
       .toBeInTheDocument();
 
     await chooseFiles([
-      { bytes: configuration, name: "psilink.yaml" },
+      { bytes: configuration, name: "alcove.yaml" },
       {
         bytes: JSON.stringify({ sharedSecret, comment: sharedSecret }),
-        name: ".psilink.key",
+        name: ".alcove.key",
       },
     ]);
 
@@ -1241,7 +1241,7 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
       .element(page.getByRole("button", { name: "Import a file" }))
       .toBeInTheDocument();
 
-    await chooseFiles([{ bytes: key, name: ".psilink.key" }]);
+    await chooseFiles([{ bytes: key, name: ".alcove.key" }]);
 
     await expect
       .element(page.getByText(KEY_FILE_ALONE_REASON))
@@ -1263,8 +1263,8 @@ describe("saved list route: a psilink.yaml imports with the .psilink.key beside 
       .toBeInTheDocument();
 
     await chooseFiles([
-      { bytes: exported.config.text, name: "psilink.yaml" },
-      { bytes: exported.key.text, name: "psilink.key" },
+      { bytes: exported.config.text, name: "alcove.yaml" },
+      { bytes: exported.key.text, name: "alcove.key" },
     ]);
 
     await expect

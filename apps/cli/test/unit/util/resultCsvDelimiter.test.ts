@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, expect, test } from "vitest";
-import { buildOutputTable, loadCSVFile, toRetainedResult } from "@psilink/core";
-import type { AssociationTable, Metadata, PartnerPayload } from "@psilink/core";
+import { buildOutputTable, loadCSVFile, toRetainedResult } from "@alcove/core";
+import type { AssociationTable, Metadata, PartnerPayload } from "@alcove/core";
 
 import { writeOutput } from "../../../src/util/dataIo";
 
@@ -25,7 +25,7 @@ const associationTable: AssociationTable = [
 const tempDirs: string[] = [];
 
 function tempResultPath(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-result-delim-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-result-delim-"));
   tempDirs.push(dir);
   return path.join(dir, "results.csv");
 }

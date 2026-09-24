@@ -4,7 +4,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { stringify as stringifyYaml } from "yaml";
 
@@ -43,8 +43,8 @@ import type {
 import type { ManagedPairImportDeps } from "@psi/managed/managedExchangeImport";
 import type { ManagedPairReconcileOutcome } from "@psi/managed/managedExchangeStore";
 
-// The key leg of the command-line import: a psilink.yaml read with the
-// .psilink.key beside it installs a runnable record, the key file is validated
+// The key leg of the command-line import: an alcove.yaml read with the
+// .alcove.key beside it installs a runnable record, the key file is validated
 // on its own terms, a matching stored exchange is reconciled on the backup
 // import's rule, and the secret appears on no surface -- no refusal, no log
 // line, no request. The store-backed half (real IndexedDB) is the browser
@@ -84,7 +84,7 @@ function exportedPair(overrides: Partial<NewManagedExchange> = {}): {
   };
 }
 
-/** A `.psilink.key` as psilink's own writer lays it out (`saveKeyFile`,
+/** A `.alcove.key` as Alcove's own writer lays it out (`saveKeyFile`,
  * `apps/cli/src/keyFile.ts`): the pair, pretty-printed, and a newline. */
 function commandLineKeyText(fields: object): string {
   return JSON.stringify(fields, null, 2) + "\n";
@@ -123,8 +123,8 @@ async function rejectionOf(run: () => Promise<unknown>): Promise<unknown> {
   throw new Error("expected a refusal");
 }
 
-describe("reading a .psilink.key", () => {
-  test("the file psilink writes is read as the key pair", () => {
+describe("reading a .alcove.key", () => {
+  test("the file Alcove writes is read as the key pair", () => {
     const sharedSecret = generateSharedSecret();
     expect(
       readManagedCommandLineKeyFile(
@@ -175,14 +175,14 @@ describe("reading a .psilink.key", () => {
       "it has no sharedSecret",
     ],
     [
-      "a secret psilink would not write",
+      "a secret Alcove would not write",
       commandLineKeyText({ sharedSecret: nearMiss }),
-      "its sharedSecret is not a psilink shared secret",
+      "its sharedSecret is not an Alcove shared secret",
     ],
     [
       "a secret that is not a string",
       JSON.stringify({ sharedSecret: 42 }),
-      "its sharedSecret is not a psilink shared secret",
+      "its sharedSecret is not an Alcove shared secret",
     ],
     [
       "an expires that is not a date and time",

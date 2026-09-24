@@ -23,7 +23,7 @@ this document, not a formality.
 
 The sidecar cannot do the provenance job: it is committed alongside the bytes it
 describes, so whoever writes one writes the other. The attestation lives in the
-fork's attestation store, outside any psilink commit, which is why it closes the
+fork's attestation store, outside any Alcove commit, which is why it closes the
 hop the sidecar cannot. Field-by-field format, the exact verifier invocation,
 and what arms it: [DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#the-vendored-openminedpsijs-addon).
 

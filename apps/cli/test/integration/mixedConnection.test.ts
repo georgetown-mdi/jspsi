@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
+import { FileSyncConnection } from "@alcove/core";
 
 import { LocalFSClient } from "../../src/connection/localFSClient";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";

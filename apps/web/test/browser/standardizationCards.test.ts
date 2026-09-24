@@ -6,7 +6,7 @@ import { page, userEvent } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { authoredLinkageFields } from "@psilink/core";
+import { authoredLinkageFields } from "@alcove/core";
 
 import { StandardizationCards } from "@components/StandardizationCards";
 import { columnSamplesFromRows } from "@psi/columnSamples";
@@ -14,7 +14,7 @@ import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createAppMount } from "./renderApp";
 import { expandFieldCards } from "./fieldCards";
 
-import type { Metadata, Standardization } from "@psilink/core";
+import type { Metadata, Standardization } from "@alcove/core";
 
 const app = createAppMount();
 

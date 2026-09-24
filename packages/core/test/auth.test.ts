@@ -118,8 +118,8 @@ test("both pre-handshake refusals tag themselves as having emitted a recovery hi
       thrown = err;
     }
     expect(
-      (thrown as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted,
+      (thrown as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
     ).toBe(true);
   }
 });
@@ -168,7 +168,7 @@ test("authenticateConnection returns an agreed session key, rotated secret, and 
   expect(responder.value.applyEncryption).toBe(true);
 });
 
-test("the rotated secret pins the psilink-shared-secret-rotation-v1 HKDF label", async () => {
+test("the rotated secret pins the alcove-shared-secret-rotation-v2 HKDF label", async () => {
   const [initiator] = await authenticateOverPipe(SHARED_SECRET, SHARED_SECRET);
   if (initiator.status !== "fulfilled") {
     throw new Error("the handshake did not complete");
@@ -178,10 +178,10 @@ test("the rotated secret pins the psilink-shared-secret-rotation-v1 HKDF label",
   // The session key is ephemeral, so the pin is the label rather than fixed
   // bytes: re-deriving from the returned session key with the literal info
   // string must reproduce the rotated secret. Any edit to the label -- including
-  // a swap to another live psilink label -- breaks this equality.
+  // a swap to another live Alcove label -- breaks this equality.
   expect(rotatedSecret).toBe(
     toBase64Url(
-      await hkdfDerive(sessionKey, "psilink-shared-secret-rotation-v1", 32),
+      await hkdfDerive(sessionKey, "alcove-shared-secret-rotation-v2", 32),
     ),
   );
 

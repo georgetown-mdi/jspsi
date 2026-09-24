@@ -10,7 +10,7 @@ import {
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { decodeAndValidateInvitation } from "../../src/invitationDecode";
 

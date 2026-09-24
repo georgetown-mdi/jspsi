@@ -4,14 +4,14 @@ import {
   decideLinkageTermsVerdict,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { CSV_DELIMITER_SINGLE_COLUMN_REMEDY } from "@components/csvDelimiterChoice";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
 import { linkageRefusalFor } from "@psi/linkageRefusal";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 
 // The one reading of core's linkage-terms verdict every console pre-launch seat
 // holds, and the copy the seats that render an alert share. The seats' own gates

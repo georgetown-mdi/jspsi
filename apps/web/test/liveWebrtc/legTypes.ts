@@ -24,7 +24,7 @@ export const LEG_ENVIRONMENT_FAILURE = "live-webrtc leg environment failure:";
 export type MatchedPair = [number, number];
 
 /** What the Node side has standing once the leg has started: a broker listening
- * on its own origin, and a `psilink invite` waiting at it. */
+ * on its own origin, and an `alcove invite` waiting at it. */
 export interface LiveLegStart {
   /** The invitation the CLI party printed, for the browser peer to accept. */
   invitation: string;

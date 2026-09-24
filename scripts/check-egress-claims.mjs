@@ -231,7 +231,7 @@ export const ALLOWLIST = [
       "the same example form in the refusal of a host-less stun entry, on the same basis",
   },
   {
-    url: "https://github.com/georgetown-mdi/jspsi",
+    url: "https://github.com/georgetown-mdi/alcove",
     match: "prefix",
     reason:
       "operator-clicked hyperlinks into this project's own repository documentation: user navigation, not app-initiated egress; a prefix because UI work adds these routinely, scoped to this repository so a link to any other host still fails",

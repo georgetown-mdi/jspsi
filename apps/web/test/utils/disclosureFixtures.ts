@@ -1,10 +1,10 @@
-import { EXCHANGE_RECORD_VERSION, buildExchangeRecord } from "@psilink/core";
+import { EXCHANGE_RECORD_VERSION, buildExchangeRecord } from "@alcove/core";
 
 import type {
   CommittedPayload,
   ExchangeRecord,
   LinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * Real exchange records for the accounting-of-disclosures suites, built through

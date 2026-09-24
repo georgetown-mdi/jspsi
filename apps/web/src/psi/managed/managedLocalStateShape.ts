@@ -19,8 +19,8 @@ import type { ZodType } from "zod";
 
 /** Which export handed a spent copy off, where that is not the device migration.
  * `"command-line"` is the command-line export's confirmed hand-off: the exchange
- * runs from the exported `psilink.yaml` and `.psilink.key` on some machine. The
- * import reads that `psilink.yaml` as a configuration only and never the key file,
+ * runs from the exported `alcove.yaml` and `.alcove.key` on some machine. The
+ * import reads that `alcove.yaml` as a configuration only and never the key file,
  * so that hand-off leaves nothing of its own to bring the secret back. */
 export type ManagedSpentHandoff = "command-line";
 

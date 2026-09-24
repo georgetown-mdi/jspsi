@@ -12,7 +12,7 @@ import { useAcceptorExchange } from "../../../src/exchange/useAcceptorExchange.j
 import { useInviterExchange } from "../../../src/exchange/useInviterExchange.js";
 import { waitForIncomingConnection } from "../../../src/psi/transport/waitForConnection.js";
 
-import type * as PsilinkCore from "@psilink/core";
+import type * as AlcoveCore from "@alcove/core";
 import type {
   HandshakeRole,
   InvitationToken,
@@ -22,7 +22,7 @@ import type {
   PsiBackendSelection,
   RendezvousRole,
   WebRTCEndpoint,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { AcceptorLaunch } from "../../../src/exchange/useAcceptorExchange.js";
 import type { DataConnection } from "peerjs";
 import type { GeneratedInvitation } from "../../../src/psi/invitation.js";
@@ -137,8 +137,8 @@ vi.mock("react", async (importOriginal) => {
 vi.mock("@openmined/psi.js/psi_wasm_web", () => ({
   default: () => Promise.resolve({}),
 }));
-vi.mock("@psilink/core", async (importOriginal) => {
-  const actual = await importOriginal<typeof PsilinkCore>();
+vi.mock("@alcove/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof AlcoveCore>();
   const stubLinkageTerms: LinkageTerms = {
     version: "1.0.0",
     date: "2026-01-01",

@@ -3,7 +3,7 @@ import dns from "node:dns";
 import { RTCPeerConnection } from "werift";
 import { beforeAll, expect, test } from "vitest";
 
-import { safeParseConnectionConfig } from "@psilink/core";
+import { safeParseConnectionConfig } from "@alcove/core";
 
 import { buildPeerConfiguration } from "../../../src/connection/webrtc/weriftPeer";
 
@@ -32,7 +32,7 @@ import type { RTCIceCandidate } from "werift";
 /** Nothing listens here; naming it keeps every arm on loopback. */
 const UNREACHABLE_TURN = {
   urls: "turn:127.0.0.1:3478",
-  username: "psilink",
+  username: "alcove",
   credential: "placeholder-not-a-secret",
 };
 const UNREACHABLE_STUN = { urls: "stun:127.0.0.1:3478" };
@@ -45,7 +45,7 @@ const UNREACHABLE_STUN = { urls: "stun:127.0.0.1:3478" };
  */
 const HOSTLESS_TURN = {
   urls: "turn:",
-  username: "psilink",
+  username: "alcove",
   credential: "placeholder-not-a-secret",
 };
 

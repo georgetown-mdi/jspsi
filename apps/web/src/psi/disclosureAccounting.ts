@@ -23,15 +23,15 @@
 
 import { z } from "zod";
 
-import { EXCHANGE_RECORD_VERSION, parseExchangeRecord } from "@psilink/core";
+import { EXCHANGE_RECORD_VERSION, parseExchangeRecord } from "@alcove/core";
 
-import type { ExchangeRecord } from "@psilink/core";
+import type { ExchangeRecord } from "@alcove/core";
 import type { ZodType } from "zod";
 
 /** The single recognized format version for a stored accounting. A reader rejects
  * any other value rather than migrating it, the reader-rejects-unknown rule the
  * record and verification-keys files follow (see docs/spec/EXCHANGE_RECORD.md). */
-export const DISCLOSURE_ACCOUNTING_VERSION = "psilink-disclosure-accounting/v1";
+export const DISCLOSURE_ACCOUNTING_VERSION = "alcove-disclosure-accounting/v2";
 
 /** One managed exchange's accounting of disclosures: its runs' exchange records,
  * oldest first. */

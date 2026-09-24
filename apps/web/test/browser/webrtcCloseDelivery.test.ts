@@ -2,7 +2,7 @@
 
 import { expect, inject, test } from "vitest";
 
-import { generateSharedSecret } from "@psilink/core";
+import { generateSharedSecret } from "@alcove/core";
 
 import {
   CLOSE_OUTCOME_WARNINGS,
@@ -14,7 +14,7 @@ import { openPeerMessageConnection } from "../../src/psi/transport/peerMessageCo
 import { canReachServer } from "../utils/pspiFixtures.js";
 import { connectRendezvousPair } from "../utils/rendezvousPair.js";
 
-import type { MessageConnection } from "@psilink/core";
+import type { MessageConnection } from "@alcove/core";
 import type { PeerCloseOutcome } from "../../src/psi/transport/waitForPeerClose.js";
 import type { RendezvousPair } from "../utils/rendezvousPair.js";
 

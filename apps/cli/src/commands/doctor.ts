@@ -1,7 +1,7 @@
 import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 
-import { redactAndSanitizeForDisplay } from "@psilink/core";
+import { redactAndSanitizeForDisplay } from "@alcove/core";
 
 import { runMountChecks } from "../doctor/mount";
 import { runProbe } from "../doctor/probe";
@@ -18,7 +18,7 @@ import { exitCodeForError, exitWithError } from "../util/exit";
 import { parseOrExit, singleValue } from "../util/flags";
 import { configureLogging, logLevelFlag } from "../util/logging";
 
-// `psilink doctor` answers "why did the file drop not work" before an exchange
+// `alcove doctor` answers "why did the file drop not work" before an exchange
 // is attempted: `doctor probe` checks over the network as smbclient sees it,
 // `doctor mount` through the kernel as a mounted folder. Connection inputs come
 // from the SMB_* environment, never flags, so a password never becomes an argv
@@ -37,12 +37,12 @@ function commonOptions(cmd: Argv): Argv {
   );
 }
 
-/** Handler for `psilink doctor probe`. */
+/** Handler for `alcove doctor probe`. */
 export function probeHandler(argv: Arguments): Promise<void> {
   return runDoctor(argv, "probe");
 }
 
-/** Handler for `psilink doctor mount DIRECTORY`. */
+/** Handler for `alcove doctor mount DIRECTORY`. */
 export function mountHandler(argv: Arguments): Promise<void> {
   return runDoctor(argv, "mount");
 }

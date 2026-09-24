@@ -31,12 +31,9 @@ import {
   RECEIPT_UNANSWERED_NOTICE,
 } from "@exchange/ReceiptDownload";
 
-import {
-  EXCHANGE_RECORD_OUTCOMES,
-  describeEntityClusters,
-} from "@psilink/core";
+import { EXCHANGE_RECORD_OUTCOMES, describeEntityClusters } from "@alcove/core";
 
-import type { ExchangeRecordOutcome } from "@psilink/core";
+import type { ExchangeRecordOutcome } from "@alcove/core";
 import type { RunOutputs } from "@psi/runOutputs";
 
 const matched = (matchedRecordCount?: number): RunOutputs => ({
@@ -237,9 +234,9 @@ describe("the exchange-record copy", () => {
         recordCertificateMismatchObserved,
         downloads: {
           recordUrl: "/api/jobs/job-1/record",
-          recordFileName: "psilink-record.json",
+          recordFileName: "alcove-record.json",
           keysUrl: "/api/jobs/job-1/keys",
-          keysFileName: "psilink-record.keys.json",
+          keysFileName: "alcove-record.keys.json",
         },
       }) as const;
 
@@ -347,9 +344,9 @@ describe("the exchange-record copy", () => {
 describe("untakenRecordConfirm", () => {
   const downloads = {
     recordUrl: "/api/jobs/job-1/record",
-    recordFileName: "psilink-record.json",
+    recordFileName: "alcove-record.json",
     keysUrl: "/api/jobs/job-1/keys",
-    keysFileName: "psilink-record.keys.json",
+    keysFileName: "alcove-record.keys.json",
   };
 
   test("confirms over a record the console says it holds", () => {

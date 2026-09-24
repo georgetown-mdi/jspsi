@@ -4,10 +4,10 @@ title: "Where cross-workspace test material lives"
 
 # Where cross-workspace test material lives
 
-_Status: decided and built. psilink first decided to add no dedicated home,
+_Status: decided and built. Alcove first decided to add no dedicated home,
 naming the conditions that would reopen the question; one of them then fired,
 and the home exists as `packages/testkit` -- private, unpublished, consumed as
-raw TypeScript -- holding what `@psilink/core/testing` cannot. This note records
+raw TypeScript -- holding what `@alcove/core/testing` cannot. This note records
 the constraints that shaped both decisions, what fired the trigger and what the
 second decision was measured against, what each piece of test-only material
 inside `packages/core/src` is, and the alternatives weighed and not adopted. See
@@ -21,8 +21,8 @@ it.
 ## The question
 
 A helper that only tests use, and that more than one workspace's test tree
-needs, has exactly one channel: `@psilink/core/testing`, a subpath export of the
-published `@psilink/core` package. That channel has two properties.
+needs, has exactly one channel: `@alcove/core/testing`, a subpath export of the
+published `@alcove/core` package. That channel has two properties.
 
 - It cannot take a dependency `packages/core` does not declare in its own
   `dependencies`. A root devDependency is out of reach from it.
@@ -31,12 +31,12 @@ published `@psilink/core` package. That channel has two properties.
 
 So a helper two workspaces need either moves into `packages/core/src` and ships
 with the package, or -- if it needs a root devDependency -- cannot use the
-channel at all. The question is whether psilink builds a home with neither
+channel at all. The question is whether Alcove builds a home with neither
 property, and if not, what would make it build one.
 
 ## The first decision, and what it rested on
 
-Build no new home. `@psilink/core/testing` remains the single cross-workspace
+Build no new home. `@alcove/core/testing` remains the single cross-workspace
 channel for test-only material, test-only material shipping in `dist/testing.*`
 is accepted as the steady state, and nothing moves. The reopen condition is a
 line in [TESTING.md](../TESTING.md#shared-test-material) rather than a promise
@@ -69,7 +69,7 @@ writes for a workspace link, and each consuming app declares the dependency.
 The junk-drawer risk the first decision named is answered by the admission rule
 in [TESTING.md](../TESTING.md#shared-test-material) rather than by the package's
 existence: material enters only when a second workspace's test tree needs it AND
-it cannot take the `@psilink/core/testing` channel. Nothing migrated -- the
+it cannot take the `@alcove/core/testing` channel. Nothing migrated -- the
 existing subjects of that channel meet its condition and stay on it.
 
 ### What constraint 1 does when the dependency is bundleable
@@ -132,7 +132,7 @@ have paid for a cross-workspace home was satisfied by a same-workspace refactor.
 
 **No other duplication is pulling.** `apps/cli/test` and `apps/web/test` share
 no helper between them. Every piece of test material that crosses a workspace
-boundary crosses it through `@psilink/core/testing`, which serves its consumers
+boundary crosses it through `@alcove/core/testing`, which serves its consumers
 today -- the CLI's unit and integration suites and the web browser suite.
 
 **The approaches that lift the constraints change shared build configuration.**
@@ -166,7 +166,7 @@ narrow rather than a general test-scaffolding package.
 ## The test-only material inside `packages/core/src`
 
 Nothing moved when the home was built, and the admission rule is why: each of
-these can take the `@psilink/core/testing` channel, so the fact that a second
+these can take the `@alcove/core/testing` channel, so the fact that a second
 channel now exists is not a reason to migrate it. What would move one is a
 decision about core's export map, or the shipped `dist/testing.*` surface being
 priced -- not this note.
@@ -257,7 +257,7 @@ a shared chunk rather than as two independent bundles.
   `node_modules` and therefore exempt from constraints 2 and 3. Core, the CLI
   test config, and web all typecheck a consumer of one, its source is inside
   each consumer's program rather than skipped, and it may import both a
-  dependency core does not declare and `@psilink/core` types at once -- no
+  dependency core does not declare and `@alcove/core` types at once -- no
   project-reference cycle arises, because no project reference exists in either
   direction. Its standing costs: each consumer typechecks the shared source
   inside its own program, so an error there is reported once per consuming

@@ -10,8 +10,8 @@ import {
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
   POLL_INTERVAL_LINES,
   snakeizeKeys,
-} from "@psilink/core";
-import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+} from "@alcove/core";
+import type { LinkageTerms, Metadata, Standardization } from "@alcove/core";
 
 // Placeholder server fields the operator must replace before the first exchange.
 // Kept identical in spirit to the offline-invite placeholder connection
@@ -38,16 +38,16 @@ export interface TemplateDataSpec {
 }
 
 const HEADER_LINES = [
-  "psilink configuration template.",
+  "Alcove configuration template.",
   "",
   "Every option below is documented inline. Edit the placeholders (anything",
   "REPLACE_WITH_...), fill in your connection credentials, and review the",
   "linkage terms before running an exchange. The shared secret is NOT stored",
-  "here -- it lives in the key file (.psilink.key), written by invite/accept.",
+  "here -- it lives in the key file (.alcove.key), written by invite/accept.",
   "",
   "Field reference:",
-  "  https://github.com/georgetown-mdi/jspsi/blob/main/docs/EXCHANGE_REFERENCE.md",
-  "CLI usage: https://github.com/georgetown-mdi/jspsi/blob/main/docs/CLI.md",
+  "  https://github.com/georgetown-mdi/alcove/blob/main/docs/EXCHANGE_REFERENCE.md",
+  "CLI usage: https://github.com/georgetown-mdi/alcove/blob/main/docs/CLI.md",
   "snake_case keys; a value beginning with @ is read from the file at that path",
   "(use it for credentials so secrets stay out of this file).",
 ];
@@ -83,7 +83,7 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
         "of (preferably as an @path, never a literal secret -- quote the value, as",
         "a leading @ is reserved in YAML):",
         '  password: "@./sftp-password.txt"',
-        '  private_key: "@~/.ssh/id_psilink"',
+        '  private_key: "@~/.ssh/id_alcove"',
         "If the server accepts keyboard-interactive but not the direct password",
         "method, answer its prompts with the password (requires password):",
         "  keyboard_interactive: true",
@@ -250,7 +250,7 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 # A webrtc connection, in place of the sftp block above: a direct channel
 # between the two parties, set up through a peer-coordination server. role is
 # inviter on the party that issued the invitation and acceptor on the other;
-# 'psilink accept' writes this block for you. key is the coordination server's
+# 'alcove accept' writes this block for you. key is the coordination server's
 # API key (default peerjs). stun replaces the built-in STUN server list. turn
 # names relay servers for networks where a direct connection fails (write the
 # credential as an @path, or leave out username and credential to have each
@@ -301,13 +301,13 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 # certificate (third-party verifiable); the session-derived mode is not yet
 # implemented and an exchange configured with it is refused. Under certificate
 # mode identity_file is required: the signing identity is a long-lived
-# credential, so you choose where it lives and psilink never does -- a mount of
+# credential, so you choose where it lives and Alcove never does -- a mount of
 # its own is the usual home, read-only for every run except the one that creates
 # the file. Create it with
-# 'psilink fingerprint --identity-file <the path below>'.
+# 'alcove fingerprint --identity-file <the path below>'.
 # signing:
 #   mode: none
-#   # identity_file: /run/signing/psilink-signing-identity.json
+#   # identity_file: /run/signing/alcove-signing-identity.json
 #   # partner_fingerprint: <43-char base64url>          # pin the partner's certificate
 #   # receipt_output: ./receipts/exchange-receipt.json  # where the receipt file is written
 
@@ -333,7 +333,7 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 
 # disclosed_payload_columns: payload columns (in YOUR OWN namespace) you
 # committed to disclose to the partner when the exchange was established -- the
-# send-side counterpart of expected_payload_columns. 'psilink invite' fills this
+# send-side counterpart of expected_payload_columns. 'alcove invite' fills this
 # in automatically from the invitation it published; you rarely set it by hand.
 # Before anything is sent, an exchange checks that your current metadata still
 # discloses exactly this set and fails (exit 64) otherwise, so a drift is caught
@@ -344,7 +344,7 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 #   - matched_record_id
 
 # outbound_payload_consent: your own record of the columns you confirmed you send
-# to the partner. 'psilink accept' fills this in from the set it showed you, and
+# to the partner. 'alcove accept' fills this in from the set it showed you, and
 # an exchange that resolves a different set stops and asks again rather than
 # sending it; you rarely set it by hand. status is confirmed (with the columns)
 # or pending, which asks at the first run that can resolve them. Omit the field
@@ -356,7 +356,7 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 #     - matched_record_id
 
 # expected_partner_deduplicate: the linkage_terms.deduplicate your partner
-# declared for its own side in the invitation you accepted. 'psilink accept'
+# declared for its own side in the invitation you accepted. 'alcove accept'
 # fills this in; you rarely set it by hand. An exchange refuses a partner that
 # presents a different value than the invitation declared, before any key or
 # payload moves. Omit the field for an exchange you and your partner each
@@ -371,7 +371,7 @@ export const OPTIONAL_SECTIONS = `# --- Optional sections (uncomment and edit to
 //
 // @internal exported so the section-coverage test reads it from one place.
 export const CSV_DELIMITER_HINT = `# csv_delimiter: the field delimiter of the CSV you link and of the result
-# psilink writes -- one character, 'tab', or 'detect' to take it from the input
+# Alcove writes -- one character, 'tab', or 'detect' to take it from the input
 # file. Local to you: your partner reads and writes its own files however it
 # likes, and nothing about this is sent. Omit the field to read and write
 # commas.
@@ -386,7 +386,7 @@ export const CSV_DELIMITER_HINT = `# csv_delimiter: the field delimiter of the C
 // @internal exported so a test un-comments the example and validates it against
 // the schema -- an operator who follows it by hand must get a loadable config.
 export const INFERRED_SECTIONS_HINT = `# metadata and standardization are inferred from an input CSV: run
-# 'psilink init data.csv' to fill them in, or author them by hand.
+# 'alcove init data.csv' to fill them in, or author them by hand.
 #
 # metadata:
 #   - name: ssn
@@ -401,7 +401,7 @@ export const INFERRED_SECTIONS_HINT = `# metadata and standardization are inferr
 `;
 
 /**
- * Render the commented `psilink.yaml` template `psilink init` writes: an
+ * Render the commented `alcove.yaml` template `alcove init` writes: an
  * `sftp` connection scaffold with placeholder credentials, the linkage terms
  * (default or inferred), the inferred metadata/standardization when an input
  * file was given, and the optional sections documented as commented examples.

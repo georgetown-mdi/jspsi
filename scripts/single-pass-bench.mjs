@@ -46,7 +46,7 @@
 //     single phase's peak; most of the per-value slope is collectable JS garbage,
 //     not live retained memory. With --gc the children fork under --expose-gc,
 //     the same runtime flag the shipped CLI sets, which turns on
-//     @psilink/core's relieveTransientMemory at the single-pass phase boundaries --
+//     @alcove/core's relieveTransientMemory at the single-pass phase boundaries --
 //     so the recv RSS the table reports is the real shipped relief, not a
 //     bench-only collection. The table also adds the post-GC live heap, the
 //     retained floor the transient peak sits above (the split that shows the peak
@@ -172,7 +172,7 @@ function mb(kib) {
 async function runRates(argv) {
   installWasmHeapProbe();
   const { default: PSI } = await import("@openmined/psi.js");
-  const { PSIParticipant } = await import("@psilink/core");
+  const { PSIParticipant } = await import("@alcove/core");
   const lib = await PSI();
   const Ds = argv.length ? argv.map(Number) : [2000, 8000, 32000];
 
@@ -267,7 +267,7 @@ function runChild(role, rows, keys, overlap, relayTo, onResult, gc, group) {
     {
       serialization: "advanced",
       // --gc runs the child under --expose-gc, which is exactly what the shipped
-      // CLI does: it turns on @psilink/core's relieveTransientMemory at the
+      // CLI does: it turns on @alcove/core's relieveTransientMemory at the
       // single-pass phase boundaries (a no-op without the flag). So --gc measures
       // the real shipped relief by toggling the same runtime flag, rather than the
       // bench forcing its own collection. With gc exposed the child can also read
@@ -511,8 +511,7 @@ function ipcConnection() {
 async function runChildRole(role, rows, keys, overlap, groupSize) {
   installWasmHeapProbe();
   const { default: PSI } = await import("@openmined/psi.js");
-  const { PSIParticipant, linkViaSinglePassPSI } =
-    await import("@psilink/core");
+  const { PSIParticipant, linkViaSinglePassPSI } = await import("@alcove/core");
   const lib = await PSI();
 
   const bothSided = groupSize > 0;
@@ -533,7 +532,7 @@ async function runChildRole(role, rows, keys, overlap, groupSize) {
   );
   const conn = ipcConnection();
 
-  // Under --gc the child is forked with --expose-gc, so @psilink/core's
+  // Under --gc the child is forked with --expose-gc, so @alcove/core's
   // relieveTransientMemory fires at the single-pass phase boundaries -- the bench
   // measures that shipped relief in the lifetime maxRSS, it does not force its own
   // collection. globalThis.gc is present iff --expose-gc, which the child also uses

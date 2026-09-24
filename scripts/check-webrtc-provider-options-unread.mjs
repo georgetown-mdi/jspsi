@@ -203,7 +203,7 @@ function resolvedCompilerOptions(tsconfigFile) {
  * `paths` map or an extension guess. A specifier the resolver cannot place is
  * dropped; one it places via a package resolution
  * (`resolvedModule.isExternalLibraryImport`, e.g. `peerjs` or the workspace
- * package `@psilink/core`) is dropped too -- neither is local to the web app's
+ * package `@alcove/core`) is dropped too -- neither is local to the web app's
  * own source, whatever file the resolver happens to land the package's own
  * types or dist output on.
  */

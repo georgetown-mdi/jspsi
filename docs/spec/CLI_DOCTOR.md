@@ -4,7 +4,7 @@ title: "CLI Doctor Verdict"
 
 # CLI doctor verdict
 
-This document specifies the machine-readable verdict the `psilink doctor` subcommands emit under `--json`. It covers the document's fields, the byte encoding of the line holding them, the schema version and the compatibility rule a consumer applies before reading anything else, the `overall` and per-check status vocabularies, the fixed ordered check list each mode reports, what the verdict withholds, and the exit code each verdict maps to. It is the spec-tier complement to the operator-facing [Checking a network file drop](../CLI.md#checking-a-network-file-drop) section in [CLI.md](../CLI.md), which says what the two modes check and how an operator runs them; this document says what a caller may rely on. It does not cover the `SMB_*` inputs the checks read (see [CLI.md](../CLI.md#inputs)), the CLI-wide exit-code table these codes sit within (see [CLI.md](../CLI.md#exit-codes)), or the rendezvous semantics the checks are chosen to exercise (see [FILE_SYNC.md](FILE_SYNC.md)). Intended readers are implementors of a setup launcher or supervising process, and security auditors.
+This document specifies the machine-readable verdict the `alcove doctor` subcommands emit under `--json`. It covers the document's fields, the byte encoding of the line holding them, the schema version and the compatibility rule a consumer applies before reading anything else, the `overall` and per-check status vocabularies, the fixed ordered check list each mode reports, what the verdict withholds, and the exit code each verdict maps to. It is the spec-tier complement to the operator-facing [Checking a network file drop](../CLI.md#checking-a-network-file-drop) section in [CLI.md](../CLI.md), which says what the two modes check and how an operator runs them; this document says what a caller may rely on. It does not cover the `SMB_*` inputs the checks read (see [CLI.md](../CLI.md#inputs)), the CLI-wide exit-code table these codes sit within (see [CLI.md](../CLI.md#exit-codes)), or the rendezvous semantics the checks are chosen to exercise (see [FILE_SYNC.md](FILE_SYNC.md)). Intended readers are implementors of a setup launcher or supervising process, and security auditors.
 
 The verdict is a contract, not a formatted log: a launcher keys on the check ids and the `overall` value rather than parsing check lines, so a check keeps its id and a consumer reads `version` before anything else.
 
@@ -98,11 +98,11 @@ The id set per mode is fixed and ordered. Every id below appears in every verdic
 | -- | -------------------------------- |
 | `mount_readable` | The directory exists and can be listed. Its failure is the failure that makes the rest of these checks unrunnable. |
 | `marker` | The file `doctor probe` left behind is here and is this run's, so both sets of checks examined the same directory. A marker from a different run is a `warn`, and so is a matching marker the mount cannot delete; an absent one is a `fail`, since the mount and the probe are then pointing at different directories. `skipped` when no marker or token was supplied. |
-| `write_rename` | A file was written under a temporary name and renamed into place, the shape psilink writes every message with. |
-| `exclusive_create` | The share refuses to create a file that already exists -- the `O_EXCL` refusal psilink's rendezvous uses to decide which side goes first. A share that does not refuse it is a `warn`; a share where the create could not be tested at all is `skipped`, with an `action` naming the same remedy. A working name left in the directory that the run cannot remove first is a `fail`: the check never ran, and the name has to be cleared by hand. |
-| `rename_onto_existing` | The share renames a file onto an existing one, which psilink does when two sides meet at once. A share that will not is a `warn`; staging the two files that the rename needs failing is `skipped`; and, as for `exclusive_create`, an unremovable working name is a `fail`. |
+| `write_rename` | A file was written under a temporary name and renamed into place, the shape Alcove writes every message with. |
+| `exclusive_create` | The share refuses to create a file that already exists -- the `O_EXCL` refusal Alcove's rendezvous uses to decide which side goes first. A share that does not refuse it is a `warn`; a share where the create could not be tested at all is `skipped`, with an `action` naming the same remedy. A working name left in the directory that the run cannot remove first is a `fail`: the check never ran, and the name has to be cleared by hand. |
+| `rename_onto_existing` | The share renames a file onto an existing one, which Alcove does when two sides meet at once. A share that will not is a `warn`; staging the two files that the rename needs failing is `skipped`; and, as for `exclusive_create`, an unremovable working name is a `fail`. |
 
-Both `fail`s are the occupied-working-name case, and it is the only `fail` either check emits. The three names are fixed -- `.psilink-x.tmp` for `exclusive_create`, `.psilink-a.tmp` and `.psilink-b.tmp` for `rename_onto_existing` -- and each is removed before its check runs; a name still present after that attempt puts `overall` at `fix_and_retry`, never `fatal`, since the rest of the checks still ran.
+Both `fail`s are the occupied-working-name case, and it is the only `fail` either check emits. The three names are fixed -- `.alcove-x.tmp` for `exclusive_create`, `.alcove-a.tmp` and `.alcove-b.tmp` for `rename_onto_existing` -- and each is removed before its check runs; a name still present after that attempt puts `overall` at `fix_and_retry`, never `fatal`, since the rest of the checks still ran.
 
 ## What the verdict withholds
 
@@ -131,7 +131,7 @@ A usage error -- a missing or malformed input, or a bad flag -- is not in that s
 ## Cleanup limits
 
 Probe cleanup is attempted, never guaranteed. A delete is issued for every
-working file the run created (`psilink-probe-*.tmp*`) on every handled exit
+working file the run created (`alcove-probe-*.tmp*`) on every handled exit
 path, but its outcome is not re-verified: a share that refuses deletes or a
 transport that dies mid-battery leaves the file in place. The next probe run
 sweeps that name mask before its own staged test, which is the designed

@@ -12,7 +12,7 @@ import {
   LinkageTermsUnsatisfiableError,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // The two steps an online invitation reaches after its linkage gate, spied so a
 // refusal can be pinned as arriving before either: `runOnlineBootstrap` is the
@@ -61,15 +61,15 @@ function fixture(csv: string): {
   input: string;
   options: CommonBootstrapOptions;
 } {
-  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-online-mint-seat-"));
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "alcove-online-mint-seat-"));
   tmpDirs.push(dir);
   const input = path.join(dir, "input.csv");
   fs.writeFileSync(input, csv);
   return {
     input,
     options: {
-      configFile: path.join(dir, "psilink.yaml"),
-      keyFile: path.join(dir, ".psilink.key"),
+      configFile: path.join(dir, "alcove.yaml"),
+      keyFile: path.join(dir, ".alcove.key"),
       identity: "Agency A",
       record: false,
       eventStream: false,
@@ -163,7 +163,7 @@ test("the refused online mint prints no invitation and opens no connection", asy
   try {
     await inviteHandler({
       _: [],
-      $0: "psilink",
+      $0: "alcove",
       identity: "Agency A",
       args: ["wss://peers.example.org/psi", input],
       "config-file": options.configFile,

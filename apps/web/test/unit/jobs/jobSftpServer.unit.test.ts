@@ -193,7 +193,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     expect(() =>
       validateAuthoredSftpServer(
         authoredBody(
-          { hostKeyFingerprint: "@/etc/psilink/fingerprint" },
+          { hostKeyFingerprint: "@/etc/alcove/fingerprint" },
           { kind: "ref", ref: `@${secretPath}`, credType: "password" },
         ),
         path.join(dir, "data-root"),

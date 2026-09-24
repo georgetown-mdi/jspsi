@@ -8,8 +8,8 @@ import {
   TransportPublishIndeterminateError,
   UsageError,
   sanitizeErrorForDisplay,
-} from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+} from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { startInProcessSftpServer } from "../sftpServer";
@@ -260,7 +260,7 @@ inProcessOnly(
       expect(
         logs.filter((entry) =>
           entry.message.includes(
-            "https://github.com/georgetown-mdi/jspsi/issues",
+            "https://github.com/georgetown-mdi/alcove/issues",
           ),
         ),
       ).toEqual([]);
@@ -344,8 +344,8 @@ inProcessOnly(
         // this the only next step the operator gets, and makes its survival of
         // the cap critical.
         expect(
-          (outcome.sendRejection as { psilinkRecoveryHintEmitted?: unknown })
-            .psilinkRecoveryHintEmitted,
+          (outcome.sendRejection as { alcoveRecoveryHintEmitted?: unknown })
+            .alcoveRecoveryHintEmitted,
         ).toBe(true);
         expect(publishLink).toContain(REMEDY);
         expect(publishLink).not.toContain(DISPLAY_TRUNCATION_MARKER);

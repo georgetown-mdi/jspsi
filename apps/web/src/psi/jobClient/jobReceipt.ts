@@ -80,7 +80,7 @@ function receiptFileName(jobId: string, status: JobStatusFields): string {
     typeof status.recordCreatedAt === "string"
       ? recordFileStamp(status.recordCreatedAt)
       : jobId;
-  return `psilink-receipt-${stamp}.json`;
+  return `alcove-receipt-${stamp}.json`;
 }
 
 /** The status-body fields this reader looks at, all of them unknown until read:

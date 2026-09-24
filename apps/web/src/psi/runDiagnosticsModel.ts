@@ -43,7 +43,7 @@ export const SWEEP_CONTROL_LABEL =
 
 /**
  * What the card states before a sweep runs, saying what the CLI's own reference
- * says: the sweep is safe about WHICH files it deletes (psilink's own protocol
+ * says: the sweep is safe about WHICH files it deletes (Alcove's own protocol
  * files, never anything else in the folder) and unsafe about WHEN, because it is
  * a scan followed by deletes with nothing holding the directory still. A sweep
  * run against a directory a live exchange is using destroys that exchange, and

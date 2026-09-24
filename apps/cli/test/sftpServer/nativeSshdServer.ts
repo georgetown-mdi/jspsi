@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { computeHostKeyFingerprint } from "@psilink/core";
+import { computeHostKeyFingerprint } from "@alcove/core";
 
 import type { SftpServerHandle, SftpTestServer } from "./types";
 
@@ -48,7 +48,7 @@ const VALIDATE_ONLY_PORT = 22222;
 
 /**
  * The hardened native-sshd configurations the conformance suite can run against,
- * selected by PSILINK_SFTP_NATIVE_PROFILE. `baseline` is the Phase-1 config
+ * selected by ALCOVE_SFTP_NATIVE_PROFILE. `baseline` is the Phase-1 config
  * (forced internal-sftp, no chroot) and is the default -- it must stay unchanged.
  * The rest layer on the hardening real deployments use:
  *   - `chroot`: ChrootDirectory confinement. Requires sshd to run as root (for
@@ -319,13 +319,13 @@ export async function startNativeSshdServer(
   if (isChroot) {
     const cap = chrootCapability();
     if (!cap.ok) {
-      // Safety check for a direct `PSILINK_SFTP_NATIVE_PROFILE=chroot` run that
+      // Safety check for a direct `ALCOVE_SFTP_NATIVE_PROFILE=chroot` run that
       // bypasses the runChrootProfile.mjs runner (which skips cleanly instead);
       // fail with the actionable reason rather than a confusing chroot error.
       throw new Error(
         `Cannot start the chroot native-sshd profile: ${cap.reason}. ` +
           `Run it as root on Linux (the test:integration:native-chroot script, ` +
-          `under sudo on CI), or pick a different PSILINK_SFTP_NATIVE_PROFILE.`,
+          `under sudo on CI), or pick a different ALCOVE_SFTP_NATIVE_PROFILE.`,
       );
     }
   }
@@ -334,7 +334,7 @@ export async function startNativeSshdServer(
   const osUser = os.userInfo().username;
 
   const workDir = await fsp.mkdtemp(
-    path.join(os.tmpdir(), "psilink-sftp-sshd-"),
+    path.join(os.tmpdir(), "alcove-sftp-sshd-"),
   );
   // The chroot jail lives outside workDir: ChrootDirectory requires every path
   // component to be root-owned and not group/world-writable, which os.tmpdir()
@@ -349,7 +349,7 @@ export async function startNativeSshdServer(
     let backingDir: string;
     let remoteRoot: string;
     if (isChroot) {
-      jailDir = await fsp.mkdtemp("/run/psilink-sftp-chroot-");
+      jailDir = await fsp.mkdtemp("/run/alcove-sftp-chroot-");
       // Enforce the jail's ownership requirement in code: 0700 is root-owned and
       // not group/world-writable, so ChrootDirectory accepts it.
       await fsp.chmod(jailDir, 0o700);

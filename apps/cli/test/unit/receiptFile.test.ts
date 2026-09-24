@@ -6,11 +6,11 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 // Capture writeDualSignedRecord's logger so the non-fatal "could not be written"
 // WARN is asserted rather than leaked to the suite output. getLogger is the only
-// @psilink/core export replaced; everything else stays real.
+// @alcove/core export replaced; everything else stays real.
 const logCapture = vi.hoisted(() => ({ warnings: [] as string[] }));
 
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   return {
     ...actual,
     getLogger: () => ({
@@ -25,7 +25,7 @@ vi.mock("@psilink/core", async (importActual) => {
   };
 });
 
-import { parseDualSignedRecord, type DualSignedRecord } from "@psilink/core";
+import { parseDualSignedRecord, type DualSignedRecord } from "@alcove/core";
 
 import {
   defaultReceiptPath,
@@ -37,7 +37,7 @@ import {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-receipt-test-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-receipt-test-"));
   logCapture.warnings.length = 0;
 });
 
@@ -48,7 +48,7 @@ afterEach(() => {
 // A minimal schema-valid dual-signed record (the certificates self-verify; these
 // are the checked-in signing-cert vectors' identities, reused for a valid shape).
 const certA = {
-  version: "psilink-signing-cert/v2" as const,
+  version: "alcove-signing-cert/v3" as const,
   algorithm: "ecdsa-p256-sha256" as const,
   identity: "Party A",
   publicKey: {
@@ -61,7 +61,7 @@ const certA = {
     "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g",
 };
 const record: DualSignedRecord = {
-  version: "psilink-signed-receipt/v3",
+  version: "alcove-signed-receipt/v4",
   content: {
     termsHash: "dGVybXNIYXNo",
     initiatorToResponderPayload: "aTJyUGF5bG9hZA",
@@ -77,7 +77,7 @@ const record: DualSignedRecord = {
 
 test("defaultReceiptPath is a filesystem-safe timestamped path in the cwd", () => {
   const p = defaultReceiptPath("2026-06-06T01:02:03.456Z");
-  expect(p).toBe("./psilink-receipt-2026-06-06T01-02-03-456Z.json");
+  expect(p).toBe("./alcove-receipt-2026-06-06T01-02-03-456Z.json");
   expect(path.basename(p)).not.toContain(":");
 });
 
@@ -96,7 +96,7 @@ test("receiptPathFor uses an explicit path verbatim, else the timestamped defaul
   ).toBe("/tmp/x.json");
   expect(
     receiptPathFor({ receiptFile: undefined }, "2026-01-01T00:00:00Z"),
-  ).toBe("./psilink-receipt-2026-01-01T00-00-00Z.json");
+  ).toBe("./alcove-receipt-2026-01-01T00-00-00Z.json");
 });
 
 test("writeDualSignedRecord writes a parseable owner-only file", () => {

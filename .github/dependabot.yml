@@ -76,7 +76,7 @@ updates:
           - "@vitest/browser"
           - "@vitest/browser-playwright"
           - "@vitest/coverage-v8"
-          # Inlined into a built @psilink/core artifact rather than resolved
+          # Inlined into a built @alcove/core artifact rather than resolved
           # at runtime -- canonicalize in every build, re2js and yaml in the
           # standalone UMD browser build. Excluded so each bump is an
           # individual, reviewable PR instead of riding along in this batch --

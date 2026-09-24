@@ -17,7 +17,7 @@ import type {
   LinkageTerms,
 } from "../src/config/linkageTermsSchema";
 
-// The terms psilink ships, driven through the exchange boundary: the fields
+// The terms Alcove ships, driven through the exchange boundary: the fields
 // and keys getDefaultLinkageTerms emits, under the strategy it emits them
 // with, over records generated from those key declarations rather than from a
 // restatement of them. Every other exchange test here hand-builds a small key

@@ -56,17 +56,17 @@
  * cache may hold change; activate then discards the previous scheme's caches --
  * including, per {@link claimAndDiscardOldCaches}, the asset cache a client left
  * open in another tab is still fetching from. */
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 
 /** Holds the one cached navigation document plus {@link STATIC_ASSETS}. */
-const SHELL_CACHE = `psilink-shell-${CACHE_VERSION}`;
+const SHELL_CACHE = `alcove-shell-${CACHE_VERSION}`;
 
 /** Holds content-hashed build assets under {@link ASSET_PATH_PREFIX}. It is the
  * one cache here that grows with use, so every writer of it must also bring it
  * back within {@link MAX_ASSET_ENTRIES}; the writers are named and held to that
  * in `apps/web/test/unit/serviceWorkerAssetCache.test.ts`, so a third one cannot
  * appear unnoticed. */
-const ASSET_CACHE = `psilink-assets-${CACHE_VERSION}`;
+const ASSET_CACHE = `alcove-assets-${CACHE_VERSION}`;
 
 /** The caches this worker owns; activate deletes every other cache. */
 const CURRENT_CACHES = [SHELL_CACHE, ASSET_CACHE];
@@ -119,12 +119,12 @@ const MAX_ASSET_ENTRIES = 240;
  * told its operator an update is ready and reached the unload that applies it.
  * Mirrored by the client registration in `apps/web/src/utils/appShellUpdate.ts`.
  */
-const SKIP_WAITING_MESSAGE = "psilink-skip-waiting";
+const SKIP_WAITING_MESSAGE = "alcove-skip-waiting";
 
 /** The message a client running as an INSTALLED app posts to have every route's
  * code cached ({@link SHELL_ROUTES}), rather than only the shell's own. Mirrored
  * by the client registration in `apps/web/src/utils/appShellUpdate.ts`. */
-const WARM_ROUTES_MESSAGE = "psilink-warm-routes";
+const WARM_ROUTES_MESSAGE = "alcove-warm-routes";
 
 /**
  * Every route of the app, as a path whose served document names that route's
@@ -163,11 +163,11 @@ const SHELL_ROUTES = [
 const UNCACHED_OFFLINE_DOCUMENT = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>psilink is offline</title></head>
+<title>Alcove is offline</title></head>
 <body style="font-family: system-ui, sans-serif; margin: 2rem; max-width: 34rem">
-<h1>psilink is offline</h1>
+<h1>Alcove is offline</h1>
 <p>This device has no network connection, and this browser has not stored a copy
-of the app yet. Reconnect and open psilink once; after that the app and your
+of the app yet. Reconnect and open Alcove once; after that the app and your
 saved exchanges open without a connection.</p>
 </body></html>`;
 

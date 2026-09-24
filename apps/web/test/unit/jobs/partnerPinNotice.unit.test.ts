@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import {
   PARTNER_PIN_UNRECORDABLE_FAILURE,
@@ -85,7 +85,7 @@ function composedConfigFile(pin: string | undefined): string {
   fs.writeFileSync(
     configPath,
     composeConfigDocument(intent, path.join(dir, "rendezvous"), undefined, {
-      identityFile: path.join(dir, ".psilink-signing-identity.json"),
+      identityFile: path.join(dir, ".alcove-signing-identity.json"),
       receiptOutput: path.join(dir, JOB_FILE_NAMES.receipt),
     }),
   );
@@ -220,7 +220,7 @@ describe("the notice states the pin without naming a file", () => {
     const notice = partnerCertificatePinnedNotice(ADOPTED_FINGERPRINT);
     expect(notice).toContain(ADOPTED_FINGERPRINT);
     expect(notice).toMatch(/channel the invitation travelled/);
-    expect(notice).toMatch(/psilink fingerprint/);
+    expect(notice).toMatch(/alcove fingerprint/);
     // An adopted pin is not written back into the configuration in the mounted
     // folder, so it is lost unless the operator enters it -- unlike a
     // command-line run, which records it in the file it was passed.
@@ -334,7 +334,7 @@ const PRE_CONNECTION_REFUSAL =
   "directory holding it and renames that over the old one, which needs the " +
   "directory writable by the user this run is. The run stopped before " +
   "connecting. Either record signing.partner_fingerprint in that file by " +
-  "hand, from the value the partner's 'psilink fingerprint' prints, or mount " +
+  "hand, from the value the partner's 'alcove fingerprint' prints, or mount " +
   "the configuration writable for the run that records the pin.";
 
 const ADOPTION_WRITE_FAILURE =
@@ -343,7 +343,7 @@ const ADOPTION_WRITE_FAILURE =
   "(EROFS: read-only file system), so the run stops here. The partner's " +
   `fingerprint is ${ADOPTED_FINGERPRINT}; before the next run, either record ` +
   "signing.partner_fingerprint in that file by hand, from the value the " +
-  "partner's 'psilink fingerprint' prints, or mount the configuration " +
+  "partner's 'alcove fingerprint' prints, or mount the configuration " +
   "writable for the run that records the pin.";
 
 /** One certificate-mode job whose child emits `message` as its terminal
@@ -449,7 +449,7 @@ describe("the relayed first-contact failure states no container path", () => {
     expect(PARTNER_PIN_UNRECORDABLE_FAILURE).not.toContain(
       "signing.partner_fingerprint",
     );
-    expect(PARTNER_PIN_UNRECORDABLE_FAILURE).toMatch(/psilink fingerprint/);
+    expect(PARTNER_PIN_UNRECORDABLE_FAILURE).toMatch(/alcove fingerprint/);
     expect(PARTNER_PIN_UNRECORDABLE_FAILURE).toMatch(/run the exchange again/);
     // The run stopped at or before the terms exchange, so no row of the
     // operator's file moved (packages/core/src/exchange.ts, the terms-time pin

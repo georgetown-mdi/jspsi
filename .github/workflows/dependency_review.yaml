@@ -24,7 +24,7 @@ name: Dependency Review
 #
 # The check reads GitHub's Dependency Review API, which requires the repository's
 # Dependency Graph feature to be enabled. That is free on public repositories
-# (georgetown-mdi/jspsi is public), so this needs no GitHub Advanced Security
+# (georgetown-mdi/alcove is public), so this needs no GitHub Advanced Security
 # license -- but the graph must stay enabled (default-on for public repos, yet
 # disableable since 2025-05) or the action fails closed on every PR.
 

@@ -5,7 +5,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   clearManagedExchanges,
@@ -18,7 +18,7 @@ import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import type { CSVParseRows } from "@psi/workers/csvParseController";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
-import type { WebRTCExchangeLocator } from "@psilink/core";
+import type { WebRTCExchangeLocator } from "@alcove/core";
 
 // What a run reads through a persisted input-file handle after the file at the
 // agreed path is replaced, exercised against real Chromium: the three ways an

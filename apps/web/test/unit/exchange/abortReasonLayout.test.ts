@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   errorWithPartnerCauseLinks,
   partnerOriginTextList,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { failureFor } from "@exchange/useInviterExchange";
 import { layOutValueLineBreaks } from "@exchange/RunSurface";

@@ -152,18 +152,18 @@ describe("writing a run's results into the granted folder", () => {
     const permission = fakePermission("granted");
     const delivery = await writeResultsToOutputDirectory(
       folder.handle,
-      "psilink-results-2026-03-01.csv",
+      "alcove-results-2026-03-01.csv",
       new Blob([RESULTS_CSV]),
       permission,
     );
 
     expect(delivery).toEqual({
       kind: "written",
-      fileName: "psilink-results-2026-03-01.csv",
+      fileName: "alcove-results-2026-03-01.csv",
       directoryName: "Riverbend results",
     });
     expect(folder.written).toEqual([
-      { fileName: "psilink-results-2026-03-01.csv", text: RESULTS_CSV },
+      { fileName: "alcove-results-2026-03-01.csv", text: RESULTS_CSV },
     ]);
     // The entry is opened with `create`, which is what makes a first run's file
     // exist at all.
@@ -179,7 +179,7 @@ describe("writing a run's results into the granted folder", () => {
       const permission = fakePermission(state);
       const delivery = await writeResultsToOutputDirectory(
         folder.handle,
-        "psilink-results-2026-03-01.csv",
+        "alcove-results-2026-03-01.csv",
         new Blob([RESULTS_CSV]),
         permission,
       );
@@ -194,21 +194,21 @@ describe("writing a run's results into the granted folder", () => {
     const folder = fakeFolder(new Error("the disk is full"));
     const delivery = await writeResultsToOutputDirectory(
       folder.handle,
-      "psilink-results-2026-03-01.csv",
+      "alcove-results-2026-03-01.csv",
       new Blob([RESULTS_CSV]),
       fakePermission("granted"),
     );
 
     expect(delivery.kind).toBe("write-failed");
     expect(folder.written).toHaveLength(0);
-    expect(folder.aborted).toEqual(["psilink-results-2026-03-01.csv"]);
+    expect(folder.aborted).toEqual(["alcove-results-2026-03-01.csv"]);
   });
 
   test("removes the empty entry a failed write created", async () => {
     const folder = fakeFolder(new Error("the disk is full"));
     await writeResultsToOutputDirectory(
       folder.handle,
-      "psilink-results-2026-03-01.csv",
+      "alcove-results-2026-03-01.csv",
       new Blob([RESULTS_CSV]),
       fakePermission("granted"),
     );
@@ -230,7 +230,7 @@ describe("writing a run's results into the granted folder", () => {
 
     await writeResultsToOutputDirectory(
       lockedOnce,
-      "psilink-results-2026-03-01.csv",
+      "alcove-results-2026-03-01.csv",
       new Blob([RESULTS_CSV]),
       fakePermission("granted"),
     );
@@ -254,7 +254,7 @@ describe("writing a run's results into the granted folder", () => {
     await expect(
       writeResultsToOutputDirectory(
         lockedThroughout,
-        "psilink-results-2026-03-01.csv",
+        "alcove-results-2026-03-01.csv",
         new Blob([RESULTS_CSV]),
         fakePermission("granted"),
       ),
@@ -265,19 +265,19 @@ describe("writing a run's results into the granted folder", () => {
 
   test("keeps a file the folder already held when the write fails", async () => {
     const folder = fakeFolder(new Error("the disk is full"), [
-      "psilink-results-2026-03-01.csv",
+      "alcove-results-2026-03-01.csv",
       "last-quarter.csv",
     ]);
     await writeResultsToOutputDirectory(
       folder.handle,
-      "psilink-results-2026-03-01.csv",
+      "alcove-results-2026-03-01.csv",
       new Blob([RESULTS_CSV]),
       fakePermission("granted"),
     );
 
     expect([...folder.names].sort()).toEqual([
+      "alcove-results-2026-03-01.csv",
       "last-quarter.csv",
-      "psilink-results-2026-03-01.csv",
     ]);
   });
 
@@ -292,7 +292,7 @@ describe("writing a run's results into the granted folder", () => {
     await expect(
       writeResultsToOutputDirectory(
         refusingRemoval,
-        "psilink-results-2026-03-01.csv",
+        "alcove-results-2026-03-01.csv",
         new Blob([RESULTS_CSV]),
         fakePermission("granted"),
       ),
@@ -308,7 +308,7 @@ describe("writing a run's results into the granted folder", () => {
     await expect(
       writeResultsToOutputDirectory(
         refusing,
-        "psilink-results-2026-03-01.csv",
+        "alcove-results-2026-03-01.csv",
         new Blob([RESULTS_CSV]),
         fakePermission("granted"),
       ),

@@ -1,6 +1,6 @@
 import { Button, Group, Stack } from "@mantine/core";
 
-import { sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@alcove/core";
 
 import {
   ErrorComponent,
@@ -42,9 +42,9 @@ export function DefaultCatchBoundary({ error }: ErrorComponentProps) {
             recovery. */}
         {!online && (
           <p>
-            This device is offline. A part of psilink this browser has not
-            stored yet cannot be opened without a connection -- reconnect and
-            open it once, and it will open offline after that.
+            This device is offline. A part of Alcove this browser has not stored
+            yet cannot be opened without a connection -- reconnect and open it
+            once, and it will open offline after that.
           </p>
         )}
         {/* ErrorComponent renders only `error.message` (auto-shown in dev, behind

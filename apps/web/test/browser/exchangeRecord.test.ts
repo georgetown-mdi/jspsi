@@ -10,7 +10,7 @@ import {
   serializeExchangeRecord,
   serializeVerificationKeys,
   verifyRecordCommitments,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import vectorsRaw from "../../../../packages/core/test/vectors/exchange-record-vectors.json?raw";
 
@@ -25,7 +25,7 @@ type ExchangeRecordRandomness = NonNullable<
 
 // The companion to packages/core/test/records/exchangeRecord.test.ts's vector
 // suite: it runs the SAME checked-in record vectors through the browser build
-// of @psilink/core in real Chromium. The Node suite proves Node reproduces the
+// of @alcove/core in real Chromium. The Node suite proves Node reproduces the
 // vectors and this suite proves the browser reproduces the same vectors, so a
 // record built by the CLI (Node) and one built by the web app (browser) are
 // byte-identical for the same inputs and randomness. The commitment scheme uses

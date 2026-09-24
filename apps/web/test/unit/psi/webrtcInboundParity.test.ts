@@ -6,21 +6,21 @@ import {
   packValue,
   preScanVerdict,
   unpackFrame,
-} from "@psilink/testkit/webrtcInboundFrames";
+} from "@alcove/testkit/webrtcInboundFrames";
 
 import { boundChunkReassembly } from "../../../src/psi/transport/boundedReassembly.js";
 
 import type {
   FrameVerdict,
   WebrtcFrameFixture,
-} from "@psilink/testkit/webrtcInboundFrames";
-import type { ConnectionError } from "@psilink/core";
+} from "@alcove/testkit/webrtcInboundFrames";
+import type { ConnectionError } from "@alcove/core";
 import type { DataConnection } from "peerjs";
 
 // Core's structural pre-scan (packages/core/src/connection/binaryPackBounds.ts) and
 // this app's PeerJS wrap (src/psi/transport/boundedReassembly.ts) enforce the same
 // bound; the wrap calls the scan at the unpack chokepoint for every datagram and
-// reassembled frame. The fixture set (`@psilink/testkit/webrtcInboundFrames`), also
+// reassembled frame. The fixture set (`@alcove/testkit/webrtcInboundFrames`), also
 // driven by the CLI's own parity suite, drives both here, and every divergence
 // fails -- including a rule that fires on a whole frame but not the same frame in
 // chunks.

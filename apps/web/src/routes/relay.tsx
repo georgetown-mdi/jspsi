@@ -10,7 +10,7 @@ export const Route = createFileRoute("/relay")({
   component: RelaySettingsScreen,
   head: () => ({
     meta: seo({
-      title: "Relay server - psilink",
+      title: "Relay server - Alcove",
       description:
         "Set the TURN relay your side of an exchange connects through.",
     }),

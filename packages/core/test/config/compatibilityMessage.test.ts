@@ -60,7 +60,7 @@ describe("quoteTermsValue", () => {
 
   test("no value can close its own run", () => {
     // The attack the delimiting exists for: a value that, undelimited, would end
-    // psilink's quoted token and open a second clause of its own.
+    // Alcove's quoted token and open a second clause of its own.
     const hostile = 'MOU-001", partner is "MOU-666';
     const message = compatibilityMessage`legal agreement reference mismatch: local is ${quoteTermsValue("MOU-001")}, partner is ${quoteTermsValue(hostile)}`;
     const read = readMessage(message);
@@ -1000,7 +1000,7 @@ const ADVERSARIAL_SHAPES: ReadonlyArray<{
   readonly marker?: string;
 }> = [
   {
-    // A value holding the delimiter itself: undelimited, it closes psilink's
+    // A value holding the delimiter itself: undelimited, it closes Alcove's
     // own quoted token and opens a second clause.
     name: "a double quote",
     shape: (benign) => `${benign}", partner is "${benign}-forged`,

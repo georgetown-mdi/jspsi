@@ -6,8 +6,8 @@ import {
   encodeInvitation,
   getDefaultLinkageTerms,
   UsageError,
-} from "@psilink/core";
-import type { InvitationToken } from "@psilink/core";
+} from "@alcove/core";
+import type { InvitationToken } from "@alcove/core";
 import {
   buildRotatedKeyFile,
   checkKeyFileExpiry,
@@ -35,7 +35,7 @@ function inviteToken(expires?: string): InvitationToken {
 let dir: string;
 
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-test-"));
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-test-"));
 });
 
 afterEach(() => {
@@ -50,7 +50,7 @@ test("loadKeyFile returns undefined when the file does not exist", () => {
 });
 
 test("loadKeyFile parses a valid key file with sharedSecret and expires", () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   fs.writeFileSync(
     keyPath,
     JSON.stringify({
@@ -65,7 +65,7 @@ test("loadKeyFile parses a valid key file with sharedSecret and expires", () => 
 });
 
 test("loadKeyFile parses a valid key file with sharedSecret only", () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: TOKEN }));
   fs.chmodSync(keyPath, 0o600);
   const result = loadKeyFile(keyPath);
@@ -74,7 +74,7 @@ test("loadKeyFile parses a valid key file with sharedSecret only", () => {
 });
 
 test("loadKeyFile throws when sharedSecret is missing", () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   fs.writeFileSync(
     keyPath,
     JSON.stringify({ expires: "2027-01-01T00:00:00.000Z" }),
@@ -83,13 +83,13 @@ test("loadKeyFile throws when sharedSecret is missing", () => {
 });
 
 test("loadKeyFile throws when sharedSecret is empty", () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   fs.writeFileSync(keyPath, JSON.stringify({ sharedSecret: "" }));
   expect(() => loadKeyFile(keyPath)).toThrow();
 });
 
 test("loadKeyFile throws when expires is not a valid ISO 8601 datetime", () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   fs.writeFileSync(
     keyPath,
     JSON.stringify({ sharedSecret: TOKEN, expires: "not-a-date" }),
@@ -103,7 +103,7 @@ test("loadKeyFile does not echo file content on an invalid-JSON key file", () =>
   // message (here exactly the leading 10 chars), so a file that begins with the
   // secret would otherwise leak it. The 10-char marker leads the file so the old
   // (content-echoing) path would expose it; the guard must not.
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   const MARKER = "LEAKME1234";
   fs.writeFileSync(keyPath, `${MARKER} not json`);
   let caught: unknown;
@@ -121,7 +121,7 @@ test("loadKeyFile does not echo file content on an invalid-JSON key file", () =>
 // --- saveKeyFile -------------------------------------------------------------
 
 test("saveKeyFile writes a file that loadKeyFile can read back", () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   saveKeyFile(keyPath, {
     sharedSecret: TOKEN,
     expires: "2028-06-01T12:00:00.000Z",
@@ -132,7 +132,7 @@ test("saveKeyFile writes a file that loadKeyFile can read back", () => {
 });
 
 test("saveKeyFile writes valid JSON with a trailing newline", () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   saveKeyFile(keyPath, { sharedSecret: TOKEN });
   const raw = fs.readFileSync(keyPath, "utf8");
   expect(() => JSON.parse(raw)).not.toThrow();
@@ -140,7 +140,7 @@ test("saveKeyFile writes valid JSON with a trailing newline", () => {
 });
 
 test("saveKeyFile rejects a malformed sharedSecret before writing to disk", () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   // UsageError (not a plain Error) so the CLI classifies it as exit 64, not a
   // transport failure (exit 69).
   expect(() => saveKeyFile(keyPath, { sharedSecret: "too-short" })).toThrow(
@@ -156,9 +156,9 @@ test("saveKeyFile rejects a malformed sharedSecret before writing to disk", () =
 
 test("provisionKeyFileFromInvitation writes the token's secret and expiry, owner-only", async () => {
   // The inviter-side (composing-party) copy holds BOTH the shared secret and
-  // the invitation's expiry -- matching `psilink invite`, contrast accept's copy
+  // the invitation's expiry -- matching `alcove invite`, contrast accept's copy
   // which strips the expiry. Owner-only permissions match saveKeyFile's write.
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   const expires = new Date(Date.now() + 3_600_000).toISOString();
   const encoded = await encodeInvitation(inviteToken(expires));
   await provisionKeyFileFromInvitation(encoded, keyPath);
@@ -172,7 +172,7 @@ test("provisionKeyFileFromInvitation writes the token's secret and expiry, owner
 test("provisionKeyFileFromInvitation resolves an @path invitation reference", async () => {
   // The @-file form (`--invitation @code.txt`) reads the code from a file so it
   // stays out of shell history; the resolved code provisions identically.
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   const codePath = path.join(dir, "code.txt");
   const encoded = await encodeInvitation(inviteToken());
   fs.writeFileSync(codePath, `${encoded}\n`);
@@ -184,7 +184,7 @@ test("provisionKeyFileFromInvitation errors when a key file already exists and l
   // A pre-existing key file is a clean, actionable error, never an overwrite:
   // the secret rotates after the first exchange, so re-supplying the original
   // code must not resurrect a stale secret.
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   const existing = JSON.stringify({ sharedSecret: TOKEN }) + "\n";
   fs.writeFileSync(keyPath, existing);
   const encoded = await encodeInvitation(inviteToken());
@@ -204,7 +204,7 @@ test("provisionKeyFileFromInvitation refuses even when a concurrent writer wins 
   // call's write. The write-side guard (saveKeyFile's exclusive create) must
   // catch this and refuse with the same "already exists" UsageError the
   // pre-check raises, without overwriting the concurrent writer's content.
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   const concurrentWriterContent =
     JSON.stringify({ sharedSecret: TOKEN }) + "\n";
   const realLstatSync = fs.lstatSync;
@@ -240,7 +240,7 @@ test("provisionKeyFileFromInvitation refuses even when a concurrent writer wins 
 });
 
 test("provisionKeyFileFromInvitation fails closed on a malformed code, writing nothing", async () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   await expect(
     provisionKeyFileFromInvitation("not-a-valid-invitation", keyPath),
   ).rejects.toBeInstanceOf(UsageError);
@@ -248,7 +248,7 @@ test("provisionKeyFileFromInvitation fails closed on a malformed code, writing n
 });
 
 test("provisionKeyFileFromInvitation fails closed on an expired code, writing nothing", async () => {
-  const keyPath = path.join(dir, ".psilink.key");
+  const keyPath = path.join(dir, ".alcove.key");
   const realNow = Date.now();
   const expires = new Date(realNow + 60_000).toISOString();
   // Encode while still in the future (encodeInvitation requires it), then advance

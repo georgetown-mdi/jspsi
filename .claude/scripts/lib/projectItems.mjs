@@ -19,12 +19,12 @@ export const PROJECT_PREFIXES = {
   10: "9400ce0309ab47ce0163d09ace", // georgetown-mdi release & operations
 };
 
-/** Owner login for both psilink project boards. */
+/** Owner login for both Alcove project boards. */
 export const OWNER = "georgetown-mdi";
 
 const GRAPHQL_ENDPOINT = "https://api.github.com/graphql";
 // GitHub rejects API requests without a User-Agent; identify these scripts.
-const USER_AGENT = "psilink-board-scripts";
+const USER_AGENT = "alcove-board-scripts";
 
 /**
  * Run gh with the given argv and return stdout as a string. Network calls go

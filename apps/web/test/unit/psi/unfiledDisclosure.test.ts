@@ -105,7 +105,7 @@ describe("the stored note", () => {
   test("a value under another version is refused", () => {
     expect(() =>
       parseStoredUnfiledDisclosures({
-        version: "psilink-unfiled-disclosure/v2",
+        version: "alcove-unfiled-disclosure/v3",
         entries: [],
       }),
     ).toThrow();

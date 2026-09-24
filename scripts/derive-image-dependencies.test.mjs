@@ -44,15 +44,15 @@ describe("what the shipped scripts are read to ask of the image", () => {
 
   it("derives all three helper scripts the .cmd path pipes into the image", () => {
     expect(derived.helpers.map((entry) => entry.script)).toEqual([
-      "cmd_psilink-credcheck.sh",
-      "cmd_psilink-probe.sh",
-      "cmd_psilink-volcheck.sh",
+      "cmd_alcove-credcheck.sh",
+      "cmd_alcove-probe.sh",
+      "cmd_alcove-volcheck.sh",
     ]);
   });
 
   it("derives the environment and the mount each helper call site gives it", () => {
     const volcheck = derived.helpers.find(
-      (entry) => entry.script === "cmd_psilink-volcheck.sh",
+      (entry) => entry.script === "cmd_alcove-volcheck.sh",
     );
     expect(volcheck.env).toEqual(["MARKER", "TOKEN"]);
     expect(volcheck.mounts).toEqual(["/rz"]);
@@ -76,7 +76,7 @@ describe("the argument-vector reader", () => {
   it("reads a shell vector following the image the launcher resolves", () => {
     expect(
       argvOnLine(
-        '"$PSILINK_ENGINE" run --rm "$(psilink_image)" doctor mount /rz --json',
+        '"$ALCOVE_ENGINE" run --rm "$(alcove_image)" doctor mount /rz --json',
         COMMANDS,
       ),
     ).toEqual([["doctor", "mount", "/rz", "--json"]]);
@@ -101,9 +101,9 @@ describe("the argument-vector reader", () => {
   });
 
   it("reads nothing from a line that never names the image or a vector", () => {
-    expect(
-      argvOnLine("psilink doctor probe is what it runs", COMMANDS),
-    ).toEqual([]);
+    expect(argvOnLine("alcove doctor probe is what it runs", COMMANDS)).toEqual(
+      [],
+    );
   });
 
   it("reads nothing when the tokens after the image name no command", () => {
@@ -152,14 +152,14 @@ describe("folding a script into logical lines", () => {
   });
 
   it("keeps a hash inside a parameter expansion from truncating the line", () => {
-    const source = 'hex=${DIGEST#sha256:}; run "$(psilink_image)" doctor probe';
+    const source = 'hex=${DIGEST#sha256:}; run "$(alcove_image)" doctor probe';
     expect(deriveCliCapabilities({ "a.sh": source }, COMMANDS)).toEqual([
       { argv: ["doctor", "probe"], sites: ["a.sh:1"] },
     ]);
   });
 
   it("folds a shell line continued with a backslash", () => {
-    const source = ['run --rm "$(psilink_image)" \\', "  doctor probe"].join(
+    const source = ['run --rm "$(alcove_image)" \\', "  doctor probe"].join(
       "\n",
     );
     expect(deriveCliCapabilities({ "a.sh": source }, COMMANDS)).toEqual([
@@ -183,32 +183,32 @@ describe("folding a script into logical lines", () => {
 
 describe("the helper-script reader", () => {
   const cmd = [
-    'docker run --rm -i --env SMB_PASS --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d \'\\r\' | sh" <"%SCRIPT_DIR%cmd_psilink-credcheck.sh" >"%WORK%" 2>nul',
-    'docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d \'\\r\' | sh" <"%SCRIPT_DIR%cmd_psilink-volcheck.sh"',
+    'docker run --rm -i --env SMB_PASS --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d \'\\r\' | sh" <"%SCRIPT_DIR%cmd_alcove-credcheck.sh" >"%WORK%" 2>nul',
+    'docker run --rm -i -v "%VOLUME_NAME%:/rz" --env MARKER --env TOKEN --entrypoint sh "ghcr.io/georgetown-mdi/alcove:latest" -c "tr -d \'\\r\' | sh" <"%SCRIPT_DIR%cmd_alcove-volcheck.sh"',
   ].join("\n");
 
   it("reads the script, its environment and its mount from the call site", () => {
     expect(deriveHelperInvocations(cmd)).toEqual([
       {
-        script: "cmd_psilink-credcheck.sh",
+        script: "cmd_alcove-credcheck.sh",
         env: ["SMB_PASS"],
         mounts: [],
-        sites: ["cmd_Setup-PsilinkFileDrop.cmd:1"],
+        sites: ["cmd_Setup-AlcoveFileDrop.cmd:1"],
       },
       {
-        script: "cmd_psilink-volcheck.sh",
+        script: "cmd_alcove-volcheck.sh",
         env: ["MARKER", "TOKEN"],
         mounts: ["/rz"],
-        sites: ["cmd_Setup-PsilinkFileDrop.cmd:2"],
+        sites: ["cmd_Setup-AlcoveFileDrop.cmd:2"],
       },
     ]);
   });
 
   it("reads a helper script added at a new call site", () => {
-    const grown = `${cmd}\ndocker run --rm -i --env SMB_TOKEN --entrypoint sh "img" -c "tr -d '\\r' | sh" <"%SCRIPT_DIR%cmd_psilink-newcheck.sh"`;
+    const grown = `${cmd}\ndocker run --rm -i --env SMB_TOKEN --entrypoint sh "img" -c "tr -d '\\r' | sh" <"%SCRIPT_DIR%cmd_alcove-newcheck.sh"`;
     expect(
       deriveHelperInvocations(grown).map((entry) => entry.script),
-    ).toContain("cmd_psilink-newcheck.sh");
+    ).toContain("cmd_alcove-newcheck.sh");
   });
 
   it("reads nothing from a run that leaves the entrypoint alone", () => {
@@ -230,8 +230,8 @@ describe("the tripwires that keep an empty derivation from passing", () => {
   it("refuses launchers that read different verdict versions", () => {
     expect(() =>
       deriveVerdictVersion({
-        "Start-Psilink.ps1": "$PsilinkVerdictVersion = 2",
-        "start-psilink.sh": "PSILINK_VERDICT_VERSION='1'",
+        "Start-Alcove.ps1": "$AlcoveVerdictVersion = 2",
+        "start-alcove.sh": "ALCOVE_VERDICT_VERSION='1'",
       }),
     ).toThrow(/disagree/);
   });
@@ -239,8 +239,8 @@ describe("the tripwires that keep an empty derivation from passing", () => {
   it("refuses a launcher whose version declaration it cannot find", () => {
     expect(() =>
       deriveVerdictVersion({
-        "Start-Psilink.ps1": "",
-        "start-psilink.sh": "PSILINK_VERDICT_VERSION='1'",
+        "Start-Alcove.ps1": "",
+        "start-alcove.sh": "ALCOVE_VERDICT_VERSION='1'",
       }),
     ).toThrow(/extraction pattern rotted/);
   });

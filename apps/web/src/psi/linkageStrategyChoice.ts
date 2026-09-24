@@ -10,7 +10,7 @@
  * the same words.
  */
 
-import type { LinkageStrategy } from "@psilink/core";
+import type { LinkageStrategy } from "@alcove/core";
 
 /** The label the choice is offered under, matching the caption the terms panel
  * shows the selected value beside. */

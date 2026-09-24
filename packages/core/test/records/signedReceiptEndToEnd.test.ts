@@ -843,7 +843,7 @@ test.each([
     }
     expect(thrown).toBeInstanceOf(OperatorConfigError);
     const message = (thrown as Error).message;
-    expect(message).toContain("psilink fingerprint --force --identity");
+    expect(message).toContain("alcove fingerprint --force --identity");
     expect(message).toContain("re-pin the new fingerprint");
     expect(message).not.toContain("linkage_terms.identity to the name on the");
     expect(message).not.toContain(boundLabel);
@@ -2226,10 +2226,10 @@ describe("a partner payload holding a lone surrogate is refused at the wire sche
     const receipt = resInit.signedReceipt!;
     expect(signedHalf(resResp.signedReceipt)).toEqual(signedHalf(receipt));
     expect(receipt.content.initiatorToResponderPayload).toBe(
-      "q5b2XIyMH1ps6ViDniNujF6o_hYFS5VArRScrdMwxeg",
+      "yDqnxNvZAGUxKf8onSz11e3L4j528KnMcDsL-8hO6BY",
     );
     expect(receipt.content.responderToInitiatorPayload).toBe(
-      "FtC6GHClWSbJeQowI_k_ncnqjJEYlcD7lbRIEfE5MvA",
+      "GphATuLR3vWcpYL2V4LiVlQDJVHD3fMjAbfepXJ4Lek",
     );
     expect(resInit.audit?.record.outcome).toBe("completed");
     expect(resResp.audit?.record.outcome).toBe("completed");

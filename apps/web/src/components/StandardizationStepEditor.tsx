@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 
 import { Select, Stack, Text, VisuallyHidden } from "@mantine/core";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import { functionDisplay } from "@psi/standardizationAuthoring";
 
 import { StepListEditor } from "@components/StepListEditor";
 
-import type { StandardizationStep } from "@psilink/core";
+import type { StandardizationStep } from "@alcove/core";
 
 /** Debounce (ms) before the step-list summary is announced to assistive tech, so a
  * burst of add/remove/reorder edits announces once rather than on every action. The

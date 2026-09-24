@@ -5,7 +5,7 @@ import {
   decideLinkageTermsVerdict,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { disclosedColumnNames } from "@psi/metadataEditing";
 
@@ -39,7 +39,7 @@ import {
 
 import { CONTROLS_ONLY_HEADER_PROFILE } from "../../utils/unnamedColumnProfiles";
 
-import type { LinkageStrategy } from "@psilink/core";
+import type { LinkageStrategy } from "@alcove/core";
 
 import type {
   DirectFileState,

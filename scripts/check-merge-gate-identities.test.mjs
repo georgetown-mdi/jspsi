@@ -574,21 +574,21 @@ describe("rule 3: every workflow declaring a required job is listed", () => {
 describe("repository resolution", () => {
   it("reads the slug out of either remote spelling", () => {
     for (const remote of [
-      "git@github.com:georgetown-mdi/jspsi.git",
-      "git@github.com:georgetown-mdi/jspsi",
-      "https://github.com/georgetown-mdi/jspsi.git",
-      "https://github.com/georgetown-mdi/jspsi/",
-      "ssh://git@github.com/georgetown-mdi/jspsi.git",
-      "  https://token@github.com/georgetown-mdi/jspsi.git\n",
+      "git@github.com:georgetown-mdi/alcove.git",
+      "git@github.com:georgetown-mdi/alcove",
+      "https://github.com/georgetown-mdi/alcove.git",
+      "https://github.com/georgetown-mdi/alcove/",
+      "ssh://git@github.com/georgetown-mdi/alcove.git",
+      "  https://token@github.com/georgetown-mdi/alcove.git\n",
     ]) {
-      expect(parseRepositorySlug(remote)).toBe("georgetown-mdi/jspsi");
+      expect(parseRepositorySlug(remote)).toBe("georgetown-mdi/alcove");
     }
   });
 
   it("reads no slug out of a remote naming no github.com repository", () => {
     for (const remote of [
-      "git@gitlab.com:georgetown-mdi/jspsi.git",
-      "/srv/git/jspsi.git",
+      "git@gitlab.com:georgetown-mdi/alcove.git",
+      "/srv/git/alcove.git",
       "https://github.com/georgetown-mdi",
       "",
       undefined,

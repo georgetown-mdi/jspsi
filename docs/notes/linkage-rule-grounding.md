@@ -76,7 +76,7 @@ all.
 
 ### HUD HMIS is a collection and export standard, not a matching standard
 
-The standard psilink's primary user class exports from defines **what is
+The standard Alcove's primary user class exports from defines **what is
 collected and how it is coded**, and by design does not define how records are
 matched. Its nearest approach is the Personal Identifier element, which names a
 candidate field pool -- Name, Social Security Number, Date of Birth, Race and
@@ -160,7 +160,7 @@ warns the other way: "More data do not necessarily mean better patient matching
 results ... traits with poor validity and comparability may cause a decrease in
 matching performance."
 
-Its second table is the closest published measurement to a psilink cascade rung.
+Its second table is the closest published measurement to an Alcove cascade rung.
 Seven trait combinations were scored for completeness (the share of records
 having every trait) and uniqueness (the share of matches resolving to a single
 person):
@@ -189,7 +189,7 @@ element", which its own body text contradicts ten pages earlier -- phone
 verification "is still limited in its ability to improve matching because
 patients may change numbers, share them with other individuals, or fail to
 effectively respond to requests for verification" -- and which its own finding on
-the population psilink serves contradicts harder: of 421 homeless adults studied
+the population Alcove serves contradicts harder: of 421 homeless adults studied
 in 2017, 94% owned a cellphone, but "most had experienced high phone and phone
 number turnover in the preceding three months".
 
@@ -294,7 +294,7 @@ keys at all: "The exact details of the obfuscation or the data elements used are
 not specified by this IG", and "The exact procedures for determining a match are
 not specified in this implementation guide."
 
-All three treat a missing field the same way psilink does -- the property that
+All three treat a missing field the same way Alcove does -- the property that
 makes the two-party restatement below work: a missing or invalid field yields
 **no token for every key that uses it**, never a null value or a downweighted
 comparison. The N3C guide states it with a worked example -- if only gender is
@@ -769,7 +769,7 @@ parameters of interest".
 
 So the bar below is a **measurement and disclosure obligation** -- what must be
 measured, on what, and reported alongside -- and not a threshold. Any numeric
-pass-mark psilink adopts would be psilink's own invention, defensible only by an
+pass-mark Alcove adopts would be Alcove's own invention, defensible only by an
 argument about the harm of a false match in this setting, and this note does not
 propose one.
 
@@ -779,7 +779,7 @@ validation study and "none of the studies provided results of the validation
 exercises"; the review found that studies "often lacked sufficient details on the
 matching process for outside researchers to replicate", with statements about
 code availability "rarely available". The published Medicaid-claims-to-homeless-services
-match closest to psilink's own two-sector pairing does not state its matching
+match closest to Alcove's own two-sector pairing does not state its matching
 method at all -- no identifiers, no keys, no order, no match rate -- and its
 entire quality assessment is one clause: SSNs were unavailable, "although manual
 inspection of the matches indicates that those that matched appeared accurate".
@@ -888,7 +888,7 @@ guidance, and they are additions this note proposes rather than citations:
 - **Emit the per-key attribution the reporting guidance asks for.** The guidance
   asks the linker to attach to each pair "the step in the algorithm at which the
   records were linked (e.g. pass-identifier)", and to make available "descriptions
-  of how the linkage was done" and error estimates alongside. psilink already
+  of how the linkage was done" and error estimates alongside. Alcove already
   runs and records per-key stages, so this is a disclosure question rather than a
   measurement one, and it is the input every downstream statistical correction
   for linkage error requires.
@@ -941,7 +941,7 @@ holding exchanged or published tokens **together with clear-text
 quasi-identifiers** -- a three-digit ZIP, a gender, a birth year -- or a
 plain-text database of similar frequency structure. Their key-design conclusions
 are quoted above where they bear on composition. Whether their threat model
-reaches a two-party PSI exchange is a question about psilink's protocol that this
+reaches a two-party PSI exchange is a question about Alcove's protocol that this
 note does not decide and should not be read as deciding.
 
 ## Sources

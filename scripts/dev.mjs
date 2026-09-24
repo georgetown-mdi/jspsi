@@ -2,7 +2,7 @@
 // Root dev loop: keep packages/core's dist in step with its sources for the
 // duration of a web dev session.
 //
-// The apps consume @psilink/core from its built dist/, never from its TypeScript
+// The apps consume @alcove/core from its built dist/, never from its TypeScript
 // sources, so an edit to core is invisible to a running dev server until someone
 // remembers `npm run build -w packages/core`. Nothing reports that: the app goes
 // on serving the previous build, and the only symptom is behavior that does not

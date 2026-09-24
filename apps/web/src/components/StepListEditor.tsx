@@ -25,7 +25,7 @@ import {
 } from "@tabler/icons-react";
 import { useIsomorphicEffect } from "@mantine/hooks";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import { sanitizeForDisplay } from "@alcove/core";
 
 import {
   INERT_COALESCE_ADVICE,
@@ -40,7 +40,7 @@ import {
   validateParamValue,
 } from "@psi/standardizationAuthoring";
 
-import type { StandardizationFunctionDescriptor } from "@psilink/core";
+import type { StandardizationFunctionDescriptor } from "@alcove/core";
 
 import type {
   ParamField,
@@ -249,7 +249,7 @@ function StepRow({
               data-testid="unrecognized-step-alert"
             >
               <Text size="xs">
-                psilink does not recognize this step&apos;s function, so its
+                Alcove does not recognize this step&apos;s function, so its
                 settings cannot be checked or edited. Remove the step.
               </Text>
             </Alert>

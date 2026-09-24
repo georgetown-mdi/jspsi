@@ -7,7 +7,7 @@ import {
   PARTNER_LABELLED_VALUE_BUDGET,
   replaceControlCharactersForDisplay,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   createFetchJobApiClient,
@@ -223,7 +223,7 @@ test("a stream-broke terminal reports the child's bytes outside its own copy", a
 });
 
 test("the child cannot open a cause link of the console's own chain", async () => {
-  // A rendered psilink chain is what the CLI writes to stderr, framing and all,
+  // A rendered Alcove chain is what the CLI writes to stderr, framing and all,
   // and the relay cannot tell that framing from a partner fragment inside it
   // spelling the same bytes. So the tail opens no link of its own: its line
   // break is replaced where the link is composed, and the whole tail arrives

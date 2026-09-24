@@ -2,7 +2,7 @@ import {
   HOST_KEY_FINGERPRINT_REGEX,
   parseBoundedJson,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { runCapturedCliChild } from "./capturedCliChild";
 

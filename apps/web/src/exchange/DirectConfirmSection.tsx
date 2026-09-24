@@ -14,7 +14,7 @@ import {
 import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
-import { LinkageStrategySchema, holdsPrivateKeyMaterial } from "@psilink/core";
+import { LinkageStrategySchema, holdsPrivateKeyMaterial } from "@alcove/core";
 
 import { InvitationTerms } from "@components/InvitationTerms";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
@@ -51,7 +51,7 @@ import {
   previewInferredTerms,
 } from "./directExchangeModel";
 
-import type { LinkageStrategy } from "@psilink/core";
+import type { LinkageStrategy } from "@alcove/core";
 import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 /**
@@ -204,7 +204,7 @@ export function DirectConfirmSection({
       <div>
         <h1 tabIndex={-1}>Confirm and run</h1>
         <Text size="sm" c="dimmed">
-          psilink read your file and inferred the terms below -- what your file
+          Alcove read your file and inferred the terms below -- what your file
           is expected to contribute. The exchange re-reads the file when it
           runs, so if you edit it after this preview the run uses the edited
           file (a mismatch stops the exchange before any records are compared).
@@ -317,7 +317,7 @@ export function DirectConfirmSection({
             framing={{
               heading: "Terms your file produces",
               intro:
-                "These are the terms psilink inferred from your own file. " +
+                "These are the terms Alcove inferred from your own file. " +
                 "There is no invitation for your partner to review or consent to.",
             }}
           />

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { MAX_NAME_LENGTH, MAX_TEXT_LENGTH } from "@psilink/core";
+import { MAX_NAME_LENGTH, MAX_TEXT_LENGTH } from "@alcove/core";
 
 import {
   MAX_EXPECTED_PAYLOAD_COLUMNS,
@@ -16,7 +16,7 @@ import { jobJsonResponse } from "@jobs/gate";
 
 import { testSftpServerEntry, validSftpIntent } from "../../utils/jobFixtures";
 
-import type { Metadata, Standardization } from "@psilink/core";
+import type { Metadata, Standardization } from "@alcove/core";
 
 // The hand-off cap against the intent schema that decides what it must hold. The
 // template recomposes the create intent's own blocks, so a create the boundary

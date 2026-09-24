@@ -12,8 +12,8 @@ import {
   expect,
   test,
 } from "vitest";
-import { prepareForExchange, SHARED_SECRET_REGEX } from "@psilink/core";
-import type { ExchangeDataSpec, LinkageTerms } from "@psilink/core";
+import { prepareForExchange, SHARED_SECRET_REGEX } from "@alcove/core";
+import type { ExchangeDataSpec, LinkageTerms } from "@alcove/core";
 
 import { runProtocol, type ProtocolConnectionConfig } from "../../src/protocol";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
@@ -178,7 +178,7 @@ async function runAuthenticatedPair(
 let work: string;
 
 beforeEach(() => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-auth-integ-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-auth-integ-"));
 });
 
 afterEach(() => {

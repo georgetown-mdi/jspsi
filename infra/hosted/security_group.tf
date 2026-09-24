@@ -29,7 +29,7 @@ resource "aws_security_group" "origin" {
   }
 
   tags = {
-    Name = "jspsi-webserver"
+    Name = "alcove-webserver"
   }
 
   lifecycle {

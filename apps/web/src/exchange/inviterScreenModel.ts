@@ -50,7 +50,7 @@ import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { CsvDelimiterChoice } from "@components/csvDelimiterChoice";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 
-import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+import type { LinkageTerms, Metadata, Standardization } from "@alcove/core";
 import type { LoadedEnforcementRecords } from "@console/loadedConfig";
 import type { MountedConfigurationAnswer } from "@psi/jobClient/mountedConfigClient";
 import type { MountedConfigurationState } from "@console/mountedConfiguration";

@@ -14,7 +14,7 @@ import {
   safeParseLinkageTerms,
   summarizeInvitation,
   validateStandardizationAgainstTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   EMPTY_SAVE_FIELDS,
@@ -49,7 +49,7 @@ import type {
   AdvancedInviteSeed,
 } from "../../../src/psi/authoring/advancedInvite.js";
 
-import type { CSVRow, LinkageKey, LinkageTerms, Metadata } from "@psilink/core";
+import type { CSVRow, LinkageKey, LinkageTerms, Metadata } from "@alcove/core";
 
 /**
  * The guided path's opt-in matchable types: a column of a type no built-in key
@@ -987,7 +987,7 @@ describe("what a mint over an offered column hands the surfaces that keep it", (
     const minted = await mintFor(guidedDraft());
     const input = exchangeFileInputFor(
       "filedrop",
-      { ...EMPTY_SAVE_FIELDS, sharedDirectory: "/srv/psilink" },
+      { ...EMPTY_SAVE_FIELDS, sharedDirectory: "/srv/alcove" },
       minted,
     );
     expect(

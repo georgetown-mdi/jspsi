@@ -25,7 +25,7 @@ import { describe, expect, test } from "vitest";
 // - A class is identified by its DECLARATION -- file plus name, never the name
 //   alone -- and a name written in an `extends` clause or a `new` is resolved
 //   against what its file can see: that file's own declarations first, then its
-//   imports, following a relative specifier, `@psilink/core`, or the web app's
+//   imports, following a relative specifier, `@alcove/core`, or the web app's
 //   `@*` path mapping to the imported file and on through its `export *` and
 //   `export { ... } from` re-exports. A name that lands on more than one
 //   declaration fails the scan naming both rather than picking one.
@@ -83,7 +83,7 @@ const ROOT_MEMBER: DeclarationRef = {
 };
 
 // The core package entry: package.json's `exports` "." is the bundle rollup
-// builds from this module, so an `@psilink/core` import reads its re-exports.
+// builds from this module, so an `@alcove/core` import reads its re-exports.
 const CORE_ENTRY = "packages/core/src/main.ts";
 
 const WEB_TREE = "apps/web/src";
@@ -523,7 +523,7 @@ function resolveSpecifier(
   specifier: string,
   sources: ReadonlyMap<string, ts.SourceFile>,
 ): string | undefined {
-  if (specifier === "@psilink/core")
+  if (specifier === "@alcove/core")
     return sources.has(CORE_ENTRY) ? CORE_ENTRY : undefined;
   if (specifier.startsWith("."))
     return sourceAt(posix.join(posix.dirname(fromFile), specifier), sources);

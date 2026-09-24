@@ -6,7 +6,7 @@ import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 /**
  * `GET /api/jobs/:jobId/handoff` -- the recurring-run hand-off for a job: the
  * portable, secret-free material an operator needs to graduate a prototyped
- * console exchange to a scheduled `psilink` command-line run.
+ * console exchange to a scheduled `alcove` command-line run.
  *
  * Feature-gated and id-validated exactly like the other job routes (404 when the
  * API is off; loopback-only; no-store; no CORS). A malformed, unknown, deleted, or

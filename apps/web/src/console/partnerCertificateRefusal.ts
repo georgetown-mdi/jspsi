@@ -1,6 +1,6 @@
-import { PARTNER_CERTIFICATE_REFUSAL_MESSAGES } from "@psilink/core";
+import { PARTNER_CERTIFICATE_REFUSAL_MESSAGES } from "@alcove/core";
 
-import type { PartnerCertificateRefusalKind } from "@psilink/core";
+import type { PartnerCertificateRefusalKind } from "@alcove/core";
 
 /**
  * What the console says about each of the five refusals the terms-time
@@ -29,10 +29,10 @@ import type { PartnerCertificateRefusalKind } from "@psilink/core";
  */
 const CONSOLE_REFUSAL_COPY: Record<PartnerCertificateRefusalKind, string> = {
   unreadable:
-    "Your partner presented a signing certificate psilink cannot read, so the " +
+    "Your partner presented a signing certificate Alcove cannot read, so the " +
     "exchange stopped and sent none of your data: there was nothing to pin " +
     "and nothing to check a receipt against. Ask your partner to run " +
-    "'psilink fingerprint' and send you the identity it produces, then run " +
+    "'alcove fingerprint' and send you the identity it produces, then run " +
     "the exchange again. To exchange without a receipt instead, choose 'No " +
     "receipt' under what this exchange produces.",
   absent:
@@ -47,7 +47,7 @@ const CONSOLE_REFUSAL_COPY: Record<PartnerCertificateRefusalKind, string> = {
     "nothing was pinned, and the exchange stopped and sent none of your data: " +
     "a certificate that is not internally consistent could never sign a " +
     "receipt this exchange would accept. Ask your partner to run " +
-    "'psilink fingerprint' and send you the identity it produces, then run " +
+    "'alcove fingerprint' and send you the identity it produces, then run " +
     "the exchange again.",
   unauthorizedIdentity:
     "Your partner's signing certificate does not cover the name they agreed " +
@@ -62,7 +62,7 @@ const CONSOLE_REFUSAL_COPY: Record<PartnerCertificateRefusalKind, string> = {
     "fingerprint you entered is unchanged. Confirm the value with your " +
     "partner over a channel you trust -- a phone call, not the same email as " +
     "the invitation -- and they produce it by running " +
-    "'psilink fingerprint'. Where they have made a new signing identity, " +
+    "'alcove fingerprint'. Where they have made a new signing identity, " +
     "replace the value under your partner's fingerprint before you run again.",
 };
 

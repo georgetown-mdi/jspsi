@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   DISPLAY_TRUNCATION_MARKER,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { appendSanitizedRunWarning } from "@psi/runWarnings";
 

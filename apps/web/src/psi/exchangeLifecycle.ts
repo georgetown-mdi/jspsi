@@ -5,7 +5,7 @@ import {
   describeResolvedRunShape,
   getLogger,
   runExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { authenticateExchange } from "./authenticateExchange";
 import { createBrowserPsiEngineFactory } from "./workers/psiCryptoController";
@@ -24,7 +24,7 @@ import type {
   ProcessState,
   PsiProgress,
   ResolvedMatching,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 const log = getLogger("exchangeLifecycle");
@@ -247,7 +247,7 @@ interface CountOnlyExchangeOutputs extends ExchangeOutputsBase {
   kind: "counted";
   intersectionCount: number;
   /** Whether the count arrived as the PARTNER's report rather than as a figure this
-   * party computed (`countIsPartnerReported` in `@psilink/core`). The sender seat of
+   * party computed (`countIsPartnerReported` in `@alcove/core`). The sender seat of
    * a both-entitled count-only run reads a number it cannot check, so the UI shows
    * the trust-contingent caveat; the receiver computed its own and does
    * not. */

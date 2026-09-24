@@ -35,7 +35,7 @@ import {
   canonicalString,
   isDisclosedToPartner,
   partnerBoundTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { OPT_IN_TOKEN_MAX_AGE_DAYS } from "@psi/tokenMaxAge";
 import { OWN_COLUMNS_DEFAULT } from "@psi/ownColumnsModel";
@@ -64,7 +64,7 @@ import type {
   Metadata,
   OutboundPayloadConsent,
   Standardization,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   DisclosedExchangeDocument,
   DisclosedFileSyncOptions,

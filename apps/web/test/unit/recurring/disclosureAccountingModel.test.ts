@@ -5,7 +5,7 @@ import {
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
   UNNAMED_PARTY_LABEL,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   DISCLOSED_AT_LABEL,
@@ -31,7 +31,7 @@ import { disclosureRecord } from "../../utils/disclosureFixtures.js";
 
 import type { DisclosureAccounting } from "../../../src/psi/disclosureAccounting.js";
 import type { DisclosureFact } from "../../../src/recurring/disclosureAccountingModel.js";
-import type { ExchangeRecord } from "@psilink/core";
+import type { ExchangeRecord } from "@alcove/core";
 
 /**
  * The accounting of disclosures as a reader meets it: the per-run facts on screen
@@ -833,7 +833,7 @@ describe("the exported accounting", () => {
   test("names the download by the export instant", () => {
     expect(
       disclosureAccountingFileName(new Date("2026-08-20T12:30:00.000Z")),
-    ).toBe("psilink-disclosures-2026-08-20T12-30-00-000Z.csv");
+    ).toBe("alcove-disclosures-2026-08-20T12-30-00-000Z.csv");
   });
 });
 
@@ -848,14 +848,14 @@ describe("the stored accounting as a recovery file", () => {
    * own fields, under a version this build does not admit. */
   const storedEntries: ReadonlyArray<unknown> = [
     {
-      version: "psilink-exchange-record/v-moved",
+      version: "alcove-exchange-record/v-moved",
       createdAt: "2026-07-01T09:00:00.000Z",
       partnerIdentity: "Riverbend Schools",
       recordsExposed: 11,
       fieldTheFormatNoLongerCarries: ["kept anyway"],
     },
     {
-      version: "psilink-exchange-record/v-moved",
+      version: "alcove-exchange-record/v-moved",
       createdAt: "2026-08-01T09:00:00.000Z",
       partnerIdentity: "Falls County Clinic",
       recordsExposed: 23,
@@ -906,7 +906,7 @@ describe("the stored accounting as a recovery file", () => {
     const exportedAt = new Date("2026-08-20T12:30:00.000Z");
 
     expect(storedDisclosureAccountingFileName(exportedAt)).toBe(
-      "psilink-disclosures-stored-2026-08-20T12-30-00-000Z.json",
+      "alcove-disclosures-stored-2026-08-20T12-30-00-000Z.json",
     );
     // Two forms of one accounting must not land in a downloads folder under one
     // name: only one of them is a reading a compliance reader can rely on.

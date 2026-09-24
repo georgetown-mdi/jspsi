@@ -4,7 +4,7 @@ import path from "node:path";
 import { expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
 import { logLevelFlag } from "../../../src/util/logging";
 import {

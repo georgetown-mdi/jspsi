@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { decodeInvitation } from "@psilink/core";
+import { decodeInvitation } from "@alcove/core";
 
 import { acquireManagedInput } from "@psi/managed/managedInputHandle";
 import { generateInvitation } from "@psi/invitation";
@@ -121,7 +121,7 @@ describe("the invitation mint's own re-parse", () => {
 
 describe("the console's profile behind the direct-exchange and picker seats", () => {
   test("reports the stripped names and the positions over the wire", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bidi-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bidi-"));
     dirs.push(dir);
     fs.writeFileSync(path.join(dir, "input.csv"), CSV, "utf8");
 
@@ -139,7 +139,7 @@ describe("a header that leaves a column unnamed", () => {
   /** Profile `content` as a mounted input, returning the fields the console
    * seats' stubs fix. */
   async function profileOf(content: string) {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bidi-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bidi-"));
     dirs.push(dir);
     fs.writeFileSync(path.join(dir, "input.csv"), content, "utf8");
     const profile = await profileJobInput(dir, "input.csv");

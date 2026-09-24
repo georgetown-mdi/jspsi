@@ -4,7 +4,7 @@ title: "What a connect timeout bounds: one attempt or the whole dial"
 
 # What a connect timeout bounds: one attempt or the whole dial
 
-_Status: decided and built. psilink's connect budget bounds one attempt, as
+_Status: decided and built. Alcove's connect budget bounds one attempt, as
 `curl --connect-timeout` and OpenSSH's `ConnectTimeout` do; `probe-host-key`
 dials once, so its `--connect-timeout` is the whole wait, plus at most two
 further seconds diagnosing a dial that fails before the peer identifies
@@ -27,7 +27,7 @@ unattended dial need a total budget distinct from the per-attempt one?
 
 All figures 2026-09-21, on the development container.
 
-### psilink, against the in-process SFTP harness
+### Alcove, against the in-process SFTP harness
 
 The endpoint accepts the TCP connection and then never completes the SSH
 handshake (`stallHandshakeOnConnect`), which is what a dropped or black-holed
@@ -87,12 +87,12 @@ container, and its semantics are not asserted here from memory.
 
 **The exchange's connect budget stays per-attempt.** Both comparable tools bound
 an attempt, and both express the total as the pair -- a per-attempt bound times
-an attempt count the caller sets. Redefining psilink's flag to bound the whole
+an attempt count the caller sets. Redefining Alcove's flag to bound the whole
 dial would put a flag spelled like theirs on semantics neither has, and would
 make the last attempt of a dial get whatever remained of the budget, which is a
 worse failure to report than a clean per-attempt expiry.
 
-**No new total-budget setting is added, because psilink already has the pair.**
+**No new total-budget setting is added, because Alcove already has the pair.**
 `max_reconnect_attempts` is the attempt count, `0` is a valid value, and both
 are settable from the configuration and the command line. An unattended run
 that wants its stated budget to be the whole budget sets it to 0, exactly as a

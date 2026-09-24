@@ -5,8 +5,8 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import yargs from "yargs";
-import { prepareForExchange, UNNAMED_PARTY_LABEL } from "@psilink/core";
-import type { ExchangeSpec } from "@psilink/core";
+import { prepareForExchange, UNNAMED_PARTY_LABEL } from "@alcove/core";
+import type { ExchangeSpec } from "@alcove/core";
 
 import {
   builder as exchangeBuilder,
@@ -23,7 +23,7 @@ import { DEFAULT_RECORD_BASENAME, keysPathFor } from "../../../src/recordFile";
 import { captureStdio } from "../../loggingTestSupport";
 
 // Net-new coverage: the per-command-handler wiring that turns the default-on
-// audit record into files on disk. `psilink exchange` and the zero-setup
+// audit record into files on disk. `alcove exchange` and the zero-setup
 // command each default `--record` to true and pass resolveRecordOutput(...)
 // into the shared runProtocol write path -- already covered elsewhere
 // (recordFile.test.ts, protocol.test.ts, exchangeRecord*.test.ts,
@@ -44,7 +44,7 @@ import { captureStdio } from "../../loggingTestSupport";
 // Each exchange needs two parties to complete, but only the ASSERTED party
 // runs with the default record on; its peer runs the same command with
 // --no-record, so exactly one default record lands with no path collision.
-// The default record path is `./psilink-record-<stamp>.json` relative to
+// The default record path is `./alcove-record-<stamp>.json` relative to
 // process cwd, so each test runs from its per-test work dir (chdir in
 // beforeEach, restored in afterEach) so afterEach cleans up the artifact.
 //
@@ -99,17 +99,17 @@ const PROVISION_ROWS = [
   },
 ];
 
-const RECORD_VERSION = "psilink-exchange-record/v8";
+const RECORD_VERSION = "alcove-exchange-record/v9";
 
 let work: string;
 let originalCwd: string;
 let exitSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 beforeEach(() => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-cmd-record-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-cmd-record-"));
   originalCwd = process.cwd();
   // Run from the work dir so the asserted party's default record
-  // (`./psilink-record-*.json`, resolved against cwd) lands here and is
+  // (`./alcove-record-*.json`, resolved against cwd) lands here and is
   // cleaned up with it, while still passing no --record-file. Done here, not
   // inline in each test, so the chdir pairs one-to-one with its afterEach
   // restore. (cwd is process-global, so these tests are not safe to run
@@ -145,7 +145,7 @@ afterEach(() => {
 // error already rejects via the trapped process.exit above.
 async function runCli(argv: string[]): Promise<void> {
   await yargs(argv)
-    .scriptName("psilink")
+    .scriptName("alcove")
     .command("$0", "zero-setup exchange", zeroSetupBuilder, zeroSetupHandler)
     .command("exchange <input> [output]", "", exchangeBuilder, exchangeHandler)
     .exitProcess(false)
@@ -255,7 +255,7 @@ test("exchange: a default-flag run writes the default audit record and keys file
     linkageTerms: prepared.linkageTerms,
     metadata: prepared.metadata,
   };
-  const configFile = path.join(work, "psilink.yaml");
+  const configFile = path.join(work, "alcove.yaml");
   saveConfig(configFile, spec);
   const keyA = path.join(work, "a.key");
   const keyB = path.join(work, "b.key");
@@ -361,7 +361,7 @@ describe("zero-setup", () => {
     // the named party's own label present and its partner's field absent, and
     // the mirror on the other side -- and each side's terms-agreed line names
     // the partner it actually got, the unnamed one as an absence, not a label
-    // psilink picked.
+    // Alcove picked.
     const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
     const url = pathToFileURL(dropDir).href;
     const inputA = path.join(work, "named-input.csv");

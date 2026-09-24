@@ -8,7 +8,7 @@ import type {
   ExchangeResult,
   MessageConnection,
   PreparedExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 
 /**
  * `runProtocol`'s webrtc dispatch: the branch that runs the exchange over a data
@@ -47,8 +47,8 @@ vi.mock("@openmined/psi.js", () => ({
 // initiator/responder handshake completes over it. Capture the info lines (one
 // of them is asserted below), silence the rest, and stub the PSI exchange, which
 // would otherwise need the WASM stack and a dataset.
-vi.mock("@psilink/core", async (importActual) => {
-  const actual = await importActual<typeof import("@psilink/core")>();
+vi.mock("@alcove/core", async (importActual) => {
+  const actual = await importActual<typeof import("@alcove/core")>();
   const stubLinkageTerms = actual.getDefaultLinkageTerms("Acceptor");
   return {
     ...actual,
@@ -153,7 +153,7 @@ const {
   getDefaultLinkageTerms,
   mintRunRelayCredential,
   sanitizeErrorForDisplay,
-} = await import("@psilink/core");
+} = await import("@alcove/core");
 
 /**
  * A pair of connections wired to each other: what one sends the other receives,
@@ -226,7 +226,7 @@ const interopVectors = JSON.parse(
 let tmpDir: string;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-webrtc-dispatch-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-webrtc-dispatch-"));
   pair = linkedPair();
   mockState.dials.length = 0;
   mockState.handshakes.length = 0;
@@ -244,7 +244,7 @@ const BROKER_HOST = "peers.example.org";
 /** The relay source a `relay` policy needs; the schema refuses it without one. */
 const RELAY_TURN = {
   url: "turns:relay.example.org:443?transport=tcp",
-  username: "psilink",
+  username: "alcove",
   credential: "placeholder-not-a-secret",
 };
 
@@ -550,7 +550,7 @@ test("a webrtc run with no shared secret is refused, naming the rendezvous", asy
     }),
   ).rejects.toThrow(UsageError);
   expect(WEBRTC_RENDEZVOUS_SECRET_REQUIRED).toContain("shared secret");
-  expect(WEBRTC_RENDEZVOUS_SECRET_REQUIRED).toContain("psilink invite");
+  expect(WEBRTC_RENDEZVOUS_SECRET_REQUIRED).toContain("alcove invite");
   // Nothing was dialed: the resolution runs before the transport is touched.
   expect(mockState.dials).toHaveLength(0);
 });
@@ -845,7 +845,7 @@ test("a minting run whose peer_timeout_ms is under the credential lifetime ends 
     },
     SECRET,
     {
-      username: "1767229200:psilink",
+      username: "1767229200:alcove",
       credential: "bWludGVk",
       expiresAt: new Date("2026-01-01T01:00:00Z"),
     },
@@ -891,7 +891,7 @@ test("ice_transport_policy reaches the rendezvous", () => {
       turn: [
         {
           url: "turns:relay.example.org:443?transport=tcp",
-          username: "psilink",
+          username: "alcove",
           credential: "placeholder-not-a-secret",
         },
       ],

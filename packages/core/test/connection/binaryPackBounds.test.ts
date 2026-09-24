@@ -169,7 +169,7 @@ function ceilingScaleIndex(records: number, i: number): number {
  * shapes below measures 3.5. */
 const MIN_CEILING_HEADROOM = 3;
 
-/** The three largest legitimate non-binary shapes psilink puts on the data channel,
+/** The three largest legitimate non-binary shapes Alcove puts on the data channel,
  * built per record with the real packer under a hand-written array32 header so a
  * record count too large for `pack`'s per-element recursion still assembles. */
 const RECORD_SHAPES: Array<RecordShape> = [

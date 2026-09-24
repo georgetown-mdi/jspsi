@@ -61,7 +61,7 @@ describe("terminal transport/directory error taxonomy", () => {
     const err = new FrameSizeExceededError("inbound frame exceeds the cap");
     expect(err).toBeInstanceOf(UsageError);
     expect(err.name).toBe("FrameSizeExceededError");
-    expect(err.psilinkRecoveryHintEmitted).toBe(true);
+    expect(err.alcoveRecoveryHintEmitted).toBe(true);
     expect(err.message).toBe("inbound frame exceeds the cap");
     expect(recoveryStepOf(err)).toContain("contact your partner");
   });
@@ -72,7 +72,7 @@ describe("terminal transport/directory error taxonomy", () => {
     );
     expect(err).toBeInstanceOf(UsageError);
     expect(err.name).toBe("DirectoryListingBoundsError");
-    expect(err.psilinkRecoveryHintEmitted).toBe(true);
+    expect(err.alcoveRecoveryHintEmitted).toBe(true);
     expect(err.message).toBe("directory has too many entries");
     expect(recoveryStepOf(err)).toContain("dedicated to a single exchange");
   });
@@ -81,7 +81,7 @@ describe("terminal transport/directory error taxonomy", () => {
     const err = new TransportOperationStalledError("SFTP read stalled");
     expect(err).toBeInstanceOf(UsageError);
     expect(err.name).toBe("TransportOperationStalledError");
-    expect(err.psilinkRecoveryHintEmitted).toBe(true);
+    expect(err.alcoveRecoveryHintEmitted).toBe(true);
     expect(err.message).toBe("SFTP read stalled");
     expect(recoveryStepOf(err)).toContain("then retry");
   });
@@ -101,8 +101,8 @@ describe("errors left without a recovery hint", () => {
     expect(err).toBeInstanceOf(UsageError);
     expect(err.name).toBe("BilateralModeMismatchError");
     expect(
-      (err as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted,
+      (err as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
     ).toBeUndefined();
     expect(err.message).toBe(message);
   });
@@ -115,8 +115,8 @@ describe("errors left without a recovery hint", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(UsageError);
     expect(
-      (err as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted,
+      (err as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
     ).toBeUndefined();
   });
 });
@@ -127,7 +127,7 @@ describe("the internal fault's recovery hint", () => {
     // re-inviting" advisory at the raise site -- mid-data-exchange, after the
     // handshake rotated the secret. It sits on the CLASS because every
     // internal fault takes the same step, and the one raise site's message
-    // states it (pinned in psiLink.test.ts). Not a UsageError: the boundary
+    // states it (pinned in link.test.ts). Not a UsageError: the boundary
     // maps this class to exit 70, not the 64 that would send the operator to
     // an input the single-pass ceiling gate already cleared.
     const err = new InternalConsistencyError(
@@ -138,7 +138,7 @@ describe("the internal fault's recovery hint", () => {
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(UsageError);
     expect(err.name).toBe("InternalConsistencyError");
-    expect(err.psilinkRecoveryHintEmitted).toBe(true);
+    expect(err.alcoveRecoveryHintEmitted).toBe(true);
   });
 });
 
@@ -161,8 +161,8 @@ describe("errors whose recovery hint is per instance, not per class", () => {
     expect(err.name).toBe("TransportPublishIndeterminateError");
     expect(err.cause).toBe(cause);
     expect(
-      (err as { psilinkRecoveryHintEmitted?: unknown })
-        .psilinkRecoveryHintEmitted,
+      (err as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
     ).toBeUndefined();
   });
 });
@@ -227,7 +227,7 @@ describe("isPeerWaitTimeout cause-chain walk", () => {
       new Error("synchronization has timed out"),
     );
     const middle = new Error("the exchange failed", { cause: tagged });
-    const outer = new Error("psilink exited", { cause: middle });
+    const outer = new Error("Alcove exited", { cause: middle });
 
     expect(isPeerWaitTimeout(outer)).toBe(true);
     // The tag is the only own enumerable property markPeerWaitTimeout adds, and
@@ -297,7 +297,7 @@ describe("PeerAbortError exemplar (unchanged)", () => {
     // to meet.
     const err = new PeerAbortError();
     expect(err.name).toBe("PeerAbortError");
-    expect(err.psilinkRecoveryHintEmitted).toBe(true);
+    expect(err.alcoveRecoveryHintEmitted).toBe(true);
     expect(err.message).toContain(
       "Contact your partner, who holds the specific error locally.",
     );

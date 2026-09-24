@@ -12,7 +12,7 @@ import {
   test,
   vi,
 } from "vitest";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import {
   selectedBackend,
@@ -116,7 +116,7 @@ function createKexinitReader(): {
   });
 
   const server = net.createServer((socket) => {
-    socket.write("SSH-2.0-psilink-kexinit-reader\r\n");
+    socket.write("SSH-2.0-alcove-kexinit-reader\r\n");
     let buffered = Buffer.alloc(0);
     let identificationConsumed = false;
     socket.on("data", (chunk: Buffer) => {
@@ -171,7 +171,7 @@ function createDisconnectingServer(description: string): {
     return encoded;
   };
   const server = net.createServer((socket) => {
-    socket.write("SSH-2.0-psilink-disconnecting-listener\r\n");
+    socket.write("SSH-2.0-alcove-disconnecting-listener\r\n");
     socket.once("data", () => {
       const reason = Buffer.from(description, "utf8");
       const payload = Buffer.concat([
@@ -300,9 +300,9 @@ describe("the key-exchange offer on the wire", () => {
   });
 
   test("the constraint subtracts from ssh2's offer and adds nothing to it", () => {
-    // psilink owns the subtraction; ssh2 keeps ownership of which algorithms
+    // Alcove owns the subtraction; ssh2 keeps ownership of which algorithms
     // exist and in what order. Anything the adapter offered that ssh2 would not
-    // have would be psilink choosing a key-exchange algorithm.
+    // have would be Alcove choosing a key-exchange algorithm.
     expect(constrained.every((name) => bare.includes(name))).toBe(true);
     expect(constrained).toEqual(bare.filter((name) => !/25519/i.test(name)));
   });
@@ -363,11 +363,11 @@ describe("the offer shapes an operator's own algorithms.kex takes", () => {
   });
 });
 
-describe("what ssh2 makes of a kex value psilink must not forward", () => {
+describe("what ssh2 makes of a kex value Alcove must not forward", () => {
   // The measured ssh2 behaviour the refusal and the empty-list replacement exist
   // for: these values are treated as *unspecified* and restore the full defaults,
   // X25519 included. Driven against bare ssh2 because the constraint's whole job
-  // is that they never reach it from psilink.
+  // is that they never reach it from Alcove.
   let bare: string[];
 
   beforeAll(async () => {
@@ -584,7 +584,7 @@ describe("a server that accepts only algorithms this process cannot perform", ()
     // the server's own SSH_MSG_DISCONNECT description, so a server writes it
     // verbatim -- and reaches the same diagnostic anyway by restricting its offer
     // as the case above does, with no message control at all. What the match must
-    // not do is let the server's bytes into psilink's own advice: the top-level
+    // not do is let the server's bytes into Alcove's own advice: the top-level
     // message is composed from constants, and the server's text stays one cause
     // link down, where the display sink escapes it.
     const marker = "SERVER SUPPLIED THIS";

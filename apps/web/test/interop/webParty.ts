@@ -10,7 +10,7 @@ import {
   loadPsiBackend,
   prepareForExchange,
   runExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
@@ -31,7 +31,7 @@ import type {
   HandshakeRole,
   MessageConnection,
   PreparedExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 /** The CSV a party links on, parsed through the same core reader both runtimes

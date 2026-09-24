@@ -13,7 +13,7 @@ import {
   encodeInvitation,
   endpointRequiresRetainedFiles,
   generateSharedSecret,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   ACCEPT_UNSUPPORTED_TITLE,
@@ -40,7 +40,7 @@ import type {
   ConnectionEndpoint,
   InvitationToken,
   LinkageTerms,
-} from "@psilink/core";
+} from "@alcove/core";
 import type { JobHandoff } from "@jobs/handoff";
 
 // This suite exercises the CONSOLE acceptor seat: the accurate unsupported-shape
@@ -111,7 +111,7 @@ async function encodeToken(endpoint: ConnectionEndpoint): Promise<string> {
 // refuse it rather than assert a (mock-only) successful run.
 const FILEDROP_ENDPOINT: ConnectionEndpoint = {
   channel: "filedrop",
-  path: "/drops/psilink",
+  path: "/drops/alcove",
 };
 // The split shape of the same invitation: the inviting party's inbound and outbound
 // folders. An accept runs over the mounts on THIS console rather than these paths,
@@ -119,8 +119,8 @@ const FILEDROP_ENDPOINT: ConnectionEndpoint = {
 // is stated from the inviter's side, which is why neither path is shown to this seat.
 const SPLIT_FILEDROP_ENDPOINT: ConnectionEndpoint = {
   channel: "filedrop",
-  inboundPath: "/drops/psilink-in",
-  outboundPath: "/drops/psilink-out",
+  inboundPath: "/drops/alcove-in",
+  outboundPath: "/drops/alcove-out",
 };
 const WEBRTC_ENDPOINT: ConnectionEndpoint = {
   channel: "webrtc",
@@ -356,8 +356,8 @@ describe("console acceptor shared-folder confirmation", () => {
     expect(alertText).toContain("the other way round");
     // The invitation's own paths name the INVITER's folders, so this seat renders
     // neither -- the same rule the single-folder confirmation holds.
-    expect(alertText).not.toContain("/drops/psilink-in");
-    expect(alertText).not.toContain("/drops/psilink-out");
+    expect(alertText).not.toContain("/drops/alcove-in");
+    expect(alertText).not.toContain("/drops/alcove-out");
   });
 
   test("asks for the same two-folder confirmation where this console cannot name its mounts", async () => {
@@ -825,7 +825,7 @@ describe("console acceptor re-attaches on a busy create", () => {
     usedSigningIdentity: false,
     template: {
       kind: "config",
-      argv: ["psilink", "exchange", "input.csv", "results.csv"],
+      argv: ["alcove", "exchange", "input.csv", "results.csv"],
       yaml: "connection:\n  channel: filedrop\n  path: /mnt/rendezvous\n",
     },
   } satisfies JobHandoff;
@@ -1093,7 +1093,7 @@ describe("console acceptor recoveries against the run's exchange record", () => 
     await expect
       .element(
         page.getByRole("link", {
-          name: `Download record (safe to share): psilink-record-${RECORD_STAMP}.json`,
+          name: `Download record (safe to share): alcove-record-${RECORD_STAMP}.json`,
         }),
       )
       .toBeInTheDocument();

@@ -11,7 +11,7 @@ import {
   UsageError,
   assertLocalCertificateAuthorizesAgreedIdentity,
   assertSigningModeImplemented,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   EVENT_RESULT_CLUSTER_SHAPES_MAX,
@@ -459,7 +459,7 @@ test("marks a terminal error that states its own next step", () => {
         "confirm the fingerprint out-of-band",
       "security",
     ),
-    { psilinkRecoveryHintEmitted: true },
+    { alcoveRecoveryHintEmitted: true },
   );
   expect(buildErrorEvent(selfExplaining, "run").recoveryHint).toBe(true);
 });
@@ -467,7 +467,7 @@ test("marks a terminal error that states its own next step", () => {
 test("the marker survives a wrap, since the wrapped message still states it", () => {
   const wrapped = new Error("the exchange stopped", {
     cause: Object.assign(new Error("re-share an identity"), {
-      psilinkRecoveryHintEmitted: true,
+      alcoveRecoveryHintEmitted: true,
     }),
   });
   expect(buildErrorEvent(wrapped, "run").recoveryHint).toBe(true);
@@ -511,7 +511,7 @@ test("classifies every other failure as exchange", () => {
 
 test("classifies a run-phase InternalConsistencyError as exchange", () => {
   // The class the single-pass send-time reply-cap safety check raises (pinned
-  // as what a triggered safety check throws in core's psiLink.test.ts). The
+  // as what a triggered safety check throws in core's link.test.ts). The
   // four categories have no internal-fault member, so it lands in the default
   // bucket beside the retryable transport faults; the exit code (70, pinned in
   // cli.test.ts) is where a supervisor sees the difference -- the mirror of a

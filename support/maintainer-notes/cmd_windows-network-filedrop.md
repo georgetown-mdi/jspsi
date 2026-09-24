@@ -1,6 +1,6 @@
 # Maintainer notes: the Command Prompt file-drop setup on Windows
 
-Notes on `cmd_Setup-PsilinkFileDrop.cmd` and its three container-side scripts in
+Notes on `cmd_Setup-AlcoveFileDrop.cmd` and its three container-side scripts in
 [`support/windows-network-filedrop`](../windows-network-filedrop/README.md).
 They live outside that folder for the same reason the PowerShell notes do: the
 guide is handed to an operator as a unit, and what is here -- what is
@@ -14,7 +14,7 @@ only what is different because the script is a batch file.
 
 ## Why there is a second script
 
-`Setup-PsilinkFileDrop.ps1` cannot run where Windows PowerShell is absent or
+`Setup-AlcoveFileDrop.ps1` cannot run where Windows PowerShell is absent or
 blocked. The guide already had a section for the blocked case, but its advice
 was to do the work by hand using PowerShell commands, which is no help on a
 machine where PowerShell is the obstacle. The Command Prompt script closes
@@ -32,15 +32,15 @@ quote in it. The reasoning for folding its page back in is in
 
 ## What is here
 
-- `cmd_Setup-PsilinkFileDrop.cmd` -- the operator-facing script. Same four
+- `cmd_Setup-AlcoveFileDrop.cmd` -- the operator-facing script. Same four
   parts, same exit codes, and where it cites a section of the troubleshooting or
   passwords page it uses the same name the PowerShell version does. It cites
   fewer of them: the PowerShell script reaches some conditions this one does
   not.
-- `cmd_psilink-probe.sh` -- the container checks, steps 1 to 6. A port of the
+- `cmd_alcove-probe.sh` -- the container checks, steps 1 to 6. A port of the
   `$probe` here-string in the PowerShell script.
-- `cmd_psilink-credcheck.sh` -- inspects the password and mints the run token.
-- `cmd_psilink-volcheck.sh` -- the checks that run over the mounted volume.
+- `cmd_alcove-credcheck.sh` -- inspects the password and mints the run token.
+- `cmd_alcove-volcheck.sh` -- the checks that run over the mounted volume.
 
 The three shell scripts are separate files rather than text embedded in the
 batch file. Embedding them would mean escaping every `%`, `>`, `&`, `|` and
@@ -55,13 +55,13 @@ are unverified against a real share**, exactly as the PowerShell script's are;
 the reasoning, what would settle it, and why the earlier passing runs are not
 evidence are recorded once, under "The CIFS volume pins `uid=1000,gid=1000`" in
 [`windows-network-filedrop.md`](windows-network-filedrop.md). The measurement on
-this side is `cmd_psilink-volcheck.sh`'s `WRITE_OK`, which runs inside the
+this side is `cmd_alcove-volcheck.sh`'s `WRITE_OK`, which runs inside the
 published image and so writes as the unprivileged account the mapping is for.
 
 The most recent full pass covers both scripts together and is written up once,
 under "Verification pass on staging, 30 July 2026" in
 [`windows-network-filedrop.md`](windows-network-filedrop.md). It confirms this
-script end to end against the psilink image, records that the rewritten closing
+script end to end against the Alcove image, records that the rewritten closing
 block emits no redirection character, and states what it does not cover. What
 follows here is the older, script-specific record.
 
@@ -86,7 +86,7 @@ alone with its contents intact; and the usage text and an unrecognised option.
 The password stored in the volume metadata was read back and compared: it
 arrives as `Pa!ss&w%rd^1`, unaltered.
 
-`cmd_psilink-volcheck.sh` was verified directly over a real CIFS mount, in all
+`cmd_alcove-volcheck.sh` was verified directly over a real CIFS mount, in all
 three marker states -- absent, matching the run token, and holding a different
 token -- along with `WRITE_OK`, `EXCL_OK` and `RENAME_OK`. The script's routing
 of `MARKER_OK` was exercised by the full runs. Its routing of `MARKER_MISSING`
@@ -95,7 +95,7 @@ directory they reached, which is the DFS case, and the DFS case cannot be
 mocked here. The PowerShell notes reach the same limit by the same route.
 
 **Most of that pass no longer covers the code it was run against.**
-`cmd_psilink-probe.sh` was replaced wholesale afterwards (see
+`cmd_alcove-probe.sh` was replaced wholesale afterwards (see
 "The probe is a second copy" below), and the probe is what produced most of the
 "Covered:" list -- the full pass to a mounted volume, the
 `NT_STATUS_LOGON_FAILURE` report, and the `-Dialect SMB3` confirmation all run
@@ -119,7 +119,7 @@ unverified against the current probe.
 Running the two scripts against the same share and reading the transcripts
 against each other is what found the one divergence between them. The volume
 check emits `EXCL_OK`, and the PowerShell script turns it into "Exclusive
-create and rename behave the way psilink needs"; the port had all three of the
+create and rename behave the way Alcove needs"; the port had all three of the
 warning branches and no positive one, so a share that was entirely fine said
 nothing about it. The port now carries that branch, gated on the rename result
 the same way. This is the failure mode the guide's "reports the same failures"
@@ -180,7 +180,7 @@ A third result decided where the password is inspected. **Expanding a variable
 holding `&`, `|` or `>` into any parsed line breaks the batch file**: `if not
 "%PW%"=="%PW: =%"` aborts with `& was unexpected at this time` rather than
 reporting anything. `cmd` re-parses whatever an expansion produces, so `cmd`
-cannot examine a password at all. That is what `cmd_psilink-credcheck.sh` is
+cannot examine a password at all. That is what `cmd_alcove-credcheck.sh` is
 for: the value reaches the container through the environment, which is never
 re-parsed, and the shell inspects it there.
 
@@ -279,7 +279,7 @@ asked for a standalone `cmd_`-prefixed set, and that is what this is. It is
 worth being clear about the cost: the PowerShell notes record that a second,
 hand-maintained copy of the container diagnostic already drifted once -- it read
 `SMB_VERS` where the script exported `SMB_DIALECT`, so the dialect was silently
-ignored -- and was deleted rather than resynchronised. `cmd_psilink-probe.sh`
+ignored -- and was deleted rather than resynchronised. `cmd_alcove-probe.sh`
 is that same text again, and nothing currently detects the two falling out of
 step. It drifted immediately: the port was cut before the probe's fixes landed,
 so it shipped a copy that read an empty status scrape as success, swept a name
@@ -294,7 +294,7 @@ mechanical. To redo it:
 
 1. Extract the `$probe` here-string from the `.ps1` -- there is exactly one, so
    `awk "/^\\\$probe = @'\$/{f=1;next} /^'@\$/{f=0} f"` is unambiguous.
-2. Insert `cmd_psilink-probe.sh`'s own nine-line delivery header immediately
+2. Insert `cmd_alcove-probe.sh`'s own nine-line delivery header immediately
    after the shebang, not at the top of the file.
 3. Substitute four message lines: the script name in three of them, and
    `Resolve-DnsName` to `nslookup` in the fourth.

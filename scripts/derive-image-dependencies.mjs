@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// What the shipped file-drop support scripts ask of the psilink image, read out
+// What the shipped file-drop support scripts ask of the Alcove image, read out
 // of the scripts themselves rather than kept in a list beside them.
 //
 // Those scripts delegate every check they make to a capability of the image:
-// they hand a container a psilink subcommand, or they pipe one of their helper
+// they hand a container an Alcove subcommand, or they pipe one of their helper
 // scripts into a shell inside it and depend on the tools that shell can resolve.
 // Nothing in the repository connects the two, so a script can ask for a
 // capability the image does not have and the mismatch shows only on an
@@ -13,7 +13,7 @@
 //
 // The two derivations and their anchors:
 //
-//   - A psilink subcommand is a run of literal argument tokens beginning with a
+//   - An Alcove subcommand is a run of literal argument tokens beginning with a
 //     name the image answers to, on a logical line that also names the image (a
 //     `ghcr.io/georgetown-mdi/alcove` reference, or one of the helpers the launchers resolve
 //     it through) or an argument-vector parameter (`-Args`, `_ARGUMENTS`) before
@@ -22,7 +22,7 @@
 //     registers -- so a command that ships without being registered, or a call
 //     site that invokes one this never saw, changes the derived set rather than
 //     going unnoticed.
-//   - A helper script is one cmd_Setup-PsilinkFileDrop.cmd redirects into a
+//   - A helper script is one cmd_Setup-AlcoveFileDrop.cmd redirects into a
 //     shell in the image, together with the environment and mounts that call
 //     site gives it. Running the script is what resolves the tools it needs, so
 //     no list of tool names is kept anywhere: a helper that gains a dependency
@@ -50,22 +50,22 @@ export const SUPPORT_DIR = "support/windows-network-filedrop";
 
 /** Every support script a derivation reads, relative to SUPPORT_DIR. */
 export const SUPPORT_SCRIPTS = [
-  "Setup-PsilinkFileDrop.ps1",
-  "Start-Psilink.ps1",
-  "start-psilink.sh",
-  "cmd_Setup-PsilinkFileDrop.cmd",
-  "cmd_psilink-credcheck.sh",
-  "cmd_psilink-probe.sh",
-  "cmd_psilink-volcheck.sh",
+  "Setup-AlcoveFileDrop.ps1",
+  "Start-Alcove.ps1",
+  "start-alcove.sh",
+  "cmd_Setup-AlcoveFileDrop.cmd",
+  "cmd_alcove-credcheck.sh",
+  "cmd_alcove-probe.sh",
+  "cmd_alcove-volcheck.sh",
 ];
 
 /** The `.cmd` path's setup script, whose redirects name the helper scripts. */
-export const CMD_SETUP_SCRIPT = "cmd_Setup-PsilinkFileDrop.cmd";
+export const CMD_SETUP_SCRIPT = "cmd_Setup-AlcoveFileDrop.cmd";
 
 /** The launchers that declare which `--json` verdict version they read. */
 export const VERDICT_VERSION_SOURCES = {
-  "Start-Psilink.ps1": /\$PsilinkVerdictVersion\s*=\s*'?(\d+)'?/,
-  "start-psilink.sh": /PSILINK_VERDICT_VERSION='(\d+)'/,
+  "Start-Alcove.ps1": /\$AlcoveVerdictVersion\s*=\s*'?(\d+)'?/,
+  "start-alcove.sh": /ALCOVE_VERDICT_VERSION='(\d+)'/,
 };
 
 const LANGUAGE_BY_EXTENSION = { ps1: "powershell", sh: "shell", cmd: "batch" };
@@ -190,7 +190,7 @@ function stripCommentsAndMeasure(line, language, startsInBlockComment) {
       continue;
     }
     // A comment opens only where a word does. Both languages require it, and
-    // reading any `#` as one would truncate `${PSILINK_IMAGE_DIGEST#sha256:}`
+    // reading any `#` as one would truncate `${ALCOVE_IMAGE_DIGEST#sha256:}`
     // and every call site folded onto the same logical line as it.
     if (ch === "#" && (i === 0 || /[\s;(&|]/.test(line[i - 1]))) break;
     if (ch === "(" || ch === "[") depth += 1;
@@ -210,8 +210,8 @@ export function namesImage(token) {
   return (
     /georgetown-mdi\/alcove/i.test(token) ||
     token === "Image" ||
-    token === "psilink_image" ||
-    token === "Get-PsilinkImage"
+    token === "alcove_image" ||
+    token === "Get-AlcoveImage"
   );
 }
 
@@ -224,7 +224,7 @@ const ARGUMENT_TOKEN = /^(--?[A-Za-z0-9][A-Za-z0-9-]*|\/[A-Za-z0-9_/-]*)$/;
 const MODE_TOKEN = /^[a-z][a-z0-9-]*$/;
 
 /**
- * The psilink argument vectors one logical line hands the image.
+ * The Alcove argument vectors one logical line hands the image.
  *
  * A vector starts at a command name that follows an image reference or an
  * argument-vector parameter on the same logical line, and runs while the tokens
@@ -239,7 +239,7 @@ const MODE_TOKEN = /^[a-z][a-z0-9-]*$/;
  * and nothing would say so.
  *
  * One measured consequence of the over-read: a logical line that merely echoes
- * or returns a sample command for the operator (cmd_Setup-PsilinkFileDrop.cmd's
+ * or returns a sample command for the operator (cmd_Setup-AlcoveFileDrop.cmd's
  * closing help text; Get-ConsoleCommandLines' read-back strings) derives like a
  * real call site. A capability introduced by such a line alone fails for want
  * of a recipe, and its coverage-gap message then cites the print site -- read
@@ -274,7 +274,7 @@ export function argvOnLine(text, commands) {
 }
 
 /**
- * Every psilink argument vector the support scripts hand the image.
+ * Every Alcove argument vector the support scripts hand the image.
  *
  * Returns `[{ argv, sites }]` sorted by vector, where a site is
  * `<filename>:<line>`. The same vector reached from several call sites is one
@@ -396,7 +396,7 @@ export function deriveImageDependencies(root) {
   const cli = deriveCliCapabilities(support, commands);
   if (cli.length === 0) {
     throw new Error(
-      `${SUPPORT_DIR}: no psilink argument vector was derived from any support script -- the extraction pattern rotted; fix scripts/derive-image-dependencies.mjs`,
+      `${SUPPORT_DIR}: no Alcove argument vector was derived from any support script -- the extraction pattern rotted; fix scripts/derive-image-dependencies.mjs`,
     );
   }
 

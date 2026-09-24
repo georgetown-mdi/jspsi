@@ -6,7 +6,7 @@ import {
   getLogger,
   getLoggerForVerbosity,
   setLogLevel,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   SSH_WIRE_TRACE_LOGGER_NAME,

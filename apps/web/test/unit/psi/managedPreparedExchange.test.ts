@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { getDefaultLinkageTerms, inferMetadata } from "@psilink/core";
+import { getDefaultLinkageTerms, inferMetadata } from "@alcove/core";
 
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { prepareManagedRerunExchange } from "@psi/managed/managedPreparedExchange";
 
-import type { CSVRow } from "@psilink/core";
+import type { CSVRow } from "@alcove/core";
 
 // The re-run's prepared-exchange assembly, tested in Node: the persisted document's
 // own-perspective terms bind to this run's rows, and the received-payload commitment

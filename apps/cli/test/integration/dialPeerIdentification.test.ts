@@ -2,9 +2,9 @@ import net from "node:net";
 import type { AddressInfo, Socket } from "node:net";
 
 import { expect, test } from "vitest";
-import { FileSyncConnection } from "@psilink/core";
-import type { SFTPConnectionConfig } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import { FileSyncConnection } from "@alcove/core";
+import type { SFTPConnectionConfig } from "@alcove/core";
+import { withCapturedLogs } from "@alcove/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import {

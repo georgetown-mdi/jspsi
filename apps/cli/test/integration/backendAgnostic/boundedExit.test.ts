@@ -11,8 +11,8 @@ import {
   computeCertificateFingerprint,
   generateSigningIdentity,
   prepareForExchange,
-} from "@psilink/core";
-import type { ExchangeSpec, SigningIdentity } from "@psilink/core";
+} from "@alcove/core";
+import type { ExchangeSpec, SigningIdentity } from "@alcove/core";
 
 import { saveConfig } from "../../../src/config";
 import { saveKeyFile } from "../../../src/keyFile";
@@ -105,7 +105,7 @@ let identityA: SigningIdentity;
 let identityB: SigningIdentity;
 
 beforeEach(async () => {
-  work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bounded-exit-"));
+  work = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bounded-exit-"));
   dropDir = path.join(work, "drop");
   fs.mkdirSync(dropDir);
   fs.writeFileSync(path.join(work, "a-input.csv"), PARTY_A_CSV);
@@ -547,7 +547,7 @@ function shellArg(value: string): string {
  * closes the pipe under a result far larger than the pipe holds.
  *
  * A real shell runs it, since that is how an operator writes it, and
- * `pipefail` makes the pipeline report psilink's own status rather than
+ * `pipefail` makes the pipeline report Alcove's own status rather than
  * `head`'s. The run's event stream goes to `eventsPath` on fd 3, which bash
  * passes through to the party it starts.
  */

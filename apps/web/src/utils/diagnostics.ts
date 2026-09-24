@@ -1,12 +1,12 @@
 /**
  * The localStorage key a tester or support engineer sets to opt a single browser
  * into diagnostic logging against a deployed client. Set it from the devtools
- * console (`localStorage.setItem("psilink:diagnostics", "1")`), reload, and
- * reproduce; clear it (`localStorage.removeItem("psilink:diagnostics")`) to
+ * console (`localStorage.setItem("alcove:diagnostics", "1")`), reload, and
+ * reproduce; clear it (`localStorage.removeItem("alcove:diagnostics")`) to
  * return to the secure default. Namespaced so it cannot collide with another
  * app's key on a shared origin.
  */
-export const DIAGNOSTICS_STORAGE_KEY = "psilink:diagnostics";
+export const DIAGNOSTICS_STORAGE_KEY = "alcove:diagnostics";
 
 /**
  * Whether the stored flag value engages diagnostic mode. Any value other than

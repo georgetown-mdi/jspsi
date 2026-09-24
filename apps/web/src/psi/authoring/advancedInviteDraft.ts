@@ -10,7 +10,7 @@ import {
   inferMetadata,
   optInLinkageKeys,
   referencedLinkageFieldNames,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { encodeKeyForComparison, isOptInDraftKey } from "../linkageComparison";
 import { normalizeForEditor } from "../metadataEditing";
@@ -28,7 +28,7 @@ import type {
   OwnColumnSelection,
   Standardization,
   StandardizationStep,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type {
   AdvancedInviteDraft,

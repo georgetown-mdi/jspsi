@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { MAX_TEXT_LENGTH } from "@psilink/core";
+import { MAX_TEXT_LENGTH } from "@alcove/core";
 
 import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient";
 
@@ -15,8 +15,8 @@ import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient"
  * aligned set core's regex requires). */
 const FINGERPRINT = "B".repeat(42) + "A";
 
-const IDENTITY_FILE = ".psilink-signing-identity.json";
-const CERTIFICATE_FILE = "psilink-certificate.json";
+const IDENTITY_FILE = ".alcove-signing-identity.json";
+const CERTIFICATE_FILE = "alcove-certificate.json";
 
 /** A fetch answering the one request with the given JSON body and status. */
 function answering(body: unknown, status = 200): typeof fetch {
@@ -263,7 +263,7 @@ describe("the ok body is re-validated field by field", () => {
         "Agency A",
         { exportCertificate: true },
         answering(
-          okBody({ certificateFileName: "../psilink-certificate.json" }),
+          okBody({ certificateFileName: "../alcove-certificate.json" }),
         ),
       ),
     ).toEqual({ kind: "error" });

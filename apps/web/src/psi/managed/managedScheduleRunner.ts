@@ -55,7 +55,7 @@ import {
   ConnectionError,
   LinkageTermsUnsatisfiableError,
   OutboundDisclosureRefusalError,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   DEFAULT_PEER_WAIT_TIMEOUT_MS,

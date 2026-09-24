@@ -10,7 +10,7 @@
  * value except the record's own local `expires`.
  */
 
-import { sanitizeErrorForDisplay } from "@psilink/core";
+import { sanitizeErrorForDisplay } from "@alcove/core";
 
 import {
   CONSENT_FAILURE_TITLE,

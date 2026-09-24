@@ -48,7 +48,7 @@ export const RESULT_BYTES_PER_PAIR = 41;
  * The two record counts whose product bounds a run's pair table: this party's and
  * the partner's, both as DECLARED at the terms exchange, so the two parties
  * project the same figure for the same run (`projectPairTable` in
- * `@psilink/core`).
+ * `@alcove/core`).
  *
  * A run holds them only where the agreed cardinality makes the table their
  * product -- `many-to-many`, where both parties keep their within-dataset

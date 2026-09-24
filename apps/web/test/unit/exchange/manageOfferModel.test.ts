@@ -8,7 +8,7 @@ import {
   inferMetadata,
   parseExchangeSpec,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 import { describe, expect, test } from "vitest";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -32,7 +32,7 @@ import type {
   ManagedDepositInputs,
   ManagedExchangeDocumentParts,
 } from "@exchange/manageOfferModel";
-import type { WebRTCEndpoint } from "@psilink/core";
+import type { WebRTCEndpoint } from "@alcove/core";
 
 // The inviter's own signaling location (window.location-derived) is already the
 // invitation's endpoint shape; the acceptor's endpoint is the invitation's own.
@@ -338,7 +338,7 @@ describe("the acceptor's outbound-payload consent record", () => {
       webrtcLocatorFromEndpoint(invitationEndpoint),
     );
     // The document as the CLI would receive it: snake_case keys, serialized and
-    // read back through the schema a `psilink.yaml` is parsed with.
+    // read back through the schema an `alcove.yaml` is parsed with.
     const serialized = stringifyYaml(snakeizeKeys(doc));
     expect(serialized).toContain("outbound_payload_consent");
     const reloaded = parseExchangeSpec(parseYaml(serialized));

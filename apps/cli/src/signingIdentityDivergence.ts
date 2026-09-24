@@ -3,8 +3,8 @@ import {
   certificateAuthorizesIdentity,
   reasonTermsCannotStateIdentity,
   redactAndDisplayPartyIdentity,
-} from "@psilink/core";
-import type { CertificateBody } from "@psilink/core";
+} from "@alcove/core";
+import type { CertificateBody } from "@alcove/core";
 
 // The one place the CLI compares the identity a signing certificate is bound to
 // against the party's `linkage_terms.identity`, shared by the commands that
@@ -14,21 +14,21 @@ import type { CertificateBody } from "@psilink/core";
 //
 // Why the comparison matters: a partner verifies a receipt against the identity
 // in the AGREED TERMS, not the one the presented certificate holds
-// (verifyPresentedCertificate in @psilink/core), so a certificate bound to
+// (verifyPresentedCertificate in @alcove/core), so a certificate bound to
 // anything other than linkage_terms.identity signs receipts the partner rejects.
 //
 // The two commands dispose of the same comparison differently, because only one
 // of them runs an exchange.
 //
-// `psilink exchange` REFUSES: this party's own certificate against its own
+// `alcove exchange` REFUSES: this party's own certificate against its own
 // agreed terms (assertLocalCertificateAuthorizesAgreedIdentity in
-// @psilink/core), refused here before any credential, terms, or data are
+// @alcove/core), refused here before any credential, terms, or data are
 // sent -- the disposition its sibling certificate-mode fault takes
-// (assertCertificateModeNamesLocalParty in @psilink/core).
+// (assertCertificateModeNamesLocalParty in @alcove/core).
 // packages/core/test/records/signedReceiptEndToEnd.test.ts drives both role
 // assignments, backing this refusal's assumption with a check.
 //
-// `psilink fingerprint` WARNS. It runs no exchange and sends nothing, and
+// `alcove fingerprint` WARNS. It runs no exchange and sends nothing, and
 // binding a name before editing the configuration to match is an authoring order
 // an operator may legitimately work in, so it reports the divergence and still
 // prints the fingerprint.
@@ -41,7 +41,7 @@ import type { CertificateBody } from "@psilink/core";
 // the two, and regeneration invalidates a fingerprint the partner has pinned.
 const RECONCILE_GUIDANCE =
   "Make the two match: set linkage_terms.identity to the bound identity (a " +
-  "local config edit), or regenerate the identity with 'psilink fingerprint " +
+  "local config edit), or regenerate the identity with 'alcove fingerprint " +
   "--force --identity' naming the terms identity -- regeneration changes the " +
   "fingerprint your partner pins, so it needs a coordinated re-pin.";
 
@@ -50,12 +50,12 @@ const RECONCILE_GUIDANCE =
 // document may state that label, so the local config edit is closed to its
 // holder and a re-key is the only exit left. Which labels those are, and the
 // clause naming the class without quoting the label, are core's own answer
-// (reasonTermsCannotStateIdentity in @psilink/core), read rather than restated
+// (reasonTermsCannotStateIdentity in @alcove/core), read rather than restated
 // so this boundary and the exchange boundary cannot disagree. Core names the
 // same exit at that boundary (assertLocalCertificateAuthorizesAgreedIdentity),
 // which an exchange reaches only after this one.
 const REKEY_GUIDANCE =
-  "Re-key the signing identity with 'psilink fingerprint --force --identity' " +
+  "Re-key the signing identity with 'alcove fingerprint --force --identity' " +
   "under a label the terms admit, then have every partner re-pin the new " +
   "fingerprint before receipts verify again.";
 
@@ -73,7 +73,7 @@ const DIVERGENCE_CONSEQUENCE =
  * against (absent or empty) -- there is nothing the certificate could diverge
  * from. A `certificate`-mode run that names no party is refused earlier, for
  * its own reason, ahead of either disposition below
- * (`assertCertificateModeNamesLocalParty` in `@psilink/core`).
+ * (`assertCertificateModeNamesLocalParty` in `@alcove/core`).
  */
 function divergesFromAgreedTerms(
   certificate: CertificateBody,
@@ -87,10 +87,10 @@ function divergesFromAgreedTerms(
  * Warn when `certificate` is bound to an identity other than `termsIdentity`,
  * naming both values and the two ways to reconcile them. Silent when they agree
  * and when there is nothing to diverge from (see {@link divergesFromAgreedTerms}).
- * `psilink fingerprint`'s disposition of the divergence.
+ * `alcove fingerprint`'s disposition of the divergence.
  *
  * A bound label the terms cannot state takes the re-key exit instead and is
- * not named at all (`reasonTermsCannotStateIdentity` in `@psilink/core`).
+ * not named at all (`reasonTermsCannotStateIdentity` in `@alcove/core`).
  *
  * Both identities are escaped here, the single escape site since neither
  * value ever becomes an `Error` on this path (CONTRIBUTING.md,
@@ -130,7 +130,7 @@ export function warnOnIdentityDivergence(
  * Silent when they agree and when there is nothing to diverge from (see
  * {@link divergesFromAgreedTerms}).
  *
- * `psilink exchange`'s disposition, raised as soon as the certificate is in
+ * `alcove exchange`'s disposition, raised as soon as the certificate is in
  * hand, before any credential, terms, or data are sent -- the earliest point
  * possible: `prepareForExchange`, which its siblings use, reads the
  * `signing` block, which has only a path to the identity file, so no
@@ -153,7 +153,7 @@ export function warnOnIdentityDivergence(
  *
  * A bound label the terms cannot state takes a refusal of its own, naming the
  * re-key exit and no part of the label (`reasonTermsCannotStateIdentity` in
- * `@psilink/core`). It names one value rather than two, so the room the
+ * `@alcove/core`). It names one value rather than two, so the room the
  * paragraph above reserves covers it as well.
  *
  * @throws {OperatorConfigError} when the certificate is bound to a different

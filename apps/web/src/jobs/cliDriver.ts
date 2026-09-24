@@ -11,12 +11,12 @@ import {
   partnerOriginText,
   sanitizeErrorChainLinks,
   sanitizeForDisplay,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
 
 import type { ChildProcess } from "node:child_process";
-import type { PartnerOriginText } from "@psilink/core";
+import type { PartnerOriginText } from "@alcove/core";
 import type { Readable } from "node:stream";
 
 /**
@@ -330,7 +330,7 @@ export function spawnExchangeJob(args: {
 
 /**
  * Spawn the CLI to run a zero-setup exchange -- the positional `$0` form
- * (`psilink URL INPUT OUTPUT`), no subcommand token, no `--config-file`, no
+ * (`alcove URL INPUT OUTPUT`), no subcommand token, no `--config-file`, no
  * `--key-file`, and never `--save`: it infers its terms from the input file,
  * holds no shared secret, and persists nothing beyond the job's record.
  * `connectionArgs` (the URL and, for sftp, the `--server-*` flags) and

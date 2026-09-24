@@ -106,11 +106,11 @@ whichever block holds it.
 
 That application reads the same file a second way, which is one reader's other
 path rather than a fourth reader (`readConfigLinkageSource`,
-`apps/cli/src/config.ts`). `psilink invite` and `psilink verify-receipt` do not
+`apps/cli/src/config.ts`). `alcove invite` and `alcove verify-receipt` do not
 load the whole file: they read `linkage_terms`, `standardization`, and
 `metadata` block by block, leaving the connection out so a still-placeholder one
 does not fail the read. Each block has its own parse entry point, and those
-strip -- so a file `psilink exchange` refused was a file `psilink invite` minted
+strip -- so a file `alcove exchange` refused was a file `alcove invite` minted
 an invitation from, over terms narrowed by whatever the strip took, with nothing
 said to either party. All three blocks are read through the entry point that
 applies the same comparison
@@ -118,7 +118,7 @@ applies the same comparison
 other two), so for those three blocks one file is accepted by both commands or
 refused by both, and refused naming the same key. A misspelled top-level key
 outside those three (`expected_payload_columns`, say) is not covered by this
-comparison: `psilink invite`'s read still accepts it, and only `psilink
+comparison: `alcove invite`'s read still accepts it, and only `alcove
 exchange`'s full load refuses it, so the file still fails closed at exchange
 time rather than earlier.
 

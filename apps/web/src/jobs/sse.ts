@@ -53,7 +53,7 @@ export const SSE_KEEPALIVE_FRAME = ": keepalive\n\n";
  * soon as 60 seconds (a common default, sooner on a hardened one), and an
  * exchange can sit quiet for minutes while a party waits on its partner -- so
  * this stays well under that floor rather than raising a timeout the
- * deployment owns and psilink does not.
+ * deployment owns and Alcove does not.
  */
 const SSE_KEEPALIVE_INTERVAL_MS = 15000;
 

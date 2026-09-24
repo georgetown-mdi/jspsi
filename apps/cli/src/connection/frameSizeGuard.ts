@@ -1,6 +1,6 @@
 import { Writable } from "node:stream";
 
-import { FrameSizeExceededError } from "@psilink/core";
+import { FrameSizeExceededError } from "@alcove/core";
 
 import { fittedCauseLink } from "./causeLink";
 import {

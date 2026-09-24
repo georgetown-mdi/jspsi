@@ -16,7 +16,7 @@ import {
   overlongDisclosedColumnPositions,
   relayLocatorFromOwnRelay,
   stripInvitationWhitespace,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { emptyColumnPositions } from "./columnNames";
 import { linkageRefusalFor } from "./linkageRefusal";
@@ -37,7 +37,7 @@ import type {
   SFTPEndpoint,
   Standardization,
   WebRTCEndpoint,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import type { LinkageRefusal } from "./linkageRefusal";
 import type { OwnColumnsChoice } from "./ownColumnsModel";

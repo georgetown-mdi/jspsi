@@ -39,7 +39,7 @@
  * more and holds it from there.
  */
 
-import { getLogger } from "@psilink/core";
+import { getLogger } from "@alcove/core";
 
 import { appendSanitizedRunWarning } from "../runWarnings";
 

@@ -40,7 +40,7 @@ test("deriveAbortToken yields distinct tokens per session key (no cross-session 
 
 test("deriveAbortToken outputs never collide with the AEAD key from the same session key (domain separation)", async () => {
   // Both derivations take the session key as IKM; only their HKDF labels
-  // ("psilink-abort-token-v1:<role>" vs "psilink-aead-v1:<context>") separate
+  // ("alcove-abort-token-v2:<role>" vs "alcove-aead-v2:<context>") separate
   // them. If those labels ever collided, an abort token could substitute for an
   // AEAD key (or vice versa). Cross every abort role against every AEAD context
   // from one session key and assert no output coincides -- a real falsifier for a
@@ -59,20 +59,20 @@ test("deriveAbortToken outputs never collide with the AEAD key from the same ses
 test("deriveAbortToken known-answer vector pins the HKDF info string", async () => {
   // Expected bytes were computed independently with Node's crypto.hkdfSync(
   // "sha256", ikm, salt, info, 32): ikm is sessionKeyA, salt is 32 zero
-  // bytes, info is "psilink-abort-token-v1:<role>". A change to the prefix,
+  // bytes, info is "alcove-abort-token-v2:<role>". A change to the prefix,
   // the ":" delimiter, or a role label trips this test -- including a swap
-  // to "psilink-aead-v1:<role>", which the distinctness tests above cannot
+  // to "alcove-aead-v2:<role>", which the distinctness tests above cannot
   // see because it still differs from every AEAD_CONTEXTS label.
   const initiator = await deriveAbortToken(sessionKeyA, "initiator");
   expect(Array.from(initiator)).toEqual([
-    201, 98, 150, 196, 136, 40, 110, 199, 175, 117, 106, 141, 23, 111, 121, 63,
-    242, 123, 11, 85, 9, 146, 193, 206, 139, 139, 6, 86, 167, 89, 93, 206,
+    15, 153, 237, 64, 189, 197, 47, 214, 120, 199, 19, 55, 79, 37, 197, 253,
+    100, 39, 84, 141, 197, 229, 43, 153, 246, 25, 37, 162, 127, 6, 65, 40,
   ]);
 
   const responder = await deriveAbortToken(sessionKeyA, "responder");
   expect(Array.from(responder)).toEqual([
-    136, 136, 194, 178, 242, 75, 147, 103, 35, 109, 242, 54, 24, 59, 74, 128,
-    98, 246, 108, 95, 211, 75, 130, 59, 230, 216, 246, 180, 192, 14, 210, 15,
+    123, 109, 231, 45, 251, 252, 199, 156, 5, 87, 96, 119, 68, 133, 106, 231,
+    209, 130, 182, 74, 11, 28, 139, 32, 225, 124, 169, 45, 243, 28, 95, 232,
   ]);
 });
 

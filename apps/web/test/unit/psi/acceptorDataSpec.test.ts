@@ -7,7 +7,7 @@ import {
   inferMetadata,
   prepareForExchange,
   validateCompatibility,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   disclosedColumnNames,
@@ -17,7 +17,7 @@ import {
 } from "../../../src/psi/metadataEditing.js";
 import { acceptorExchangeDataSpec } from "../../../src/psi/acceptInvitation.js";
 
-import type { ExchangeDataSpec, LinkageTerms, Metadata } from "@psilink/core";
+import type { ExchangeDataSpec, LinkageTerms, Metadata } from "@alcove/core";
 
 // Two single-field keys, so the acceptor's columns can satisfy both, one, or
 // neither depending on how the metadata binds them.

@@ -18,7 +18,7 @@ import {
   parseSensitiveJson,
   parseSensitiveYaml,
   snakeizeKeys,
-} from "@psilink/core";
+} from "@alcove/core";
 import { stringify as stringifyYaml } from "yaml";
 
 import { RECEIPTS_DEFAULT, receiptsIntentFields } from "@psi/receiptsModel";
@@ -41,8 +41,8 @@ import type { JobFiledropExchangeIntent } from "@jobs/intentSchemas";
 
 /**
  * The whole of "use the GUI for the settings and the CLI for the work", driven
- * end to end: `psilink` writes a file-drop configuration, the console opens it
- * off its mounted folder, runs the exchange it states against a real `psilink`
+ * end to end: `alcove` writes a file-drop configuration, the console opens it
+ * off its mounted folder, runs the exchange it states against a real `alcove`
  * partner, and hands back the configuration a scheduled command-line run loads.
  *
  * Both parties here are the real program -- the partner spawned directly, this
@@ -88,7 +88,7 @@ const POLL_INTERVAL_MS = 20;
 // is the deadline for a partner that stopped, never the test's runtime.
 const PEER_TIMEOUT_MS = 60_000;
 
-// A hard deadline on each `psilink` invocation, past the peer budget so a run
+// A hard deadline on each `alcove` invocation, past the peer budget so a run
 // that hangs is reported as a hang rather than absorbed into a budget's expiry.
 const CLI_DEADLINE_MS = 150_000;
 
@@ -108,7 +108,7 @@ interface Workspace {
 }
 
 function makeWorkspace(): Workspace {
-  const root = mkdtempSync(path.join(tmpdir(), "psilink-console-loaded-"));
+  const root = mkdtempSync(path.join(tmpdir(), "alcove-console-loaded-"));
   const dropDir = path.join(root, "drop");
   const partnerDir = path.join(root, "partner");
   const mount = path.join(root, "mount");
@@ -120,9 +120,9 @@ function makeWorkspace(): Workspace {
     dropDir,
     partnerDir,
     partnerOutput: path.join(partnerDir, "out.csv"),
-    partnerConfig: path.join(partnerDir, "psilink.yaml"),
+    partnerConfig: path.join(partnerDir, "alcove.yaml"),
     mount,
-    mountedConfig: path.join(mount, "psilink.yaml"),
+    mountedConfig: path.join(mount, "alcove.yaml"),
   };
 }
 
@@ -142,7 +142,7 @@ afterEach(() => {
  * which is what the console's run holds the exchange to. */
 function mountedSharedSecret(mount: string): string {
   const parsed = parseSensitiveJson(
-    readFileSync(path.join(mount, ".psilink.key"), "utf8"),
+    readFileSync(path.join(mount, ".alcove.key"), "utf8"),
     "mounted key file",
   );
   const { sharedSecret } = parsed as { sharedSecret?: unknown };
@@ -214,9 +214,9 @@ async function waitForTerminal(manager: JobManager, id: string): Promise<void> {
 }
 
 describe.skipIf(!cliIsBuilt)(
-  "a configuration psilink wrote, opened in the console and run",
+  "a configuration Alcove wrote, opened in the console and run",
   () => {
-    test("the console links against a real psilink partner on the file's terms", async () => {
+    test("the console links against a real Alcove partner on the file's terms", async () => {
       const invite = await startCli({
         args: ["invite", "--identity", PARTNER_IDENTITY, "input.csv"],
         cwd: workspace.partnerDir,
@@ -231,7 +231,7 @@ describe.skipIf(!cliIsBuilt)(
       });
 
       // The console's mount is what an operator has after accepting the
-      // invitation on the command line: a psilink.yaml, the key file beside it,
+      // invitation on the command line: an alcove.yaml, the key file beside it,
       // and their own input. The connection block is theirs to fill in, which an
       // offline invitation asks for.
       const accept = await startCli({
@@ -292,12 +292,12 @@ describe.skipIf(!cliIsBuilt)(
         mountedSharedSecret(workspace.mount) ===
           mountedSharedSecret(workspace.partnerDir),
       ).toBe(true);
-      expect(existsSync(path.join(record.workdir, ".psilink.key"))).toBe(false);
+      expect(existsSync(path.join(record.workdir, ".alcove.key"))).toBe(false);
 
       // The max-age policy the console composed is the one the CLI stamped the
       // rotated secret with, as a command-line run under the same policy does.
       const { expires } = parseSensitiveJson(
-        readFileSync(path.join(workspace.mount, ".psilink.key"), "utf8"),
+        readFileSync(path.join(workspace.mount, ".alcove.key"), "utf8"),
         "mounted key file",
       ) as { expires?: string };
       const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
@@ -326,7 +326,7 @@ describe.skipIf(!cliIsBuilt)(
 );
 
 describe.skipIf(!cliIsBuilt)(
-  "an opened configuration's maximum age, held by the real psilink",
+  "an opened configuration's maximum age, held by the real Alcove",
   () => {
     test("a run whose shared secret is past its expiry is refused", async () => {
       // The mount an operator has once a max-age policy stamped the key file
@@ -343,7 +343,7 @@ describe.skipIf(!cliIsBuilt)(
         ),
       );
       writeFileSync(
-        path.join(workspace.mount, ".psilink.key"),
+        path.join(workspace.mount, ".alcove.key"),
         JSON.stringify({
           sharedSecret: "c".repeat(42) + "A",
           expires: "2020-01-01T00:00:00.000Z",
@@ -394,7 +394,7 @@ describe.skipIf(!cliIsBuilt)(
       expect(readdirSync(workspace.dropDir)).toEqual([]);
       expect(
         JSON.parse(
-          readFileSync(path.join(workspace.mount, ".psilink.key"), "utf8"),
+          readFileSync(path.join(workspace.mount, ".alcove.key"), "utf8"),
         ),
       ).toMatchObject({ expires: "2020-01-01T00:00:00.000Z" });
     });

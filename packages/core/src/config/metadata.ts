@@ -66,7 +66,7 @@ export interface ColumnMetadata {
 export const METADATA_NAME_SHAPE_MESSAGE =
   "a metadata column name must not contain a control or text-direction " +
   "character; the CSV read removes these characters from a header, so " +
-  "re-run psilink init over the input file, or delete the character from " +
+  "re-run alcove init over the input file, or delete the character from " +
   "the name, to make the declared name match the header that is read";
 
 const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({

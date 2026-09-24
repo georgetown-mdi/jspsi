@@ -47,7 +47,7 @@ const OWN_FINGERPRINT = "B".repeat(42) + "A";
 const PARTNER_FINGERPRINT = "C".repeat(42) + "A";
 
 /** The identity file name an operator keeps in a mount of their own. */
-const PICKED_IDENTITY_NAME = "psilink-signing-identity.json";
+const PICKED_IDENTITY_NAME = "alcove-signing-identity.json";
 
 const roots: Array<string> = [];
 const managers: Array<JobManager> = [];
@@ -149,7 +149,7 @@ function makeManager(options: {
   return manager;
 }
 
-/** The `signing` block of a job's composed psilink.yaml. */
+/** The `signing` block of a job's composed alcove.yaml. */
 function composedSigning(workdir: string): Record<string, unknown> {
   const text = fs.readFileSync(
     path.join(workdir, JOB_FILE_NAMES.config),
@@ -157,7 +157,7 @@ function composedSigning(workdir: string): Record<string, unknown> {
   );
   const parsed = parseYaml(text) as { signing?: Record<string, unknown> };
   if (parsed.signing === undefined)
-    throw new Error("composed psilink.yaml has no signing block");
+    throw new Error("composed alcove.yaml has no signing block");
   return parsed.signing;
 }
 

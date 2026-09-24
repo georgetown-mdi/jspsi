@@ -13,7 +13,7 @@ import {
 
 import styles from "@styles/app.module.css";
 
-import type { Metadata } from "@psilink/core";
+import type { Metadata } from "@alcove/core";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 
 /**

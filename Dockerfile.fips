@@ -113,7 +113,7 @@ COPY packages/core/*.ts packages/core/tsconfig.json packages/core/
 COPY packages/core/src packages/core/src/
 COPY apps/cli/tsconfig.json apps/cli/*.ts apps/cli/
 COPY apps/cli/src apps/cli/src/
-# @psilink/core must be built before the web build: apps/web consumes it from its
+# @alcove/core must be built before the web build: apps/web consumes it from its
 # built dist/ (a file: workspace dependency), so build core and the CLI first.
 RUN npm run build -w packages/core -w apps/cli
 
@@ -131,9 +131,9 @@ ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
 # read or an empty manifest value fails the layer rather than shipping a kit
 # that quietly names the floating tag (apps/web/src/bench/acceptKit.ts).
 RUN set -eu; \
-  VITE_PSILINK_VERSION="$(node -p "require('/build/apps/cli/package.json').version ?? ''")"; \
-  test -n "$VITE_PSILINK_VERSION"; \
-  export VITE_PSILINK_VERSION; \
+  VITE_ALCOVE_VERSION="$(node -p "require('/build/apps/cli/package.json').version ?? ''")"; \
+  test -n "$VITE_ALCOVE_VERSION"; \
+  export VITE_ALCOVE_VERSION; \
   npm run build -w apps/web
 
 # The tree the runtime stage ships: the same lockfile-exact resolution as above
@@ -149,11 +149,12 @@ RUN --mount=type=cache,target=/root/.npm \
 
 FROM nodebase
 
-# The source label is what links the package on ghcr.io to this repository, so
-# a hand-pushed tag inherits the repository's package visibility and access;
-# the release workflow adds the same labels through docker/metadata-action.
-LABEL org.opencontainers.image.source="https://github.com/georgetown-mdi/jspsi" \
-      org.opencontainers.image.description="psilink: privacy-preserving record linkage over SFTP, a shared folder, or WebRTC" \
+# Metadata the package page on ghcr.io shows. For an organization package the
+# source label links and grants nothing: repository write access is set under
+# the package's Manage Actions access (docs/RELEASES.md, step 8). The release
+# workflow adds the same labels through docker/metadata-action.
+LABEL org.opencontainers.image.source="https://github.com/georgetown-mdi/alcove" \
+      org.opencontainers.image.description="Alcove: privacy-preserving record linkage over SFTP, a shared folder, or WebRTC" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 ARG AL2023_RELEASEVER
@@ -165,7 +166,7 @@ ARG FIPS_MODULE_VERSION
 # SMB probe, as apk add samba-client does in the root Dockerfile; the openssl
 # CLI is what reads the loaded provider back in the build assertion below, which
 # is the only reader of it -- the entrypoint's per-run report probes Node's own
-# crypto instead, that being the consumer psilink actually runs on.
+# crypto instead, that being the consumer Alcove actually runs on.
 RUN dnf -y --releasever=${AL2023_RELEASEVER} install samba-client openssl && dnf clean all
 # `swap`, not `install` or `downgrade`. The stock amazonlinux:2023 already ships
 # openssl-fips-provider-latest at an uncertified 3.5.7, and its fips.so is the
@@ -252,7 +253,7 @@ RUN rm -rf \
 # not carry fails rather than falling back to an uncertified implementation.
 # Every dnf transaction above runs before this file is in force: the fips-only
 # configuration breaks dnf's own Python, which hashes with blake2s.
-COPY openssl-fips-only.cnf /etc/psilink/fips-only.cnf
+COPY openssl-fips-only.cnf /etc/alcove/fips-only.cnf
 
 WORKDIR /app
 # npm links the workspaces its install names, so the tree copied here carries
@@ -296,19 +297,19 @@ RUN chmod +x /app/docker-entrypoint.sh /app/docker-entrypoint-fips.sh
 # runtime image should carry.
 COPY support/fips-probe/engagement.mjs support/fips-probe/image-engagement.mjs /app/fips-probe/
 
-ENV OPENSSL_CONF=/etc/psilink/fips-only.cnf
+ENV OPENSSL_CONF=/etc/alcove/fips-only.cnf
 ENV OPENSSL_MODULES=/usr/lib64/ossl-modules
 
 # Everything the container must WRITE, created and handed to the unprivileged
 # account the USER below drops to, exactly as in the root Dockerfile: /work so a
-# run with no bind mount still has somewhere to write, and /run/psilink for the
+# run with no bind mount still has somewhere to write, and /run/alcove for the
 # console's pasted-credential scratch directory, whose root-owned parent an
 # unprivileged server cannot create at boot. /app is deliberately not among
 # them, so the running process reads and executes its own code without being
 # able to rewrite it.
-RUN mkdir -p /work /run/psilink/sftp-credentials \
-  && chown -R node:node /work /run/psilink \
-  && chmod -R 700 /run/psilink
+RUN mkdir -p /work /run/alcove/sftp-credentials \
+  && chown -R node:node /work /run/alcove \
+  && chmod -R 700 /run/alcove
 
 # Stated rather than left to the runtime's passwd lookup, as in the root
 # Dockerfile: the CLI derives its default signing-identity directory from the

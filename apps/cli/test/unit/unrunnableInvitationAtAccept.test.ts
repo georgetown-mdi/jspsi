@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { UsageError } from "@psilink/core";
+import { UsageError } from "@alcove/core";
 
 import { decodeAndValidateInvitation } from "../../src/invitationDecode";
 

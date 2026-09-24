@@ -6,7 +6,7 @@ import {
   MAX_CHUNKS_PER_REASSEMBLY,
   MAX_CONCURRENT_REASSEMBLIES,
   MIN_CHUNK_RESIDENT_BYTES,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { BoundedInboundFrames } from "../../../src/connection/webrtc/inboundBounds";
 import {

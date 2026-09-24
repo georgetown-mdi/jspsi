@@ -1,4 +1,4 @@
-import type { HandshakeRole, RendezvousRole } from "@psilink/core";
+import type { HandshakeRole, RendezvousRole } from "@alcove/core";
 
 /**
  * The key-exchange handshake role each rendezvous side takes: the acceptor dials

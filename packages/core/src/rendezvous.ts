@@ -27,19 +27,19 @@ const PEER_ID_BYTES = 16;
 
 /**
  * HKDF info prefix for the rendezvous-id derivation. Versioned and role-separated
- * exactly like {@link deriveAeadKey}'s `psilink-aead-v1:<context>`: the version
+ * exactly like {@link deriveAeadKey}'s `alcove-aead-v2:<context>`: the version
  * guards against an incompatible construction change, and the role label is the
  * domain separation that makes the inviter and acceptor ids distinct from the one
  * secret.
  *
  * CROSS-IMPLEMENTATION CONTRACT: the full construction -- HKDF-SHA-256 over the
- * decoded 32-byte secret, zero salt, info `psilink-webrtc-peerid-v1:<role>`,
+ * decoded 32-byte secret, zero salt, info `alcove-webrtc-peerid-v2:<role>`,
  * first {@link PEER_ID_BYTES} bytes, lowercase hex -- is the shared rendezvous
  * contract between the web app and the CLI WebRTC transport. Both sides must
  * compute it identically or CLI<->web rendezvous breaks; do not change it without
- * changing every implementation in lockstep (and bumping the `v1` version).
+ * changing every implementation in lockstep (and bumping the `v2` version).
  */
-const PEER_ID_INFO_PREFIX = "psilink-webrtc-peerid-v1:";
+const PEER_ID_INFO_PREFIX = "alcove-webrtc-peerid-v2:";
 
 /**
  * Derive the deterministic PeerJS peer id for one rendezvous `role` from the

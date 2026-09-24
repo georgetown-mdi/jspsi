@@ -57,11 +57,11 @@ export interface SniVhostCertificates {
 /**
  * Mint the fixture's certificates, or `null` where `openssl` cannot supply
  * them -- which a suite needing them skips on, as it does for
- * `@psilink/testkit/loopbackTlsCert`, rather than reporting the environment as
+ * `@alcove/testkit/loopbackTlsCert`, rather than reporting the environment as
  * a failure of the code under test.
  */
 export function mintSniVhostCertificates(): SniVhostCertificates | null {
-  const dir = mkdtempSync(join(tmpdir(), "psilink-sni-vhost-"));
+  const dir = mkdtempSync(join(tmpdir(), "alcove-sni-vhost-"));
   try {
     mintAuthority(dir, "trusted");
     mintAuthority(dir, "untrusted");
@@ -104,7 +104,7 @@ function mintAuthority(dir: string, name: string): void {
       "1",
       "-nodes",
       "-subj",
-      `/CN=psilink test ${name} authority`,
+      `/CN=alcove test ${name} authority`,
       "-addext",
       "basicConstraints=critical,CA:TRUE",
       "-addext",

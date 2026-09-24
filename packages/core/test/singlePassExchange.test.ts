@@ -31,7 +31,7 @@ import type {
 // single-pass exchange must flow through the full path -- role resolution, the
 // payload exchange, the one-sided-output gate, and the audit record -- to the same
 // result the cascade produces. linkViaSinglePassPSI's byte-identical parity with the
-// cascade is pinned at the unit level (psiLink.test.ts); these tests pin that the
+// cascade is pinned at the unit level (link.test.ts); these tests pin that the
 // exchange.ts dispatch and every downstream consumer treat a single-pass result
 // identically, which the unit path never exercises.
 

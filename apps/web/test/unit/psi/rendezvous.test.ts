@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { deriveRendezvousPeerId, generateSharedSecret } from "@psilink/core";
+import { deriveRendezvousPeerId, generateSharedSecret } from "@alcove/core";
 
 import {
   WEBRTC_ENDPOINT_HOST_REFUSED,
@@ -14,7 +14,7 @@ import { PartnerNoShowError } from "../../../src/psi/transport/waitForConnection
 
 import type { DataConnection, PeerOptions } from "peerjs";
 import type Peer from "peerjs";
-import type { WebRTCEndpoint } from "@psilink/core";
+import type { WebRTCEndpoint } from "@alcove/core";
 
 // A fake PeerJS data channel: just the events and methods the rendezvous touches.
 class FakeConn extends EventEmitter {

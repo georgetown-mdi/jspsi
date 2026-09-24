@@ -18,7 +18,7 @@ the procedure and the reviewer's steps are in
 
 ## The gap
 
-`@openmined/psi.js` is a psilink fork, built by that repository's
+`@openmined/psi.js` is an Alcove fork, built by that repository's
 `native-prebuilds.yml` and copied here by hand as
 `lib/openmined-psi.js-<version>.tgz`. It ships native N-API addons that are
 `dlopen`'d with full process privilege and run the PSI crypto. The digests that
@@ -39,7 +39,7 @@ this note closes.
 `gh attestation verify` consuming), chosen. Keyless throughout, so there is no
 key to rotate, leak, or revoke. The attestation is stored against the
 **producing** repository, which is precisely the trust boundary in question: it
-lives outside any psilink commit, so a writer with `lib/` access cannot forge
+lives outside any Alcove commit, so a writer with `lib/` access cannot forge
 it. It is also the toolchain already in this repository -- `release.yaml`'s
 publish job runs the same action against the image manifest and already declares
 the two permissions the fork needs -- and the same Sigstore chain as the keyless

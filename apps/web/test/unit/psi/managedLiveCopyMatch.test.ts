@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { generateSharedSecret, getDefaultLinkageTerms } from "@psilink/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
   buildManagedExchangeRecord,
@@ -11,7 +11,7 @@ import {
   sameAgreedTermsAndSide,
 } from "@psi/managed/managedLiveCopyMatch";
 
-import type { LinkageTerms } from "@psilink/core";
+import type { LinkageTerms } from "@alcove/core";
 import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 
 // The terms-and-side rule on its own: which stored record an import is named

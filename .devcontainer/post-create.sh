@@ -18,7 +18,7 @@ unset HTTP_PROXY HTTPS_PROXY http_proxy https_proxy
 # reproducible, lockfile-faithful install for the from-scratch volume.
 npm ci
 
-# Build @psilink/core so the apps resolve it immediately: they import it from its
+# Build @alcove/core so the apps resolve it immediately: they import it from its
 # built dist/, which is gitignored and lives on the bind-mounted tree (not the
 # node_modules volume), so a fresh container would otherwise see it unbuilt.
 npm run build -w packages/core

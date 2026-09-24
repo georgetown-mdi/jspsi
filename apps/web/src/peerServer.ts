@@ -1,11 +1,11 @@
-import { CreatePeerServerWSOnly } from "@psilink/peerjs-broker";
+import { CreatePeerServerWSOnly } from "@alcove/peerjs-broker";
 
 import { getServer as getHttpServer } from "./httpServer";
 import { signalingDiagnosticSink } from "./signalingDiagnostics";
 
 import type { AddressInfo } from "node:net";
 
-import type { PeerServerInstance } from "@psilink/peerjs-broker/instance";
+import type { PeerServerInstance } from "@alcove/peerjs-broker/instance";
 
 function createPeerServer(): PeerServerInstance {
   const server = getHttpServer()!;

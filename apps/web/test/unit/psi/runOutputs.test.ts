@@ -3,11 +3,11 @@ import { describe, expect, test } from "vitest";
 import {
   minimalExchangeResult,
   minimalPreparedExchange,
-} from "@psilink/core/testing";
+} from "@alcove/core/testing";
 import { buildRunOutputs } from "@psi/runOutputs";
-import { getDefaultLinkageTerms } from "@psilink/core";
+import { getDefaultLinkageTerms } from "@alcove/core";
 
-import type { ExchangeResult, PreparedExchange } from "@psilink/core";
+import type { ExchangeResult, PreparedExchange } from "@alcove/core";
 import type { ObjectUrls } from "@psi/runOutputs";
 
 // A recording ObjectUrls fake: each create hands out a distinct url (or throws
@@ -107,9 +107,9 @@ describe("buildRunOutputs", () => {
     expect(outputs.matchedRecordCount).toBe(1);
     expect(outputs.record).toEqual({
       recordUrl: created[1],
-      recordFileName: "psilink-record-2026-07-08T14-32-00-000Z.json",
+      recordFileName: "alcove-record-2026-07-08T14-32-00-000Z.json",
       keysUrl: created[2],
-      keysFileName: "psilink-record-2026-07-08T14-32-00-000Z.keys.json",
+      keysFileName: "alcove-record-2026-07-08T14-32-00-000Z.keys.json",
     });
     expect(created).toHaveLength(3);
     expect(revoked).toEqual([]);

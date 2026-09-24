@@ -584,15 +584,15 @@ describe("renderReport step tables", () => {
 
 describe("repoFromRemoteUrl", () => {
   it("reads owner/name out of both remote forms git writes", () => {
-    expect(repoFromRemoteUrl("git@github.com:georgetown-mdi/jspsi.git")).toBe(
-      "georgetown-mdi/jspsi",
+    expect(repoFromRemoteUrl("git@github.com:georgetown-mdi/alcove.git")).toBe(
+      "georgetown-mdi/alcove",
     );
-    expect(repoFromRemoteUrl("https://github.com/georgetown-mdi/jspsi")).toBe(
-      "georgetown-mdi/jspsi",
+    expect(repoFromRemoteUrl("https://github.com/georgetown-mdi/alcove")).toBe(
+      "georgetown-mdi/alcove",
     );
     expect(
-      repoFromRemoteUrl("https://github.com/georgetown-mdi/jspsi.git\n"),
-    ).toBe("georgetown-mdi/jspsi");
+      repoFromRemoteUrl("https://github.com/georgetown-mdi/alcove.git\n"),
+    ).toBe("georgetown-mdi/alcove");
   });
 
   it("returns null for a remote naming no GitHub repository", () => {

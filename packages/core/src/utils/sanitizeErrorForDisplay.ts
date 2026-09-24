@@ -103,7 +103,7 @@ const REDACTED_PRIVATE_KEY = "[redacted private key]";
  * into an error). The marker `-----BEGIN ... PRIVATE KEY-----` never
  * legitimately appears in operator-facing error or log text, so matching
  * it has no false-positive risk. (PGP `... PRIVATE KEY BLOCK-----` is
- * intentionally not matched: psilink uses no PGP keys, so there is no such
+ * intentionally not matched: Alcove uses no PGP keys, so there is no such
  * sink here.)
  *
  * The gap between BEGIN and END uses a tempered negative lookahead so it
@@ -121,7 +121,7 @@ const PRIVATE_KEY_DANGLING = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*/g;
  * Last-resort redaction safety check for PEM / OpenSSH private-key
  * material in text about to be shown to an operator. NOT the primary
  * defense: secret-bearing files are parsed through the sensitive-file
- * chokepoint (shared in `@psilink/core`, re-exported by the CLI) so a
+ * chokepoint (shared in `@alcove/core`, re-exported by the CLI) so a
  * parse error never holds source, and that prevention is what callers must
  * rely on. This only guards an UNANTICIPATED sink by stripping
  * private-key blocks, which are unambiguous and never legitimate in error
@@ -363,7 +363,7 @@ export function redactAndRenderOperatorSuppliedText(
  * end.
  */
 const FIRST_PARTY_LINE_BREAK_TEXT = Symbol.for(
-  "psilink.errorDisplay.firstPartyLineBreaks",
+  "alcove.errorDisplay.firstPartyLineBreaks",
 );
 
 /**
@@ -473,7 +473,7 @@ export function renderedDisplayCostKeepingLineBreaks(block: string): number {
 /**
  * The display form {@link keepFirstPartyLineBreaks} left on `link`, or
  * `undefined` for a link that asked for no such treatment -- which is every
- * link psilink does not compose itself.
+ * link Alcove does not compose itself.
  */
 function firstPartyLineBreakText(link: unknown): string | undefined {
   if (typeof link !== "object" || link === null) return undefined;

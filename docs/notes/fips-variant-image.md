@@ -47,7 +47,7 @@ HKDF.
   it probes whether its own crypto is being served by the validated module and
   reports the host's FIPS-mode state, and warns on either when the answer is not
   what a claim needs.
-- **No psilink-level FIPS flag.** The FIPS-mode decision belongs to the host and
+- **No alcove-level FIPS flag.** The FIPS-mode decision belongs to the host and
   its system-wide crypto policy.
 - **Published as a second tag of the same repository**, `-fips` appended to each
   of the default image's three, from the same release workflow and signed under
@@ -114,7 +114,7 @@ crypto ship one artifact and a switch (Splunk, MongoDB, Elastic, AL2023 itself).
 as its worked example: it "is ignored if the system runs in FIPS mode", and "if
 you use the `--enable-fips` option on a system not running in FIPS mode, you do
 not meet the FIPS-140 compliance requirements". Redundant on a FIPS host and
-non-compliant off one. There is no psilink equivalent and there should not be.
+non-compliant off one. There is no Alcove equivalent and there should not be.
 `crypto.setFips(true)` is worse than useless as a signal: measured, it succeeds
 and `getFips()` returns 1 with no FIPS provider present anywhere.
 
@@ -253,13 +253,13 @@ validated module is nobody's certified business but this project's.
 Publishing this list is normal practice rather than an admission; Red Hat,
 GitLab, Elastic, Splunk, HashiCorp and Chainguard all publish one. Every entry
 rests on a measurement in the image rather than on reasoning about one. Where
-what an operator sees also depends on psilink's own handling of a measured
+what an operator sees also depends on Alcove's own handling of a measured
 absence, the entry separates the two.
 
 - **SFTP against a server that offers only `curve25519` key exchange.**
   Permanent, with no client-side fix. The measured part is the primitive: the
   certified module has no X25519, so `crypto.generateKeyPairSync('x25519')`
-  throws in this image. What that produces at the handshake is psilink's own
+  throws in this image. What that produces at the handshake is Alcove's own
   behaviour rather than a second measurement taken here -- it withholds from its
   offer every key exchange built on a primitive the running process cannot
   perform, so a server with nothing else to offer is refused cleanly at
@@ -267,7 +267,7 @@ absence, the entry separates the two.
   server's administrator or at a different host, instead of winning the
   negotiation and then dying mid-handshake on a raw OpenSSL string
   ([EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#key-exchange-algorithms-and-the-hosts-crypto-provider)).
-  Where the server does offer an alternative the fix is configuration psilink
+  Where the server does offer an alternative the fix is configuration Alcove
   already accepts, and a full authenticated exchange over SFTP completes with
   it:
 
@@ -292,8 +292,8 @@ absence, the entry separates the two.
   ([FIPS_SFTP_PROFILE.md](../FIPS_SFTP_PROFILE.md#the-default-offer-measured-inside-the-image)).
   A server with nothing else to accept therefore shares no cipher with that
   offer, and the run ends at negotiation before authentication. The omission is
-  the runtime's rather than psilink's or an operator's -- `ssh2`
-  capability-probes the cipher list it offers, and psilink sets
+  the runtime's rather than Alcove's or an operator's -- `ssh2`
+  capability-probes the cipher list it offers, and Alcove sets
   `algorithms.cipher` nowhere
   ([DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#upgrading-the-sftp-stack-ssh2--ssh2-sftp-client))
   -- and whether an operator naming that cipher would put it back in the offer
@@ -305,7 +305,7 @@ absence, the entry separates the two.
 - **X25519 and Ed25519 through `node:crypto` or `crypto.subtle`.** The certified
   Amazon Linux module has neither; `openssl list` reports both ABSENT while
   the provider is `status: active` and the default-configuration control lists
-  both, so the absence is the provider's rather than the listing's. No psilink
+  both, so the absence is the provider's rather than the listing's. No Alcove
   path needs either primitive: key establishment agrees over P-256 ECDH and
   receipt signing signs with ECDSA over P-256, both through `crypto.subtle`.
 - **Package operations inside the running image.** `dnf` dies under the shipped
@@ -349,14 +349,14 @@ though no configuration existed.
 The per-run report is the same question asked of the running container, and it
 is asked of the right consumer. The image ships the engagement probe and its
 entrypoint runs it before dispatching: a Node process under the image's own
-configuration, making psilink's five call shapes and requiring `fips.so` mapped
+configuration, making Alcove's five call shapes and requiring `fips.so` mapped
 into that process beside an MD5 digest and a below-minimum RSA keygen that both
 fail. The preamble reads the probe's exit status and nothing else, and parses no
 text at all. That is by design rather than incidental. Reading `openssl list
 -providers` back with awk is the obvious way to write this line and it is wrong
 twice over: `openssl` on this base is the Amazon Linux CLI, a **different
-libcrypto** from the one inside the `node` binary that runs psilink, so it
-answers for a consumer psilink does not use; and a listing parsed for an
+libcrypto** from the one inside the `node` binary that runs Alcove, so it
+answers for a consumer Alcove does not use; and a listing parsed for an
 assurance line has no comparison behind it, so every shape the parse reads
 wrongly becomes a false assurance rather than a failure. Which module is serving
 is not read back either: the entrypoint names the `FIPS_MODULE_VERSION` the
@@ -401,7 +401,7 @@ curve.
 ### Two conditions the certificate attaches to those five
 
 All five call shapes are on certificate 5438's approved-algorithm table, at the
-parameters psilink uses; the rows and the CAVP certificate ids are in
+parameters Alcove uses; the rows and the CAVP certificate ids are in
 [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5438-attests).
 Table membership is not the whole answer for two of them, because the policy
 states a condition on each somewhere other than that table. No measurement
@@ -418,7 +418,7 @@ external IVs from the operator", requested "by invoking the
 `EVP_EncryptInit_ex2` API function with a non-NULL iv value", and "the API will
 set a non-approved service indicator". WebCrypto exposes no internal-IV mode --
 `AesGcmParams.iv` is a required member -- so every `crypto.subtle` AES-GCM call
-supplies an IV by construction, on any platform. psilink's is a deterministic
+supplies an IV by construction, on any platform. Alcove's is a deterministic
 12-byte value holding the sender's sequence number, built in application code
 in `packages/core/src/connection/encryptedMessageConnection.ts` and included in
 the envelope so the receiver reconstructs the same bytes
@@ -429,7 +429,7 @@ So the policy's own text decides it, with no measurement outstanding: the AEAD
 is not an approved service under this certificate, whatever its algorithm row
 says. The approved routes the policy names are the internal-IV service
 (Scenario 2 of FIPS 140-3 IG C.H) and the TLS 1.2 and TLS 1.3 scenarios, and
-psilink is on none of them as written. What the conclusion bounds is the wording
+Alcove is on none of them as written. What the conclusion bounds is the wording
 rather than the dispatch: the operation still runs inside the validated module's
 code, which is what the probe's AES-GCM leg measures and what a claim may name,
 so "the module performs the AEAD" and "the AEAD is an approved service" are two
@@ -440,9 +440,9 @@ here rests on one.
 **The SP 800-56Ar3 assurances are conditioned on a TLS application.** Section
 2.7.4 (p. 20) opens: "To comply with the assurances found in Section 5.6.2 of SP
 800-56Ar3, the operator must use the module together with an application that
-implements the TLS protocol." psilink is not one -- its P-256 ECDH runs inside a
-Noise NNpsk0 handshake over psilink's own transport. The section's two remaining
-sentences are the ones psilink meets: the ephemeral key pairs are generated
+implements the TLS protocol." Alcove is not one -- its P-256 ECDH runs inside a
+Noise NNpsk0 handshake over Alcove's own transport. The section's two remaining
+sentences are the ones Alcove meets: the ephemeral key pairs are generated
 through `crypto.subtle` into the same module rather than imported from outside
 it, which is the probe's ECDH leg as much as the handshake's, and the peer
 public key is validated inside the module either way. So the
@@ -670,7 +670,7 @@ reading -- Docker Hub is not reachable from the development container and no
 ## See also
 
 - [fips-provider-surface.md](fips-provider-surface.md) -- what a FIPS provider
-  holds and reaches in a psilink image, the four-leg engagement attribution,
+  holds and reaches in an Alcove image, the four-leg engagement attribution,
   and what the OpenSSL Project's own certificates approve.
 - [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) and
   [receipt-signing-fips-boundary.md](receipt-signing-fips-boundary.md) -- the two

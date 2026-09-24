@@ -355,7 +355,7 @@ rather than a consequence that follows automatically.
 **A proposal for the owner to ratify.** Nothing in this section is filed,
 scoped, or scheduled by this record.
 
-`Done is: a psilink exchange reaches its peer-coordination and relay endpoints at a deployment separate from the web app's, with credentials minted per exchange, and a CLI party on a UDP-blocked network completes an exchange with a browser party through it.`
+`Done is: an alcove exchange reaches its peer-coordination and relay endpoints at a deployment separate from the web app's, with credentials minted per exchange, and a CLI party on a UDP-blocked network completes an exchange with a browser party through it.`
 
 Candidate members, by title:
 

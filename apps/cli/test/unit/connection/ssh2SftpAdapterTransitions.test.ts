@@ -3,7 +3,7 @@
 import { EventEmitter } from "node:events";
 
 import { describe, expect, test, vi } from "vitest";
-import { TransportOperationStalledError } from "@psilink/core";
+import { TransportOperationStalledError } from "@alcove/core";
 
 import { SSH2SFTPClientAdapter } from "../../../src/connection/ssh2SftpAdapter";
 import { SFTP_REDIAL_WARN_INTERVAL } from "../../../src/connection/sftpAdapterLedger";

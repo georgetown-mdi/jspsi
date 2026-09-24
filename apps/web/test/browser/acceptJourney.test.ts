@@ -17,8 +17,8 @@ import {
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
-} from "@psilink/core";
-import { minimalPreparedExchange } from "@psilink/core/testing";
+} from "@alcove/core";
+import { minimalPreparedExchange } from "@alcove/core/testing";
 
 import { WAITING_STAGE_ID, stagesFor } from "@exchange/exchangeRun";
 import { AcceptorScreen } from "@exchange/AcceptorScreen";
@@ -29,7 +29,7 @@ import type {
   InvitationToken,
   LinkageTerms,
   PreparedExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 
 // Mounts the acceptor route tree and drives it end to end through the UI a
 // user touches (file select, consent action, Start), checking the handoff

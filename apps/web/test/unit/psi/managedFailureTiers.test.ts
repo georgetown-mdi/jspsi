@@ -4,7 +4,7 @@ import {
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
-} from "@psilink/core";
+} from "@alcove/core";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -29,7 +29,7 @@ import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
-import type { CSVRow } from "@psilink/core";
+import type { CSVRow } from "@alcove/core";
 import type { ManagedLocalState } from "@psi/managed/managedLocalState";
 
 // The desync-versus-attack tier derivation, tested in Node: each recorded benign state

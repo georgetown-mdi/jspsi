@@ -38,7 +38,7 @@ export const MAX_SFTP_CONNECTION_RESPONSE_BYTES = 64 * 1024;
 
 /**
  * The cap on the recurring-run hand-off (`GET /api/jobs/:jobId/handoff`), whose
- * `template` is the `psilink.yaml` text or the argv of the command the operator
+ * `template` is the `alcove.yaml` text or the argv of the command the operator
  * would schedule. The config template recomposes the create intent's own blocks,
  * so the intent schema's caps decide its length: `metadata` at
  * `MAX_METADATA_COLUMNS` entries each holding a

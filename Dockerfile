@@ -37,7 +37,7 @@ COPY packages/core/*.ts packages/core/tsconfig.json packages/core/
 COPY packages/core/src packages/core/src/
 COPY apps/cli/tsconfig.json apps/cli/*.ts apps/cli/
 COPY apps/cli/src apps/cli/src/
-# @psilink/core must be built before the web build: apps/web consumes it from its
+# @alcove/core must be built before the web build: apps/web consumes it from its
 # built dist/ (a file: workspace dependency), so build core and the CLI first.
 RUN npm run build -w packages/core -w apps/cli
 
@@ -78,9 +78,9 @@ ENV VITE_DEPLOYMENT_PROFILE=${VITE_DEPLOYMENT_PROFILE}
 # (apps/web/src/bench/acceptKit.ts). `set -e` fails the layer on the reader,
 # `test -n` on the empty value, and the build runs only past both.
 RUN set -eu; \
-  VITE_PSILINK_VERSION="$(node -p "require('/build/apps/cli/package.json').version ?? ''")"; \
-  test -n "$VITE_PSILINK_VERSION"; \
-  export VITE_PSILINK_VERSION; \
+  VITE_ALCOVE_VERSION="$(node -p "require('/build/apps/cli/package.json').version ?? ''")"; \
+  test -n "$VITE_ALCOVE_VERSION"; \
+  export VITE_ALCOVE_VERSION; \
   npm run build -w apps/web
 
 # The tree the runtime stage ships: the same lockfile-exact resolution as above
@@ -106,16 +106,17 @@ RUN --mount=type=cache,target=/root/.npm \
 
 FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80
 
-# The source label is what links the package on ghcr.io to this repository, so
-# a hand-pushed tag inherits the repository's package visibility and access;
-# the release workflow adds the same labels through docker/metadata-action.
-LABEL org.opencontainers.image.source="https://github.com/georgetown-mdi/jspsi" \
-      org.opencontainers.image.description="psilink: privacy-preserving record linkage over SFTP, a shared folder, or WebRTC" \
+# Metadata the package page on ghcr.io shows. For an organization package the
+# source label links and grants nothing: repository write access is set under
+# the package's Manage Actions access (docs/RELEASES.md, step 8). The release
+# workflow adds the same labels through docker/metadata-action.
+LABEL org.opencontainers.image.source="https://github.com/georgetown-mdi/alcove" \
+      org.opencontainers.image.description="Alcove: privacy-preserving record linkage over SFTP, a shared folder, or WebRTC" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 # The runtime stage resolves no npm dependency: it copies the builder's
 # production node_modules and mirrors the workspace layout around it so the
-# node_modules/@psilink/core and node_modules/psilink workspace links resolve.
+# node_modules/@alcove/core and node_modules/alcove workspace links resolve.
 # Every runtime dependency and transitive is thereby frozen to the committed
 # package-lock.json -- re2js in particular runs partner-supplied transform
 # regexes and must behave byte-identically on both parties or PSI keys silently
@@ -219,13 +220,13 @@ RUN chmod +x /app/docker-entrypoint.sh
 #   directory's ownership instead -- what an operator has to do about that is in
 #   docs/DEPLOYMENT.md.
 #
-#   /run/psilink is the console's pasted-credential scratch directory
+#   /run/alcove is the console's pasted-credential scratch directory
 #   (apps/web/src/jobs/sftpScratch.ts). Its parent /run is root-owned, so an
 #   unprivileged server cannot create it at boot -- and that boot fails closed
 #   rather than starting without it.
-RUN mkdir -p /work /run/psilink/sftp-credentials \
-  && chown -R node:node /work /run/psilink \
-  && chmod -R 700 /run/psilink
+RUN mkdir -p /work /run/alcove/sftp-credentials \
+  && chown -R node:node /work /run/alcove \
+  && chmod -R 700 /run/alcove
 
 # Stated rather than left to the runtime's passwd lookup: the CLI derives its
 # default signing-identity directory from the home directory while its module
@@ -242,7 +243,7 @@ USER node
 
 WORKDIR /work
 
-# --expose-gc lets @psilink/core release the single-pass linkage's transient
+# --expose-gc lets @alcove/core release the single-pass linkage's transient
 # allocation peak at the phase boundaries (relieveTransientMemory in
 # packages/core/src/link.ts), lowering the receiver's peak RSS; a no-op for every
 # other command. Node consumes the flag, so it does not reach the CLI's argv. The

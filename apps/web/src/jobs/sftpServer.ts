@@ -7,7 +7,7 @@ import {
   ConnectionConfigSchema,
   HOST_KEY_FINGERPRINT_REGEX,
   withRetainModeImplications,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import { isBareSftpHost } from "@psi/sftpHost";
 
@@ -684,12 +684,12 @@ function credentialContainmentWarning(
   if (exclusion.kind === "rendezvous")
     return (
       `The ${fieldLabel} credential file is inside ${exclusion.label}, which you ` +
-      "sync with your partner -- so they could read it -- and which psilink also " +
+      "sync with your partner -- so they could read it -- and which Alcove also " +
       `writes exchange files into. ${remediation}`
     );
   return (
     `The ${fieldLabel} credential file is inside ${exclusion.label}, the folder ` +
-    "psilink writes the exchange's working files and results into. A credential " +
+    "Alcove writes the exchange's working files and results into. A credential " +
     "kept there can be overwritten or shared out with the results, and if you " +
     `sync that folder with your partner they could read it. ${remediation}`
   );

@@ -5,16 +5,16 @@ import {
   sanitizeErrorForDisplay,
   serializeExchangeRecord,
   serializeVerificationKeys,
-} from "@psilink/core";
-import type { ExchangeRecord, VerificationKeys } from "@psilink/core";
+} from "@alcove/core";
+import type { ExchangeRecord, VerificationKeys } from "@alcove/core";
 
 import { writeFileOwnerOnly } from "./fileUtils";
 
 /** Basename stem for the default record file. */
-export const DEFAULT_RECORD_BASENAME = "psilink-record";
+export const DEFAULT_RECORD_BASENAME = "alcove-record";
 
 /**
- * Default path for the self-attested record: `./psilink-record-<stamp>.json` in
+ * Default path for the self-attested record: `./alcove-record-<stamp>.json` in
  * the working directory, where `<stamp>` is the record's own `createdAt`
  * timestamp made filesystem-safe (colons and the fractional-second dot replaced
  * with hyphens).

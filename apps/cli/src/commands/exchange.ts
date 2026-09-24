@@ -13,12 +13,12 @@ import {
   resolveExchangeInputs,
   sanitizeErrorForDisplay,
   UsageError,
-} from "@psilink/core";
+} from "@alcove/core";
 import type {
   ExchangeDataSpec,
   FileSyncOptions,
   PreparedExchange,
-} from "@psilink/core";
+} from "@alcove/core";
 
 import {
   applyConnectionOverrides,
@@ -77,7 +77,7 @@ import {
   type ProtocolConnectionConfig,
   type SigningPersist,
 } from "../protocol";
-import type { SigningConfig } from "@psilink/core";
+import type { SigningConfig } from "@alcove/core";
 
 export function builder(cmd: Argv): Argv {
   return addCommonBootstrapOptions(
@@ -159,7 +159,7 @@ export function builder(cmd: Argv): Argv {
         "never deleted. Use to recover a directory after a crashed or " +
         "mismatched prior run, once you have confirmed no other session is " +
         "using it. CLI-only and invocation-scoped: it is never persisted to " +
-        "psilink.yaml. Refuses on a retain-mode signal unless " +
+        "alcove.yaml. Refuses on a retain-mode signal unless " +
         "--force-retain-sweep is also set",
     })
     .option("force-retain-sweep", {
@@ -176,7 +176,7 @@ export function builder(cmd: Argv): Argv {
       describe:
         "provision the key file from an invitation code (use @path -- " +
         "`--invitation @code.txt` -- to keep the code out of shell history), the " +
-        "same code `psilink accept` takes. For the party that composed the " +
+        "same code `alcove accept` takes. For the party that composed the " +
         "exchange in the web app and downloaded a config that has no secret: " +
         "this completes local provisioning from the invitation and runs the " +
         "exchange in one command. The code is decoded and validated (checksum, " +
@@ -276,8 +276,8 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
 }
 
 // The runtime-injected authentication fields: their values come only from
-// `.psilink.key`, so an operator who sets them in the top-level `authentication`
-// block of psilink.yaml is warned and the value is stripped. Each entry lists
+// `.alcove.key`, so an operator who sets them in the top-level `authentication`
+// block of alcove.yaml is warned and the value is stripped. Each entry lists
 // the user-input spellings (snake_case and camelCase) a field can appear as
 // before `camelizeKeys` runs, plus the hint shown when it is stripped.
 const INJECTED_AUTH_FIELDS: Record<string, { forms: string[]; hint: string }> =
@@ -299,7 +299,7 @@ const INJECTED_AUTH_FIELDS: Record<string, { forms: string[]; hint: string }> =
 /**
  * Warn about and strip the runtime-injected authentication fields
  * (`shared_secret`/`expires`) from a raw top-level `authentication` block, in
- * place. Their values come only from `.psilink.key`, so a value set in YAML is
+ * place. Their values come only from `.alcove.key`, so a value set in YAML is
  * ignored; warning rather than silently dropping lets the operator see why their
  * setting did nothing. Operator-policy fields (e.g. `token_max_age_days`) are NOT
  * touched -- they pass through to schema validation, which is the authority on
@@ -338,16 +338,16 @@ export function warnAndStripInjectedAuthFields(
 
 /** What {@link loadConfig} states behind a key-file path with no file at it. */
 const MISSING_KEY_FILE_REMEDY =
-  " does not exist. Create one with 'psilink invite' (generate an " +
-  "invitation) or 'psilink accept' (accept a partner's invitation); both " +
-  "write a .psilink.key.";
+  " does not exist. Create one with 'alcove invite' (generate an " +
+  "invitation) or 'alcove accept' (accept a partner's invitation); both " +
+  "write a .alcove.key.";
 
 /** What {@link loadConfig} states behind an expired secret's key-file path. */
 const EXPIRED_SECRET_REMEDY =
   " and cannot be used; no exchange was attempted. Both parties must " +
   "re-invite to establish a new shared secret: remove the expired key file " +
-  "on both sides, then one party runs 'psilink invite' (the offline form, " +
-  "with no URL) and the other runs 'psilink accept INVITATION " +
+  "on both sides, then one party runs 'alcove invite' (the offline form, " +
+  "with no URL) and the other runs 'alcove accept INVITATION " +
   "[INPUT_FILE]'. Each side's configuration is reused; only the key file is " +
   "recreated.";
 
@@ -358,7 +358,7 @@ const MISSING_SIGNING_IDENTITY_PREAMBLE =
 
 /** What {@link resolveSigningPersist} states behind the identity path. */
 const MISSING_SIGNING_IDENTITY_REMEDY =
-  ", the path signing.identity_file names; create it there with 'psilink " +
+  ", the path signing.identity_file names; create it there with 'alcove " +
   "fingerprint --identity-file <that path>', or point signing.identity_file " +
   "at the file you already hold";
 
@@ -382,7 +382,7 @@ export function loadConfig(options: ExchangeOptions): {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       const message = messageWithOperatorText`config file ${operatorSuppliedText(
         options.configFile,
-      )} does not exist; to create one, run 'psilink invite URL ...' first`;
+      )} does not exist; to create one, run 'alcove invite URL ...' first`;
       throw Object.assign(
         keepOperatorSuppliedText(new Error(message.text), message),
         { code: "ENOENT" },
@@ -540,7 +540,7 @@ export function loadConfig(options: ExchangeOptions): {
   }
 
   // Warn when connection-per-poll is paired with a short poll interval, so a
-  // wasteful setting persisted in psilink.yaml is flagged, not only a CLI
+  // wasteful setting persisted in alcove.yaml is flagged, not only a CLI
   // --connection-per-poll. Read through a FileSyncOptions cast for the same
   // reason as the call above: the merged options are typed for every channel,
   // and a webrtc block cannot hold either field. A no-op off sftp (the mode is
@@ -868,9 +868,9 @@ const SIGNING_IDENTITY_FILE_UNSET_REFUSAL =
   "this exchange signs receipts (signing.mode: certificate) but names no " +
   "signing identity. Set signing.identity_file to the path where the " +
   "identity lives -- a mount of its own is the usual home, for example " +
-  "/run/signing/psilink-signing-identity.json -- and create the file there " +
-  "with 'psilink fingerprint --identity-file " +
-  "/run/signing/psilink-signing-identity.json'. The run reads it and writes " +
+  "/run/signing/alcove-signing-identity.json -- and create the file there " +
+  "with 'alcove fingerprint --identity-file " +
+  "/run/signing/alcove-signing-identity.json'. The run reads it and writes " +
   "nothing to it, so a read-only mount is enough. Or set signing.mode to " +
   '"none" to run unsigned.';
 
@@ -893,7 +893,7 @@ function certificateModeIdentityPath(identityFile: string | undefined): string {
  * The exchange handler runs this as a pre-flight, ahead of both the dataset
  * preparation that can put the outbound-payload consent prompt in front of the
  * operator and the first-use host-key step whose probe opens a transport to the
- * server and whose accepted pin is written into the operator's `psilink.yaml`.
+ * server and whose accepted pin is written into the operator's `alcove.yaml`.
  * A run this refuses could never have finished, so none of that should have
  * happened on its way to being told so. {@link resolveSigningPersist} raises the
  * same refusal where it loads the identity, which is where a caller
@@ -922,7 +922,7 @@ function assertSigningIdentityNamed(signing: SigningConfig | undefined): void {
  * exchange.
  *
  * The identity-file path is the config's `signing.identity_file` (tilde-expanded
- * at use, as `psilink fingerprint` does) and nothing else: the signing identity
+ * at use, as `alcove fingerprint` does) and nothing else: the signing identity
  * is a credential, so where it lives is the operator's custody decision and no
  * location is resolved on their behalf. A `certificate`-mode block that names
  * none is refused here as well, in the one wording
@@ -1066,7 +1066,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // parsed configuration alone, so it is refused here: ahead of the dataset
     // preparation that can put the outbound-payload consent prompt in front of
     // the operator, and ahead of the first-use host-key step that opens a probe
-    // transport to the server and writes an accepted pin into psilink.yaml.
+    // transport to the server and writes an accepted pin into alcove.yaml.
     // Neither should happen on the way to telling an operator the run could
     // never have finished.
 
