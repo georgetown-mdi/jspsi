@@ -152,12 +152,7 @@ conn.commit()`,
   const state = () => python(READ_TABLE, [turndb]);
   return {
     register: (id, key, days = "none", extraEnv = {}) =>
-      runWith(
-        extraEnv,
-        "register-exchange.sh",
-        days === undefined ? [id] : [id, days],
-        `${key}\n`,
-      ),
+      runWith(extraEnv, "register-exchange.sh", [id, days], `${key}\n`),
     registerArgs: (args, input) =>
       runWith({}, "register-exchange.sh", args, input),
     revoke: (id) => runWith({}, "revoke-exchange.sh", [id]),
@@ -654,6 +649,57 @@ except relay_table.TableError as error:
     expect(result.stderr).toContain("line 2 of the mapping");
     expect(result.stderr).not.toMatch(HEX64);
     expect(host.mapping()).toEqual([]);
+  });
+
+  const nowSeconds = () => Math.floor(Date.now() / 1000);
+  it.each([
+    [
+      "an id under verify.sh's prefix",
+      () => `psilink-verify-a ${KEY_B}`,
+      "may not start with 'psilink-verify-'",
+    ],
+    [
+      "a stamp later than now",
+      () => `old-2 ${KEY_B} ${nowSeconds() + 86400} 30`,
+      "later than now",
+    ],
+    [
+      "a stamp past a 64-bit integer",
+      () => `old-2 ${KEY_B} 99999999999999999999 30`,
+      "later than now",
+    ],
+  ])("refuses the whole mapping on %s", (_, line, reason) => {
+    const host = fixtureHost();
+    const mapFile = join(host.root, "exchange-keys");
+    writeFileSync(mapFile, `old-1 ${KEY_A} 1790000000 30\n${line()}\n`);
+    const result = spawnSync(
+      "python3",
+      [join(relay, "relay_table.py"), "import-mapping", mapFile],
+      { encoding: "utf8", env: { ...host.env, PSILINK_RELAY_REALM: REALM } },
+    );
+    expect(result.status).toBe(3);
+    expect(result.stderr).toContain("line 2 of the mapping");
+    expect(result.stderr).toContain(reason);
+    expect(result.stderr).not.toMatch(HEX64);
+    expect(host.mapping()).toEqual([]);
+    expect(host.rows()).toEqual([listed(KEY_LISTED)]);
+  });
+
+  it("imports a mapping stamped a moment ago", () => {
+    const host = fixtureHost();
+    const mapFile = join(host.root, "exchange-keys");
+    const stamp = nowSeconds() - 5;
+    writeFileSync(mapFile, `old-1 ${KEY_A} ${stamp} 30\n`);
+    const result = spawnSync(
+      "python3",
+      [join(relay, "relay_table.py"), "import-mapping", mapFile],
+      { encoding: "utf8", env: { ...host.env, PSILINK_RELAY_REALM: REALM } },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(host.mapping()).toMatchObject([
+      { id: "old-1", at: stamp, days: 30 },
+    ]);
+    expect(host.rows()).toEqual([listed(KEY_LISTED), listed(KEY_A)].sort());
   });
 
   it("reports status of a mapping and its row, reading the key from stdin", () => {

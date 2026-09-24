@@ -306,15 +306,17 @@ def forget_key(conn, realm, key):
     return _transaction(conn, body)
 
 
-def parse_mapping(text):
+def parse_mapping(text, now):
     """The rows of the text mapping the shell scripts kept before this module:
-    "<id> <key> [<registered-at> <max-age-days|->]" per line."""
+    "<id> <key> [<registered-at> <max-age-days|->]" per line. A row is held to
+    a fresh registration's rules, and its stamp to at most `now`."""
+    now = int(now)
     rows = []
     for number, line in enumerate(text.splitlines(), 1):
         fields = line.split()
         if not fields:
             continue
-        if len(fields) not in (2, 4) or not valid_exchange_id(fields[0]) or not valid_key(fields[1]):
+        if len(fields) not in (2, 4):
             raise Refused("line %d of the mapping is not '<exchange-id> <key> [<registered-at> <max-age-days>]'" % number)
         registered_at, max_age_days = None, None
         if len(fields) == 4:
@@ -322,8 +324,12 @@ def parse_mapping(text):
                 raise Refused("line %d of the mapping has a malformed stamp or max-age-days" % number)
             registered_at = int(fields[2])
             max_age_days = None if fields[3] == "-" else int(fields[3])
-            if not valid_max_age_days(max_age_days):
-                raise Refused("line %d of the mapping has a malformed stamp or max-age-days" % number)
+            if registered_at > now:
+                raise Refused("line %d of the mapping has a registered-at stamp later than now" % number)
+        try:
+            check_registration(fields[0], fields[1], max_age_days)
+        except Refused as refusal:
+            raise Refused("line %d of the mapping: %s" % (number, refusal))
         rows.append((fields[0], fields[1], registered_at, max_age_days))
     return rows
 
@@ -448,11 +454,13 @@ def run_command(command, args):
             raise Refused("PSILINK_RELAY_REALM is unset in relay.env")
         try:
             with open(args[0], encoding="ascii") as handle:
-                rows = parse_mapping(handle.read())
+                text = handle.read()
         except (OSError, UnicodeDecodeError) as error:
             raise TableError("could not read the mapping %s: %s" % (args[0], error))
+        now = time.time()
+        rows = parse_mapping(text, now)
         run_as_table_owner(TURNDB)
-        imported, skipped = import_mapping(open_table(), realm, rows, time.time())
+        imported, skipped = import_mapping(open_table(), realm, rows, now)
         print("imported %d exchange(s) from %s; %d already registered here were left alone" % (imported, args[0], skipped))
         return 0
     raise AssertionError(command)

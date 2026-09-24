@@ -206,14 +206,21 @@ register() {
 register "$VERIFY_A" "$KEY_A"
 register "$VERIFY_B" "$KEY_B"
 
-# The recipe mint-credential.sh uses, over a key given here. With hexkey the key
-# is the 32 bytes the hex decodes to, which coturn must refuse.
-mint() {
-  printf '%s' "$1" | openssl dgst -sha1 -hmac "$2" -binary | openssl base64 | tr -d '\n'
+# The recipe mint-credential.sh uses, over a key given here. The key reaches
+# python3 on stdin, never its command line, since a registered key does not
+# lapse. With hex the key is the 32 bytes the hex decodes to, which coturn must
+# refuse.
+hmac_sha1_base64() {
+  printf '%s\n%s' "$3" "$2" | python3 -c '
+import base64, hashlib, hmac, sys
+key, _, message = sys.stdin.buffer.read().partition(b"\n")
+if sys.argv[1] == "hex":
+    key = bytes.fromhex(key.decode("ascii"))
+sys.stdout.write(base64.b64encode(hmac.new(key, message, hashlib.sha1).digest()).decode("ascii"))
+' "$1"
 }
-mint_over_decoded_bytes() {
-  printf '%s' "$1" | openssl dgst -sha1 -mac hmac -macopt "hexkey:$2" -binary | openssl base64 | tr -d '\n'
-}
+mint() { hmac_sha1_base64 text "$1" "$2"; }
+mint_over_decoded_bytes() { hmac_sha1_base64 hex "$1" "$2"; }
 run_user() { printf '%s:%s' "$(( $(date -u +%s) + 600 ))" "$1"; }
 
 # --- a credential for this run ----------------------------------------------

@@ -17,3 +17,5 @@ turndb-journal
 *.pem
 *.key
 *.crt
+# The bytecode cache python3 writes beside relay_table.py when run without -B.
+__pycache__/
