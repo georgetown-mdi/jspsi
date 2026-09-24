@@ -8,7 +8,7 @@
 # shapes assumed in advance. Fix what a later run gets wrong rather than
 # loosening a probe until it passes.
 #
-# Four probes, in the order a failure matters:
+# Five probes, in the order a failure matters:
 #
 #   handshake     a real TLS handshake on 443/tcp, and the certificate the relay
 #                 serves for its own realm
@@ -21,6 +21,10 @@
 #                 key's 32 decoded bytes rather than its 64 hex characters is
 #                 refused (docs/spec/PROTOCOL.md, Relay credential derivation),
 #                 and a revoked key's new allocation is refused
+#   registrar     where the host holds a registrar token: a call without the
+#                 token, or with a wrong one, is refused and writes nothing, and
+#                 a registration and a revocation with it reach the mapping and
+#                 the table. Skipped, and said so, where the host holds none
 #
 # The third is the one that cannot be inferred from the second: a relay that
 # allocates is working, and a relay that allocates toward its own VPC and the
@@ -169,21 +173,23 @@ fi
 # is replaced rather than accumulated by the next one.
 VERIFY_A=psilink-verify-a
 VERIFY_B=psilink-verify-b
+VERIFY_R=psilink-verify-registrar
 KEY_A="$(openssl rand -hex 32)"
 KEY_B="$(openssl rand -hex 32)"
+KEY_R="$(openssl rand -hex 32)"
 KEY_UNREGISTERED="$(openssl rand -hex 32)"
 # Cleanup revokes each id, which drops its mapping line, then removes each key
 # from the table by value: a register can add the row and still fail, leaving a
 # key no mapping line holds.
 cleanup() {
   local id
-  for id in "$VERIFY_A" "$VERIFY_B"; do
+  for id in "$VERIFY_A" "$VERIFY_B" "$VERIFY_R"; do
     "$HERE/revoke-exchange.sh" "$id" > /dev/null 2>&1 || true
   done
   (
     # shellcheck source=exchange-keys.sh
     . "$HERE/exchange-keys.sh"
-    set -- "$VERIFY_A" "$KEY_A" "$VERIFY_B" "$KEY_B"
+    set -- "$VERIFY_A" "$KEY_A" "$VERIFY_B" "$KEY_B" "$VERIFY_R" "$KEY_R"
     while [ "$#" -gt 0 ]; do
       if [ -n "$2" ]; then
         remove_key_by_value "$2"
@@ -195,7 +201,7 @@ cleanup() {
       fi
       shift 2
     done
-  ) < /dev/null || printf 'WARNING: could not check the secrets table for the keys this run registered for %s and %s; see the message above\n' "$VERIFY_A" "$VERIFY_B" >&2
+  ) < /dev/null || printf 'WARNING: could not check the secrets table for the keys this run registered for %s, %s, and %s; see the message above\n' "$VERIFY_A" "$VERIFY_B" "$VERIFY_R" >&2
   return 0
 }
 trap cleanup EXIT
@@ -340,6 +346,86 @@ if [ "$TABLE_READY" = 1 ]; then
   fi
 else
   report unclear "no key was registered, so the secrets table was not probed"
+fi
+
+# --- the registrar ---------------------------------------------------------------
+# Configured when the host holds the relay-owner token. Every request goes over
+# HTTPS to the realm's name, and the token and key reach curl on stdin, never
+# its command line. Judged by the status code and by reading the mapping and the
+# table back, never by the response text.
+REGISTRAR_TOKEN_FILE="${PSILINK_RELAY_REGISTRAR_TOKEN_FILE:-$ETC/registrar-token}"
+REGISTRAR_PORT="${PSILINK_RELAY_REGISTRAR_PORT:-8443}"
+registrar_status() {
+  local method="$1" token="$2" body="$3"
+  {
+    printf 'url = "https://%s:%s/exchanges/%s"\n' "$REALM" "$REGISTRAR_PORT" "$VERIFY_R"
+    printf 'request = "%s"\n' "$method"
+    [ -z "$token" ] || printf 'header = "Authorization: Bearer %s"\n' "$token"
+    if [ -n "$body" ]; then
+      printf 'header = "Content-Type: application/json"\n'
+      printf 'data = "%s"\n' "${body//\"/\\\"}"
+    fi
+  } | timeout 150 curl -sS -K - --connect-to "$REALM:$REGISTRAR_PORT:$CONNECT:$REGISTRAR_PORT" \
+    -o /dev/null -w '%{http_code}' 2>/dev/null
+}
+# 0 when the mapping points the id at this run's key and the table lists it, 3
+# when neither holds it, and anything else when the two disagree or the table
+# cannot be read.
+registrar_read_back() {
+  (
+    # shellcheck source=exchange-keys.sh
+    . "$HERE/exchange-keys.sh"
+    mapped="$(key_of "$VERIFY_R")"
+    listed=0
+    table_lists_key "$KEY_R" || listed=$?
+    if [ "$mapped" = "$KEY_R" ] && [ "$listed" -eq 0 ]; then exit 0; fi
+    if [ "$mapped" != "$KEY_R" ] && [ "$listed" -eq 1 ]; then exit 3; fi
+    exit 2
+  ) < /dev/null
+}
+expect_status() {
+  local label="$1" want="$2" got="$3"
+  if [ "$got" = "$want" ]; then
+    report pass "$label was answered $want"
+  elif [ -z "$got" ] || [ "$got" = 000 ]; then
+    report unclear "$label got no answer from $CONNECT:$REGISTRAR_PORT" "is psilink-relay-registrar.service running? journalctl -u psilink-relay-registrar.service"
+  else
+    report fail "$label was answered $got, not $want"
+  fi
+}
+
+if [ ! -f "$REGISTRAR_TOKEN_FILE" ]; then
+  printf '  SKIP     the registrar is not configured on this host (no %s)\n' "$REGISTRAR_TOKEN_FILE"
+else
+  REGISTRAR_TOKEN="$(tr -d '[:space:]' < "$REGISTRAR_TOKEN_FILE")"
+  REGISTER_BODY="{\"key\": \"$KEY_R\", \"maxAgeDays\": 1}"
+  expect_status "a registration with no token" 401 "$(registrar_status PUT "" "$REGISTER_BODY")"
+  expect_status "a registration with a wrong token" 401 "$(registrar_status PUT "$(openssl rand -hex 32)" "$REGISTER_BODY")"
+  expect_status "a revocation with no token" 401 "$(registrar_status DELETE "" "")"
+  READ_BACK=0; registrar_read_back || READ_BACK=$?
+  if [ "$READ_BACK" -eq 3 ]; then
+    report pass "the refused registration left no row"
+  else
+    report fail "a refused registration left the mapping or the table holding its key"
+  fi
+  STATUS="$(registrar_status PUT "$REGISTRAR_TOKEN" "$REGISTER_BODY")"
+  expect_status "a registration with the token" 200 "$STATUS"
+  if [ "$STATUS" = 200 ]; then
+    READ_BACK=0; registrar_read_back || READ_BACK=$?
+    if [ "$READ_BACK" -eq 0 ]; then
+      report pass "the registration is in the mapping and the secrets table"
+    else
+      report fail "the registrar answered 200, but the mapping and the secrets table do not both hold the key"
+    fi
+    STATUS="$(registrar_status DELETE "$REGISTRAR_TOKEN" "")"
+    expect_status "a revocation with the token" 200 "$STATUS"
+    READ_BACK=0; registrar_read_back || READ_BACK=$?
+    if [ "$READ_BACK" -eq 3 ]; then
+      report pass "the revocation left the mapping and the secrets table"
+    else
+      report fail "after the revocation the mapping or the secrets table still holds the key"
+    fi
+  fi
 fi
 
 printf '\n%s pass, %s fail, %s unclear\n' "$PASS" "$FAIL" "$UNCLEAR"

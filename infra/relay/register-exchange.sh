@@ -1,17 +1,19 @@
 #!/bin/bash
 # Register one exchange's relay key in the relay's secrets table.
 #
-#   register-exchange.sh <exchange-id> <key-hex64>
+#   register-exchange.sh <exchange-id> <key-hex64> [<max-age-days>]
 #
 # The key is the exchange's relay key (docs/spec/PROTOCOL.md, Relay credential
 # derivation). coturn reads the table per request, so a credential minted under
 # it authenticates from the next allocation on, with no restart. An exchange
 # already registered has its new key added before its prior key is removed, so
 # both keys allocate for a moment and the exchange is never left without one.
+# With max-age-days, sweep-exchanges.sh revokes the row that many days after
+# this registration unless a later one replaces it (README.md, Per-exchange keys).
 set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-  printf 'usage: register-exchange.sh <exchange-id> <key-hex64>\n' >&2
+if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
+  printf 'usage: register-exchange.sh <exchange-id> <key-hex64> [<max-age-days>]\n' >&2
   exit 2
 fi
 # shellcheck source=exchange-keys.sh
@@ -19,8 +21,10 @@ fi
 
 ID="$1"
 KEY="$2"
+MAX_AGE_DAYS="${3:-}"
 check_exchange_id "$ID"
 check_key "$KEY"
+[ "$#" -lt 3 ] || check_max_age_days "$MAX_AGE_DAYS"
 
 HOLDER="$(id_of_key "$KEY")"
 if [ -n "$HOLDER" ] && [ "$HOLDER" != "$ID" ]; then
@@ -43,7 +47,7 @@ if [ "$LISTED" -ne 0 ]; then
   fi
   die "the secrets table was not updated with exchange $ID's key, and $MAP_FILE is unchanged; check that $DATA_DIR/turndb is writable by the relay image's account, then run register-exchange.sh again"
 fi
-write_mapping "$ID" "$KEY" ||
+write_mapping "$ID" "$KEY" "$MAX_AGE_DAYS" ||
   die "added exchange $ID's new key to the secrets table, but could not record it in $MAP_FILE, which is unchanged; the new key authenticates until removed: $(list_table_hint)"
 
 if [ -z "$PRIOR" ]; then

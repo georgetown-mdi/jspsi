@@ -1,10 +1,12 @@
 #!/bin/bash
-# Shared by register-exchange.sh and revoke-exchange.sh; sourced, not run.
+# Shared by register-exchange.sh, revoke-exchange.sh, and sweep-exchanges.sh;
+# sourced, not run.
 #
 # coturn's turn_secret table is keyed (realm, value) and holds no exchange id,
-# so the id -> key mapping lives beside it in a text file, one "<id> <key>" line
-# per registered exchange. It is root's alone, under the mode-700 /etc directory,
-# rather than in the data directory the container's account can write.
+# so the id -> key mapping lives beside it in a text file, one line per
+# registered exchange (write_mapping below). It is root's alone, under the
+# mode-700 /etc directory, rather than in the data directory the container's
+# account can write.
 
 ETC=/etc/psilink-relay
 ENV_FILE="${PSILINK_RELAY_ENV_FILE:-$ETC/relay.env}"
@@ -53,6 +55,17 @@ check_key() {
   [ "${#1}" -eq 64 ] || die "key-hex64 must be 64 lowercase hex characters; got ${#1}"
 }
 
+# A row's lapse in whole days: the managed-exchange record's tokenMaxAgeDays,
+# whose ceiling is MAX_TOKEN_MAX_AGE_DAYS in packages/core/src/config/connection.ts.
+MAX_AGE_DAYS_CEILING=36500
+check_max_age_days() {
+  case "$1" in
+    ''|0*|*[!0-9]*) die "max-age-days must be a whole number of days from 1 to $MAX_AGE_DAYS_CEILING" ;;
+  esac
+  { [ "${#1}" -le "${#MAX_AGE_DAYS_CEILING}" ] && [ "$1" -le "$MAX_AGE_DAYS_CEILING" ]; } ||
+    die "max-age-days must be a whole number of days from 1 to $MAX_AGE_DAYS_CEILING"
+}
+
 # The relay image's own turnadmin against the SQLite file the server reads. It
 # runs as the image's account, which owns DATA_DIR, so the file it creates on
 # first use is one the server can read.
@@ -94,16 +107,19 @@ id_of_key() {
   awk -v key="$1" '($2 "") == (key "") { print $1 }' "$MAP_FILE"
 }
 
-# Rewrites the mapping without the exchange's line, plus "<id> <key>" when a key
-# is given, through a mode-600 temporary so a failure leaves the prior mapping
-# and no temporary.
+# Rewrites the mapping without the exchange's line, plus
+# "<id> <key> <registered-at> <max-age-days>" when a key is given, through a
+# mode-600 temporary so a failure leaves the prior mapping and no temporary.
+# registered-at is the Unix time of the write; max-age-days is "-" for a row
+# with no lapse, which lapsed_exchanges never lists.
 write_mapping() {
-  local id="$1" key="${2:-}" tmp
+  local id="$1" key="${2:-}" max_age_days="${3:--}" now tmp
+  now="$(date -u +%s)" || return 1
   tmp="$(mktemp "$MAP_FILE.XXXXXX")" || return 1
   if ! {
     chmod 600 "$tmp" &&
       { [ ! -f "$MAP_FILE" ] || awk -v id="$id" '($1 "") != (id "")' "$MAP_FILE" > "$tmp"; } &&
-      { [ -z "$key" ] || printf '%s %s\n' "$id" "$key" >> "$tmp"; } &&
+      { [ -z "$key" ] || printf '%s %s %s %s\n' "$id" "$key" "$now" "$max_age_days" >> "$tmp"; } &&
       mv "$tmp" "$MAP_FILE"
   }; then
     rm -f "$tmp"
@@ -126,7 +142,45 @@ list_table_hint() {
     "$RUNTIME" "$DATA_DIR" "$IMAGE" "$REALM" "$MAP_FILE" "$MAP_FILE"
 }
 
-# One register or revoke at a time, so two runs cannot interleave their table
-# and mapping edits.
+# Removes the exchange's key from the table, then its line from the mapping. On
+# failure sets REVOKE_ERROR to the reason, which never names the key, and
+# returns 1; the mapping keeps the line whenever the key may still be listed.
+REVOKE_ERROR=
+revoke_exchange() {
+  local id="$1" key out listed=0
+  key="$(key_of "$id")"
+  if [ -z "$key" ]; then
+    REVOKE_ERROR="exchange-id $id is not registered on this relay"
+    return 1
+  fi
+  out="$(turnadmin -X "$key" 2>&1)" || true
+  table_lists_key "$key" || listed=$?
+  if [ "$listed" -ne 1 ]; then
+    show_turnadmin_output "$out" "$key"
+    if [ "$listed" -eq 2 ]; then
+      REVOKE_ERROR="could not read the secrets table to confirm exchange $id's key left it, so treat the key as still authenticating; $MAP_FILE keeps the exchange's line, so run revoke-exchange.sh $id again once the table can be read"
+    else
+      REVOKE_ERROR="exchange $id's key is still in the secrets table and still authenticates; $MAP_FILE keeps the exchange's line, so check that $DATA_DIR/turndb is writable by the relay image's account, then run revoke-exchange.sh $id again"
+    fi
+    return 1
+  fi
+  if ! write_mapping "$id"; then
+    REVOKE_ERROR="removed exchange $id's key from the secrets table, but could not remove its line from $MAP_FILE; delete the line starting '$id ' from that file by hand"
+    return 1
+  fi
+}
+
+# The ids whose row is at least its max-age-days old at the Unix time given. A
+# row with no lapse ("-", or a line with no stamp) is never listed. Ages compare
+# as numbers; ids are only printed, never compared.
+lapsed_exchanges() {
+  [ -f "$MAP_FILE" ] || return 0
+  awk -v now="$1" '
+    $3 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && now - $3 >= $4 * 86400 { print $1 }
+  ' "$MAP_FILE"
+}
+
+# One register, revoke, or sweep at a time, so two runs cannot interleave their
+# table and mapping edits.
 exec 9>"$MAP_FILE.lock"
 flock 9 || die "could not lock $MAP_FILE.lock"

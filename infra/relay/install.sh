@@ -7,14 +7,15 @@
 # What it does, in order: installs a container runtime, builds the image from the
 # pinned Dockerfile beside this file, creates the data directory that holds the
 # per-exchange secrets table, obtains a certificate if none is present, renders
-# the configuration, installs the relay's unit and the two timers, and starts the
-# relay. It then runs verify.sh, which is the only step that says whether the
-# result carries an exchange.
+# the configuration, installs the relay's unit and its three timers, and starts
+# the relay, and the registrar where the host holds its token. It then runs
+# verify.sh, which is the only step that says whether the result carries an
+# exchange.
 #
 # The runtime is podman where the distribution carries it and docker where it
 # does not, and that decides one thing: which file defines psilink-relay.service.
 # Everything else -- the image, its flags and mounts, the uid probe, the
-# certificate hook, both timers -- is the same on either.
+# certificate hook, the timers, the registrar -- is the same on either.
 #
 # It refuses to run without /etc/psilink-relay/relay.env, which names the realm.
 # Nothing here defaults to a hostname: a realm that does not match what
@@ -129,6 +130,19 @@ fi
 command -v openssl >/dev/null 2>&1 || dnf -y install openssl
 command -v curl >/dev/null 2>&1 || dnf -y install curl
 
+# --- the registrar ------------------------------------------------------------
+# Optional: a host holding the relay-owner token runs the registrar (README.md,
+# The registrar), on the distribution's python3, which Amazon Linux 2023 ships.
+REGISTRAR_TOKEN_FILE="$ETC/registrar-token"
+REGISTRAR=0
+if [ -f "$REGISTRAR_TOKEN_FILE" ]; then
+  REGISTRAR=1
+  chmod 600 "$REGISTRAR_TOKEN_FILE"
+  command -v python3 >/dev/null 2>&1 || dnf -y install python3
+  [ -x /usr/bin/python3 ] \
+    || die "psilink-relay-registrar.service runs /usr/bin/python3, which this host does not have; install python3 3.9 or later there and run again, or delete $REGISTRAR_TOKEN_FILE to run without the registrar"
+fi
+
 # --- the static secret ------------------------------------------------------
 # Optional, and never minted here: a host that holds one keeps it, beside the
 # per-exchange secrets table, until the operator deletes it (README.md,
@@ -172,7 +186,8 @@ install -d -m 700 -o "$IMAGE_UID" /var/lib/psilink-relay
 # --- the scripts this host runs ---------------------------------------------
 install -d -m 755 "$LIBEXEC" "$LIBEXEC/aws" "$LIBEXEC/certs"
 install -m 755 "$HERE/render-config.sh" "$HERE/verify.sh" "$HERE/mint-credential.sh" \
-  "$HERE/register-exchange.sh" "$HERE/revoke-exchange.sh" "$LIBEXEC/"
+  "$HERE/register-exchange.sh" "$HERE/revoke-exchange.sh" "$HERE/sweep-exchanges.sh" \
+  "$HERE/registrar.py" "$LIBEXEC/"
 install -m 644 "$HERE/turnserver.conf.tmpl" "$HERE/exchange-keys.sh" "$LIBEXEC/"
 install -m 755 "$HERE/aws/external-ip.sh" "$LIBEXEC/aws/"
 install -m 755 "$HERE/certs/renew.sh" "$HERE/certs/deploy-hook.sh" "$LIBEXEC/certs/"
@@ -224,12 +239,16 @@ if [ -e "$STALE_UNIT" ]; then
 fi
 install -m 644 "$HERE/certs/psilink-relay-cert.service" "$HERE/certs/psilink-relay-cert.timer" "$UNIT_DIR/"
 install -m 644 "$HERE/psilink-relay-verify.service" "$HERE/psilink-relay-verify.timer" "$UNIT_DIR/"
+install -m 644 "$HERE/psilink-relay-sweep.service" "$HERE/psilink-relay-sweep.timer" \
+  "$HERE/psilink-relay-registrar.service" "$UNIT_DIR/"
 
 systemctl daemon-reload || die "systemctl daemon-reload failed, so systemd has not read the relay's unit; check systemd-analyze verify and run again"
 systemctl enable --now psilink-relay-cert.timer \
   || die "psilink-relay-cert.timer did not start; the certificate would expire unrenewed. journalctl -u psilink-relay-cert.timer"
 systemctl enable --now psilink-relay-verify.timer \
   || die "psilink-relay-verify.timer did not start; nothing would notice a relay that stopped allocating. journalctl -u psilink-relay-verify.timer"
+systemctl enable --now psilink-relay-sweep.timer \
+  || die "psilink-relay-sweep.timer did not start; lapsed exchange keys would stay registered. journalctl -u psilink-relay-sweep.timer"
 
 if [ "$RUNTIME" = docker ]; then
   # A Quadlet-generated service is enabled by the unit's own [Install] section at
@@ -241,6 +260,17 @@ fi
 systemctl restart psilink-relay.service \
   || die "psilink-relay.service did not start; journalctl -u psilink-relay.service carries coturn's own output"
 log "psilink-relay.service started"
+
+if [ "$REGISTRAR" = 1 ]; then
+  systemctl enable psilink-relay-registrar.service \
+    || die "psilink-relay-registrar.service could not be enabled; the registrar would not come back after a reboot"
+  systemctl restart psilink-relay-registrar.service \
+    || die "psilink-relay-registrar.service did not start; journalctl -u psilink-relay-registrar.service"
+  log "psilink-relay-registrar.service started on port ${PSILINK_RELAY_REGISTRAR_PORT:-8443}"
+else
+  systemctl disable --now psilink-relay-registrar.service 2>/dev/null || true
+  log "no $REGISTRAR_TOKEN_FILE, so the registrar is not running"
+fi
 
 if [ "$SKIP_VERIFY" = 1 ]; then
   log "--skip-verify: nothing has confirmed this relay carries an allocation"
