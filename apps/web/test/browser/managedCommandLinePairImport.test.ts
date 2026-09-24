@@ -220,17 +220,19 @@ describe("a stored exchange holding the pair's secret", () => {
     expect(await getManagedLocalState(live.id)).toBeUndefined();
   });
 
-  test("the backup import's live match is unchanged: it still installs fresh", async () => {
+  test("the backup import refuses a live match on the same rule", async () => {
     const live = await createRunnableExchange(newExchange());
     const outcome = await reconcileManagedCommandLinePair(
       live,
       "2026-07-14T12:00:00.000Z",
     );
     expect(outcome).toEqual({ kind: "held", label: live.label });
-    const { record } = await importManagedExchange(
-      serializeManagedExchangeArtifact(encodeManagedExchangeArtifact(live)),
-    );
-    expect(record.id).not.toBe(live.id);
+    await expect(
+      importManagedExchange(
+        serializeManagedExchangeArtifact(encodeManagedExchangeArtifact(live)),
+      ),
+    ).rejects.toBeInstanceOf(ManagedImportAlreadyHeldError);
+    expect(await listManagedExchanges()).toEqual([live]);
   });
 
   test("a migration-spent one is revived in place with the pair laid over it", async () => {

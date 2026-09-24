@@ -372,9 +372,10 @@ describe("recovery listing: the delete confirm's custody notes", () => {
 describe("the import this surface offers works from the read-failed state", () => {
   test("an artifact of a different exchange lands beside the unreadable record", async () => {
     // What the surface's copy offers as the way forward: one record this build cannot
-    // parse must not refuse an import for an unrelated exchange.
+    // parse must not refuse an import for an unrelated exchange. The other side
+    // of the terms keeps it from reading as a copy of the good record.
     const other = await createRunnableExchange(
-      newExchange({ label: "Other partnership" }),
+      newExchange({ label: "Other partnership", side: "acceptor" }),
     );
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(other),

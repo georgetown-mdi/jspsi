@@ -27,9 +27,9 @@
  * opposite direction and has neither remedy: no build reads it again, so it is
  * named as what it is and the operator is pointed at a fresh exchange.
  *
- * The configuration-only control beside a populated list takes no backup, so
- * its refusals speak of the configuration file alone
- * ({@link configurationImportFailureReason}).
+ * The refusals that name an exchange this browser already runs -- the same
+ * secret, or the same agreed terms and side -- are here too, since they say what
+ * to do with the listed exchange rather than with the file.
  */
 
 import { ZodError } from "zod";
@@ -101,28 +101,6 @@ export const UNREADABLE_CONFIGURATION_REASON =
   "The configuration file could not be read. Check that you chose the " +
   "psilink.yaml the command line runs and that it is a valid YAML file.";
 
-/** The configuration-only import was given a backup file. A backup is imported
- * only where no exchange is listed or the list cannot be read, so the reason
- * names the file this control takes and where the backup goes instead. */
-export const BACKUP_NOT_CONFIGURATION_REASON =
-  "This is a backup file exported from this app, not a command-line " +
-  "psilink.yaml. Choose a psilink.yaml here. A backup file is imported only " +
-  "while this browser lists no recurring exchanges or cannot read them.";
-
-/**
- * Which refusal the configuration-only import is shown as. A configuration
- * this app cannot hold states its own reason, escaped for display here as in
- * {@link importFailureReason}; a backup file is named as one; everything else
- * leaves the operator with the file to check.
- */
-export function configurationImportFailureReason(error: unknown): string {
-  if (error instanceof ManagedConfigurationRefusedError)
-    return sanitizeErrorForDisplay(error);
-  if (error instanceof ManagedImportBackupNotConfigurationError)
-    return BACKUP_NOT_CONFIGURATION_REASON;
-  return UNREADABLE_CONFIGURATION_REASON;
-}
-
 /** The pair import was given the app's backup file as its configuration. */
 export const BACKUP_NOT_PAIR_REASON =
   "This is a backup file exported from this app, not a command-line " +
@@ -152,8 +130,8 @@ export function pairImportFailureReason(error: unknown): string {
   return UNREADABLE_CONFIGURATION_REASON;
 }
 
-/** The heading a pair import is refused under when this browser already runs
- * the exchange its key file belongs to. */
+/** The heading an import is refused under when this browser already runs the
+ * exchange its file belongs to. */
 export const ALREADY_HELD_IMPORT_TITLE = "That exchange is already here";
 
 /** The refusal a pair import meets when a record this browser runs already
@@ -166,5 +144,92 @@ export function alreadyHeldImportReason(label: string): string {
     "line runs it on a schedule too, stop one of the two: each run changes " +
     "the shared secret, and the copy that falls behind can no longer connect " +
     "to your partner."
+  );
+}
+
+/** The refusal a backup import meets when a record this browser runs already
+ * holds the backup's secret: it is the same exchange, and nothing is added. */
+export function alreadyHeldBackupImportReason(label: string): string {
+  const named = label === "" ? "That exchange" : `"${label}"`;
+  return (
+    `${named} already runs in this browser with the secret this backup file ` +
+    "holds, so nothing was imported. Open it from the list to run it."
+  );
+}
+
+/** The heading a backup import stops under when a listed exchange has the
+ * backup's agreed terms and side. */
+export const LIVE_COPY_IMPORT_TITLE =
+  "This may be an exchange you already have";
+
+/**
+ * What a backup import says when it stops to ask: one or more listed exchanges
+ * have the same agreed terms and side, and a different secret, which is what
+ * an older backup of one of them looks like once it has run since. Two
+ * exchanges can share both, so the operator decides; nothing is imported until
+ * they do. `labels` holds each listed exchange's label, empty where unnamed.
+ */
+export function liveCopyImportReason(labels: ReadonlyArray<string>): string {
+  if (labels.length === 1) {
+    const [label] = labels;
+    const named = label === "" ? "An exchange in the list" : `"${label}"`;
+    return (
+      `${named} has the same terms and the same side as this backup, with a ` +
+      "different secret -- an older backup of it would look like this. " +
+      "Nothing was imported. If it is the same exchange, open it from the " +
+      "list instead: a second copy falls behind the first time either one " +
+      "runs, and then cannot connect to your partner. If it is a separate " +
+      "exchange with the same terms, add this backup beside it."
+    );
+  }
+  const names = labels.filter((label) => label !== "").map((l) => `"${l}"`);
+  const unnamed = labels.length - names.length;
+  const listed =
+    names.length === 0
+      ? ""
+      : ` (${names.join(", ")}${unnamed === 0 ? "" : `, and ${unnamed} with no name`})`;
+  return (
+    `${labels.length} exchanges in the list${listed} have the same terms and ` +
+    "the same side as this backup, with different secrets -- an older backup " +
+    "of one of them would look like this. Nothing was imported. If it is one " +
+    "of these exchanges, open that one from the list instead: a second copy " +
+    "falls behind the first time either one runs, and then cannot connect to " +
+    "your partner. If it is a separate exchange with the same terms, add this " +
+    "backup beside them."
+  );
+}
+
+/** The button opening the listed exchange at `index` of `labels` from
+ * {@link liveCopyImportReason}'s alert: one button when one exchange is
+ * listed, else one per exchange, named by its label or its place in the list. */
+export function liveCopyOpenLabel(
+  labels: ReadonlyArray<string>,
+  index: number,
+): string {
+  if (labels.length === 1) return "Open the listed exchange";
+  const label = labels[index];
+  return label === "" ? `Open listed exchange ${index + 1}` : `Open "${label}"`;
+}
+
+/** The confirm on {@link liveCopyImportReason}'s alert. */
+export const LIVE_COPY_IMPORT_CONFIRM = "Add it as a separate exchange";
+
+/** The heading a scoped restore is refused under when the file is not the
+ * backup of the exchange it restores. */
+export const OTHER_EXCHANGE_RESTORE_TITLE =
+  "That is not this exchange's backup";
+
+/**
+ * What "Restore from backup" on a moved exchange says when the file is not the
+ * backup downloaded when it moved: another exchange's backup, a command-line
+ * file, or a backup exported after the exchange ran on the other device, whose
+ * secret has changed. Names the list's import for any other file.
+ */
+export function otherExchangeRestoreReason(label: string): string {
+  const named = label === "" ? "this exchange" : `"${label}"`;
+  return (
+    `This file is not the backup you downloaded when you moved ${named} to ` +
+    "another device, so nothing was restored. Choose that backup file. To " +
+    'import a different file, use "Import a file" below the list.'
   );
 }

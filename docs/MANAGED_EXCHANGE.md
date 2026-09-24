@@ -1042,11 +1042,10 @@ backup does not stand in for them either. Importing an artifact exported before 
 hand-off is **refused** while the handed-off exchange is still listed here and the
 artifact has the secret it was spent holding: importing it would either run a
 copy this browser gave away or leave that copy live beside the spent one, and one
-owner holds a recurring exchange's secret. Where a backup import is offered at
-all -- the list's empty and could-not-read states are the only surfaces holding
-one -- the refusal names the exchange and what it has instead: it runs on the machine
-holding those two files from then on, and the way back to this browser is the
-take-back on that exchange's own page, below.
+owner holds a recurring exchange's secret. The refusal names the exchange and
+what it has instead: it runs on the machine holding those two files from then
+on, and the way back to this browser is the take-back on that exchange's own
+page, below.
 
 Those two conditions bound it, and an import outside them installs an ordinary
 fresh exchange:
@@ -1150,12 +1149,10 @@ exchange up in a browser than author YAML, and run it where the data and the
 scheduler are -- read the file in, edit what is editable, download it again, run
 it there.
 
-The import is offered wherever the list is. Beside exchanges already listed, a
-control of its own takes a `psilink.yaml`, with or without its key file: a backup
-file chosen there is refused, since a backup is imported only while the list is
-empty or cannot be read ([Eviction recovery is the import
-flow](#eviction-recovery-is-the-import-flow)). Beside an empty or unreadable
-list, the one import control takes either file.
+The list's one import control takes it, whether the list is empty, holds
+exchanges already, or cannot be read; the same control takes a backup file
+([Eviction recovery is the import
+flow](#eviction-recovery-is-the-import-flow)).
 
 **To run the exchange in this browser, choose its `.psilink.key` too**, in the
 same pick as the `psilink.yaml`. Its name starts with a dot, so the file chooser
@@ -1944,7 +1941,32 @@ eviction erases the evidence that
 anything existed, so the app cannot always distinguish a first visit from a
 post-eviction one -- which is exactly why the managed-exchange list's empty
 state has the import affordance standing, rather than exposing it only
-behind a detected loss.
+behind a detected loss. The same control stands beside a populated list and an
+unreadable one.
+
+**A backup is checked against the exchange it holds, not against the rest of
+the list.** A backup file holds one exchange, so importing it never depends on
+what else is listed, and no refusal asks you to clear the list first. What
+happens depends on that one exchange (the rules:
+[MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#reconciling-a-backup-import)):
+
+- **Moved from here to another device**: the listed entry is restored in place.
+  Its row also offers "Restore from backup", which takes only the backup
+  downloaded when it moved and refuses any other file. It restores without the
+  question below, and names any other listed entry with the same terms and
+  side.
+- **Not in this browser**: it is added as a new entry.
+- **Already running here with the backup's secret**: nothing is imported, and
+  the refusal names the entry to open instead.
+- **Handed off to the command line from here**: nothing is imported, and the
+  refusal names the take-back on that exchange's page.
+
+An exchange that has run since the backup was taken has a newer secret than the
+file, so the secret no longer finds it. When listed exchanges have the same
+agreed terms and the same side as the backup, the import stops and names them
+all at once: open an entry if it is the same exchange -- a second copy falls
+behind the first time either one runs -- or add the backup beside them if it is
+a separate exchange with the same terms. Nothing is imported until you choose.
 
 **A refused file says why it was refused.** The artifact's schema
 rejects an unknown key and an unknown version outright (see

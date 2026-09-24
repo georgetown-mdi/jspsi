@@ -39,6 +39,7 @@ import {
   safeParseManagedExchangeRecord,
   standingCompromiseResponse,
 } from "./managedExchangeRecord";
+import { findLiveCopiesByTermsAndSide } from "./managedLiveCopyMatch";
 import { foldElapsedWindowsUnderResponse } from "./managedSchedule";
 import { parseManagedLocalState } from "./managedLocalStateShape";
 
@@ -1309,55 +1310,93 @@ export async function persistManagedExchangeOutputDirectory(
 }
 
 /**
- * How {@link reviveSpentManagedExchange} reconciled an artifact against the spent
- * records in the store:
+ * How {@link reviveSpentManagedExchange} reconciled an artifact against the
+ * records in the store. Nothing is written except on `"revived"`:
  *
  * - `"revived"` -- a MIGRATION-spent record held the artifact's secret and was
- *   revived in place, holding the revived record.
+ *   revived in place, holding the revived record. After a scoped restore,
+ *   `sameTermsAs` names a live record with the revived record's agreed terms
+ *   and side, if one exists, for the caller to mention.
  * - `"handed-off"` -- a spent record holding the artifact's secret was handed off
  *   by a route of its own ({@link ManagedSpentHandoff}), which the artifact cannot
- *   take back. Nothing was written; the caller refuses the import, naming the record
- *   the store still holds. The `label` is empty where the refusing record is one
- *   this build cannot parse, which leaves its own fields untrusted.
+ *   take back. The caller refuses the import, naming the record the store still
+ *   holds. The `label` is empty where the refusing record is one this build
+ *   cannot parse, which leaves its own fields untrusted.
  * - `"custody-unreadable"` -- a record holding the artifact's secret has a sibling
  *   entry this build cannot parse, so whether a hand-off spent it cannot be read.
- *   Nothing was written; the caller refuses the import without naming a hand-off
- *   route, none having been read. The `label` is empty where the record itself does
- *   not parse either.
- * - `"no-match"` -- no spent record holds the artifact's secret, so the caller
- *   installs a fresh record.
+ *   The caller refuses the import without naming a hand-off route, none having
+ *   been read. The `label` is empty where the record itself does not parse either.
+ * - `"held"` -- a LIVE record holds the artifact's secret already. The caller
+ *   refuses the import, naming that record's `label`.
+ * - `"live-copy"` -- an import not scoped to a record found no live record
+ *   holding the artifact's secret, and one or more with its agreed terms and
+ *   side not yet acknowledged ({@link findLiveCopiesByTermsAndSide}), listed
+ *   in `copies`. The caller names them all and imports only on the operator's
+ *   word, passing every `id` back in `besideIds`.
+ * - `"other-exchange"` -- a restore scoped to one record found the artifact is
+ *   not that record's backup: it does not hold the secret that migration-spent
+ *   record holds.
+ * - `"no-match"` -- nothing above applies, so the caller installs a fresh record.
  */
 export type ManagedReviveOutcome =
-  | { kind: "revived"; record: ManagedExchangeRecord }
+  | {
+      kind: "revived";
+      record: ManagedExchangeRecord;
+      sameTermsAs?: { id: string; label: string };
+    }
   | { kind: "handed-off"; handoff: ManagedSpentHandoff; label: string }
   | { kind: "custody-unreadable"; label: string }
+  | { kind: "held"; label: string }
+  | {
+      kind: "live-copy";
+      copies: ReadonlyArray<{ id: string; label: string }>;
+    }
+  | { kind: "other-exchange" }
   | { kind: "no-match" };
 
+/** What a backup import asks of the reconciliation beyond the artifact itself. */
+export interface ManagedReviveOptions {
+  /** The live records the operator confirmed installing beside, which the
+   * terms-and-side rule then passes over. Unused by a scoped restore, which
+   * never asks. */
+  besideIds?: ReadonlyArray<string>;
+  /** The migration-spent record a scoped restore brings back: the artifact must
+   * hold that record's secret, and any other file is `"other-exchange"`. The
+   * operator chose that record, so no live record is named for them to decide
+   * on; one with its agreed terms and side is reported in `sameTermsAs`. */
+  restoreInto?: string;
+}
+
 /**
- * Reconcile a reconstructed artifact against the spent records in the store, in one
- * transaction spanning both stores: reads every record and sibling entry and looks
- * for a record that is spent AND holds the same `sharedSecret` as `reconstructed`
- * (compared in memory, so nothing secret-derived is ever persisted).
+ * Reconcile a reconstructed artifact against the store, in one transaction
+ * spanning both stores: reads every record and sibling entry and compares each
+ * record's `sharedSecret` with `reconstructed`'s in memory, so nothing
+ * secret-derived is ever persisted. The outcomes decide in this order:
  *
- * A match spent by the DEVICE MIGRATION is revived in place: the record's fields
- * are updated from the artifact (keeping its own `id` and any persisted input
- * handle or output-folder grant), its spent state cleared, and the backup and
- * import markers stamped as of `at`.
- *
- * A match spent under a `handoff` is NOT revived and nothing is written -- the
- * migration is the only spend that leaves `handoff` absent, so a hand-off route
- * added later gates here by default. The exchange runs from what the hand-off
- * saved, and the artifact cannot take the copy back, so the outcome names the
- * record for the caller to refuse the import on. This refusal wins over a revive:
- * when the secret matches both a handed-off record and a migration-spent one, the
- * outcome refuses on the handed-off record rather than reviving the other, which
- * would put a second live owner beside the one the hand-off already runs.
- *
- * Only a SPENT match is reconciled: a live record holding the same secret is a
- * genuine second owner, and importing over it would fork the single-owner
- * invariant, so that case reports `"no-match"` and the caller installs fresh. The
- * field update is re-validated through the record schema, so a malformed revive
- * aborts the transaction and leaves the store untouched.
+ * 1. A match spent under a `handoff` refuses -- the migration is the only spend
+ *    that leaves `handoff` absent, so a hand-off route added later refuses here
+ *    by default. The exchange runs from what the hand-off saved and the artifact
+ *    cannot take that copy back. This wins over a revive: when a migration-spent
+ *    record holds the secret too, reviving it would put a second live owner
+ *    beside the one the hand-off already runs.
+ * 2. A match whose sibling this build cannot parse refuses (below).
+ * 3. A scoped restore whose artifact is not `restoreInto`'s refuses.
+ * 4. A LIVE match refuses: it is this exchange, and a second live copy of one
+ *    secret splits at the first rotation either side makes.
+ * 5. On an import not scoped by `restoreInto`, the live records with the
+ *    artifact's agreed terms and side, other than those in `besideIds`, are
+ *    named together for the operator to decide on
+ *    ({@link findLiveCopiesByTermsAndSide}): a secret may have rotated past
+ *    the artifact's. A scoped restore skips this step: the
+ *    operator chose the record, and the secret match confirms it.
+ * 6. A match spent by the DEVICE MIGRATION is revived in place: the record's
+ *    fields are updated from the artifact (keeping its own `id` and any
+ *    persisted input handle or output-folder grant), its spent state cleared,
+ *    and the backup and import markers stamped as of `at`. The update is
+ *    re-validated through the record schema, so a malformed revive aborts the
+ *    transaction and leaves the store untouched. A scoped revive reports a
+ *    live record with the revived record's agreed terms and side in
+ *    `sameTermsAs`.
  *
  * Each stored record is parsed on its own, and an entry this build cannot parse is
  * SKIPPED rather than failing the reconciliation: one invalid record must not block
@@ -1366,9 +1405,8 @@ export type ManagedReviveOutcome =
  * surface's diagnostic read, until the operator discards it. A skipped entry can
  * still refuse the import -- when its sibling entry holds a hand-off and its stored
  * secret is readable and equal to the artifact's, the outcome is that hand-off's
- * refusal -- but it can never be revived, a revive needing the whole record, so an
- * artifact matching a migration-spent entry this build cannot parse installs fresh
- * beside it.
+ * refusal -- but it can never be revived or named as a live copy, both needing
+ * the whole record.
  *
  * Each sibling entry is parsed on its own too, on the same terms and for the same
  * reason. A record whose sibling this build cannot parse takes no part in the
@@ -1384,40 +1422,36 @@ export type ManagedReviveOutcome =
 export async function reviveSpentManagedExchange(
   reconstructed: ManagedExchangeRecord,
   at: string,
+  options: ManagedReviveOptions = {},
 ): Promise<ManagedReviveOutcome> {
-  const outcome = await reconcileImportedSecret(reconstructed, at, "backup");
-  return outcome.kind === "held" ? { kind: "no-match" } : outcome;
+  return reconcileImportedSecret(reconstructed, at, "backup", options);
 }
 
 /**
  * How {@link reconcileManagedCommandLinePair} reconciled an imported
  * command-line pair: {@link ManagedReviveOutcome}'s outcomes, read the same
- * way, plus `"held"` -- a LIVE record holds the pair's secret already. Nothing
- * was written; the caller refuses the import, naming that record's `label`.
+ * way, less the two only a backup import asks for.
  */
-export type ManagedPairReconcileOutcome =
-  ManagedReviveOutcome | { kind: "held"; label: string };
+export type ManagedPairReconcileOutcome = Exclude<
+  ManagedReviveOutcome,
+  { kind: "live-copy" } | { kind: "other-exchange" }
+>;
 
 /**
  * Reconcile a record read from a command-line `psilink.yaml` and its
  * `.psilink.key` against the store, on the rule and in the transaction the
  * backup import's {@link reviveSpentManagedExchange} uses: a stored record is
  * the same exchange when it holds the same `sharedSecret`, compared in memory.
- * A hand-off match and an unreadable sibling refuse exactly as they do there.
+ * A hand-off match, an unreadable sibling, and a live match refuse exactly as
+ * they do there; no live copy is looked for by terms and side.
  *
- * Two outcomes differ, because a pair holds less than a backup does:
- *
- * - A LIVE match refuses (`"held"`) rather than reporting no match: installing
- *   fresh would put a second live copy of one secret beside it, and the pair
- *   holds nothing that live record lacks. It wins over a migration-spent match
- *   for the same reason.
- * - A migration-spent match is revived with the pair's fields laid over the
- *   stored record ({@link applyManagedExchangeCommandLinePair}) -- the
- *   document, side, max-age policy, and key pair -- keeping the label,
- *   schedule, run bookkeeping, standing condition, and platform grants the
- *   pair has no field for. Its spent state is cleared and it is marked
- *   imported as of `at`; a backup marker it held is kept, the secret it
- *   attests being the one the pair holds, and none is stamped.
+ * A migration-spent match is revived with the pair's fields laid over the
+ * stored record ({@link applyManagedExchangeCommandLinePair}) -- the document,
+ * side, max-age policy, and key pair -- keeping the label, schedule, run
+ * bookkeeping, standing condition, and platform grants the pair has no field
+ * for. Its spent state is cleared and it is marked imported as of `at`; a
+ * backup marker it held is kept, the secret it attests being the one the pair
+ * holds, and none is stamped.
  *
  * @throws {ZodError} if the revived record is invalid; nothing is written.
  */
@@ -1425,7 +1459,17 @@ export async function reconcileManagedCommandLinePair(
   imported: RunnableManagedExchangeRecord,
   at: string,
 ): Promise<ManagedPairReconcileOutcome> {
-  return reconcileImportedSecret(imported, at, "command-line");
+  const outcome = await reconcileImportedSecret(
+    imported,
+    at,
+    "command-line",
+    {},
+  );
+  if (outcome.kind === "live-copy" || outcome.kind === "other-exchange")
+    throw new Error(
+      `a command-line pair reconciliation reported ${outcome.kind}, which only a backup import asks for`,
+    );
+  return outcome;
 }
 
 /** Which import a reconciliation serves: the app's backup artifact, or a
@@ -1438,10 +1482,11 @@ async function reconcileImportedSecret(
   reconstructed: ManagedExchangeRecord,
   at: string,
   source: ManagedImportSource,
-): Promise<ManagedPairReconcileOutcome> {
+  options: ManagedReviveOptions,
+): Promise<ManagedReviveOutcome> {
   const db = await openManagedExchangeDatabase();
   try {
-    return await new Promise<ManagedPairReconcileOutcome>((resolve, reject) => {
+    return await new Promise<ManagedReviveOutcome>((resolve, reject) => {
       const transaction = db.transaction(
         [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
         "readwrite",
@@ -1453,7 +1498,7 @@ async function reconcileImportedSecret(
       const readRecords = records.getAll();
       const readKeys = local.getAllKeys();
       const readValues = local.getAll();
-      let outcome: ManagedPairReconcileOutcome = { kind: "no-match" };
+      let outcome: ManagedReviveOutcome = { kind: "no-match" };
       let failure: unknown;
       const applyWhenReady = () => {
         if (
@@ -1487,6 +1532,7 @@ async function reconcileImportedSecret(
           let handedOffUnreadable: ManagedSpentHandoff | undefined;
           let custodyUnreadable: string | undefined;
           let held: string | undefined;
+          const liveRecords: Array<ManagedExchangeRecord> = [];
           for (let index = 0; index < rawRecords.length; index += 1) {
             const raw = rawRecords[index];
             // The store key, not the value's own `id`, which a failed parse leaves
@@ -1511,10 +1557,13 @@ async function reconcileImportedSecret(
               continue;
             }
             const existing = parsed.data;
+            if (spent === undefined) liveRecords.push(existing);
             if (existing.sharedSecret !== reconstructed.sharedSecret) continue;
             if (spent === undefined) held ??= existing.label;
-            else if (spent.handoff === undefined) match ??= existing;
-            else
+            else if (spent.handoff === undefined) {
+              if (match === undefined || existing.id === options.restoreInto)
+                match = existing;
+            } else
               handedOff ??= { label: existing.label, handoff: spent.handoff };
           }
           if (handedOff !== undefined) {
@@ -1537,9 +1586,30 @@ async function reconcileImportedSecret(
             outcome = { kind: "custody-unreadable", label: custodyUnreadable };
             return;
           }
-          if (source === "command-line" && held !== undefined) {
+          if (
+            options.restoreInto !== undefined &&
+            match?.id !== options.restoreInto
+          ) {
+            outcome = { kind: "other-exchange" };
+            return;
+          }
+          if (held !== undefined) {
             outcome = { kind: "held", label: held };
             return;
+          }
+          if (source === "backup" && options.restoreInto === undefined) {
+            const liveCopies = findLiveCopiesByTermsAndSide(
+              liveRecords,
+              reconstructed,
+              options.besideIds,
+            );
+            if (liveCopies.length > 0) {
+              outcome = {
+                kind: "live-copy",
+                copies: liveCopies.map(({ id, label }) => ({ id, label })),
+              };
+              return;
+            }
           }
           if (match === undefined) return;
           if (source === "command-line") {
@@ -1574,7 +1644,17 @@ async function reconcileImportedSecret(
             { backup: { backedUpAt: at }, imported: { importedAt: at } },
             match.id,
           );
-          outcome = { kind: "revived", record: revived };
+          const sameTerms =
+            options.restoreInto === undefined
+              ? undefined
+              : findLiveCopiesByTermsAndSide(liveRecords, revived)[0];
+          outcome = {
+            kind: "revived",
+            record: revived,
+            ...(sameTerms !== undefined
+              ? { sameTermsAs: { id: sameTerms.id, label: sameTerms.label } }
+              : {}),
+          };
         } catch (error) {
           failure = error;
           transaction.abort();

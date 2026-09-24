@@ -7,24 +7,24 @@ import {
 
 import { stringify as stringifyYaml } from "yaml";
 
-import { importManagedConfigurationFile } from "@psi/managed/managedExchangeImport";
 import { readManagedCommandLineConfiguration } from "@psi/managed/managedCommandLineImport";
 
-import {
-  BACKUP_NOT_CONFIGURATION_REASON,
-  OUTDATED_IMPORT_REASON,
-  UNREADABLE_CONFIGURATION_REASON,
-  UNREADABLE_IMPORT_REASON,
-  UNRECOGNIZED_IMPORT_REASON,
-  configurationImportFailureReason,
-  importFailureReason,
-} from "@recurring/managedImportFailure";
 import {
   MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
+import {
+  OUTDATED_IMPORT_REASON,
+  UNREADABLE_IMPORT_REASON,
+  UNRECOGNIZED_IMPORT_REASON,
+  alreadyHeldBackupImportReason,
+  importFailureReason,
+  liveCopyImportReason,
+  liveCopyOpenLabel,
+  otherExchangeRestoreReason,
+} from "@recurring/managedImportFailure";
 import {
   encodeManagedExchangeArtifact,
   importManagedExchangeArtifact,
@@ -256,53 +256,64 @@ describe("the artifact this build writes", () => {
   });
 });
 
-/** The reason the configuration-only import shows for bytes it refuses, driven
- * through that import with an install that must never be reached. */
-async function reasonForImportingAsConfiguration(
-  source: string,
-): Promise<string> {
-  try {
-    await importManagedConfigurationFile(source, {
-      install: () => {
-        throw new Error("a refused file reached the install");
-      },
-    });
-  } catch (error) {
-    return configurationImportFailureReason(error);
-  }
-  throw new Error("the configuration import was expected to refuse this file");
-}
+/** Every reason a backup import can be refused or stopped with, where a
+ * listed exchange is involved. */
+const LISTED_EXCHANGE_REASONS: Array<[string, string]> = [
+  ["already held", alreadyHeldBackupImportReason("Riverbend quarterly")],
+  ["a possible live copy", liveCopyImportReason(["Riverbend quarterly"])],
+  ["a scoped restore", otherExchangeRestoreReason("Riverbend quarterly")],
+];
 
-describe("what the configuration-only import says", () => {
-  test("a backup file is named as one, with where a backup is imported", async () => {
-    const reason = await reasonForImportingAsConfiguration(
-      serialize(artifactDocument()),
+describe("what a backup import says about an exchange already listed", () => {
+  test("each names the listed exchange, and an unnamed one neutrally", () => {
+    for (const [, reason] of LISTED_EXCHANGE_REASONS)
+      expect(reason).toContain('"Riverbend quarterly"');
+    expect(alreadyHeldBackupImportReason("")).toMatch(/^That exchange /);
+    expect(liveCopyImportReason([""])).toMatch(/^An exchange in the list /);
+    expect(otherExchangeRestoreReason("")).toContain("this exchange");
+  });
+
+  test("the possible live copy states nothing was imported and both ways on", () => {
+    const reason = liveCopyImportReason(["Riverbend quarterly"]);
+    expect(reason).toContain("Nothing was imported.");
+    expect(reason).toContain("open it from the list");
+    expect(reason).toContain("add this backup beside it");
+  });
+
+  test("several possible live copies are named in one reason", () => {
+    const reason = liveCopyImportReason(["Riverbend quarterly", "", "Weekly"]);
+    expect(reason).toMatch(/^3 exchanges in the list /);
+    expect(reason).toContain(
+      '"Riverbend quarterly", "Weekly", and 1 with no name',
     );
-
-    expect(reason).toBe(BACKUP_NOT_CONFIGURATION_REASON);
-    expect(reason).toBe(
-      "This is a backup file exported from this app, not a command-line " +
-        "psilink.yaml. Choose a psilink.yaml here. A backup file is imported " +
-        "only while this browser lists no recurring exchanges or cannot read " +
-        "them.",
+    expect(reason).toContain("Nothing was imported.");
+    expect(reason).toContain("add this backup beside them");
+    expect(liveCopyImportReason(["", ""])).toMatch(
+      /^2 exchanges in the list have /,
     );
   });
 
-  test("a configuration it cannot hold names the fields, as the shared import does", async () => {
-    const document = configurationDocument();
-    const refused = { ...document, csvDelimiter: ";;" };
-
-    expect(
-      await reasonForImportingAsConfiguration(
-        stringifyYaml(snakeizeKeys(refused)),
-      ),
-    ).toBe(reasonForImportingConfiguration(refused));
+  test("one open button for one copy, one per copy for several", () => {
+    expect(liveCopyOpenLabel(["Riverbend quarterly"], 0)).toBe(
+      "Open the listed exchange",
+    );
+    expect(liveCopyOpenLabel(["Riverbend quarterly", ""], 0)).toBe(
+      'Open "Riverbend quarterly"',
+    );
+    expect(liveCopyOpenLabel(["Riverbend quarterly", ""], 1)).toBe(
+      "Open listed exchange 2",
+    );
   });
 
-  test("bytes that do not parse point at the configuration file, not a backup", async () => {
-    const reason = await reasonForImportingAsConfiguration("\tnot: [yaml");
-
-    expect(reason).toBe(UNREADABLE_CONFIGURATION_REASON);
-    expect(reason).not.toContain("backup");
+  test("no reason advises clearing the list to import", () => {
+    for (const [name, reason] of [
+      ...LISTED_EXCHANGE_REASONS,
+      ["unreadable", UNREADABLE_IMPORT_REASON],
+      ["unrecognized", UNRECOGNIZED_IMPORT_REASON],
+      ["outdated", OUTDATED_IMPORT_REASON],
+    ]) {
+      expect(reason, name).not.toMatch(/\bevery\b|\ball\b/i);
+      expect(reason, name).not.toMatch(/no recurring exchanges/i);
+    }
   });
 });
