@@ -1,68 +1,25 @@
 #!/bin/bash
 # Register one exchange's relay key in the relay's secrets table.
 #
-#   register-exchange.sh <exchange-id> <key-hex64> [<max-age-days>]
+#   register-exchange.sh <exchange-id> <max-age-days|none>   key on stdin
 #
 # The key is the exchange's relay key (docs/spec/PROTOCOL.md, Relay credential
-# derivation). coturn reads the table per request, so a credential minted under
-# it authenticates from the next allocation on, with no restart. An exchange
-# already registered has its new key added before its prior key is removed, so
-# both keys allocate for a moment and the exchange is never left without one.
-# With max-age-days, sweep-exchanges.sh revokes the row that many days after
-# this registration unless a later one replaces it (README.md, Per-exchange keys).
-# Registering the key the exchange already holds renews its row: the stamp and
-# max-age-days are rewritten, the table left alone.
+# derivation), read from standard input -- typed without echo at a terminal, or
+# piped -- so it is never on a command line. coturn reads the table per request,
+# so a credential minted under it authenticates from the next allocation on,
+# with no restart. An exchange already registered has its prior key replaced in
+# the same transaction. With a number of days, the sweep revokes the row that
+# many days after this registration unless a later one replaces it; with none,
+# it never lapses (README.md, Per-exchange keys). Registering the key the
+# exchange already holds renews its row.
 set -euo pipefail
 
-if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
-  printf 'usage: register-exchange.sh <exchange-id> <key-hex64> [<max-age-days>]\n' >&2
+if [ "$#" -ne 2 ]; then
+  printf 'usage: register-exchange.sh <exchange-id> <max-age-days|none>   (the key on standard input)\n' >&2
   exit 2
 fi
 # shellcheck source=exchange-keys.sh
 . "$(cd "$(dirname "$0")" && pwd)/exchange-keys.sh"
 
-ID="$1"
-KEY="$2"
-MAX_AGE_DAYS="${3:-}"
-check_exchange_id "$ID"
-check_key "$KEY"
-[ "$#" -lt 3 ] || check_max_age_days "$MAX_AGE_DAYS"
-
-HOLDER="$(id_of_key "$KEY")"
-if [ -n "$HOLDER" ] && [ "$HOLDER" != "$ID" ]; then
-  die "key-hex64 is already registered for exchange $HOLDER; revoke that exchange first"
-fi
-
-PRIOR="$(key_of "$ID")"
-if [ "$PRIOR" = "$KEY" ]; then
-  write_mapping "$ID" "$KEY" "$MAX_AGE_DAYS" ||
-    die "could not renew exchange $ID's line in $MAP_FILE, which is unchanged; its key still authenticates"
-  printf 'renewed exchange %s (realm %s), which already had this key registered\n' "$ID" "$REALM"
-  exit 0
-fi
-
-OUT="$(turnadmin -s "$KEY" 2>&1)" || true
-LISTED=0
-table_lists_key "$KEY" || LISTED=$?
-if [ "$LISTED" -ne 0 ]; then
-  show_turnadmin_output "$OUT" "$KEY"
-  if [ "$LISTED" -eq 2 ]; then
-    die "could not read the secrets table to confirm exchange $ID's key was added, and $MAP_FILE is unchanged; if the key was added it authenticates until removed: $(list_table_hint)"
-  fi
-  die "the secrets table was not updated with exchange $ID's key, and $MAP_FILE is unchanged; check that $DATA_DIR/turndb is writable by the relay image's account, then run register-exchange.sh again"
-fi
-write_mapping "$ID" "$KEY" "$MAX_AGE_DAYS" ||
-  die "added exchange $ID's new key to the secrets table, but could not record it in $MAP_FILE, which is unchanged; the new key authenticates until removed: $(list_table_hint)"
-
-if [ -z "$PRIOR" ]; then
-  printf 'registered exchange %s (realm %s)\n' "$ID" "$REALM"
-  exit 0
-fi
-OUT="$(turnadmin -X "$PRIOR" 2>&1)" || true
-LISTED=0
-table_lists_key "$PRIOR" || LISTED=$?
-if [ "$LISTED" -ne 1 ]; then
-  show_turnadmin_output "$OUT" "$PRIOR"
-  die "registered exchange $ID's new key and pointed $MAP_FILE at it, but could not remove its prior key from the secrets table, where it still authenticates: $(list_table_hint)"
-fi
-printf 'registered exchange %s (realm %s), replacing its prior key\n' "$ID" "$REALM"
+read_key
+printf '%s\n' "$KEY" | relay_table register "$1" "$2"
