@@ -36,8 +36,10 @@
  * backup holds one exchange, so the guard is a lookup: a live record holding the
  * artifact's secret refuses ({@link ManagedImportAlreadyHeldError}), and a live
  * record with the artifact's agreed terms and side is named and installed beside
- * only on the operator's word ({@link ManagedImportLiveCopyError}). When the
- * artifact matches a record spent by the DEVICE MIGRATION -- same `sharedSecret`, the correct
+ * only on the operator's word ({@link ManagedImportLiveCopyError}); a restore
+ * scoped to one record does not ask, and names such a record after reviving.
+ * When the artifact matches a record spent by the DEVICE MIGRATION -- same
+ * `sharedSecret`, the correct
  * match, since a spent-and-unrun-since record's artifact holds exactly its secret
  * (compared in memory, never persisted) -- the import REVIVES that record in place: it
  * updates the record's fields from the artifact, keeps its `id` and any persisted
@@ -263,6 +265,9 @@ export interface ManagedImportResult {
   /** The grants the source record held that {@link record} does not, in the order
    * they are presented. Empty when there is nothing to take again. */
   missingGrants: Array<ManagedPlatformGrant>;
+  /** A listed exchange with the restored record's agreed terms and side, which
+   * a scoped restore reports rather than asks about. */
+  sameTermsAs?: { id: string; label: string };
 }
 
 /** The grants the artifact's source held that the imported record does not, which is
@@ -292,7 +297,9 @@ function grantsMissingHere(
  * its source did.
  *
  * `options.restoreInto` scopes the import to one migration-spent record: any
- * artifact not holding its secret is refused.
+ * artifact not holding its secret is refused, and no live record is asked
+ * about; one with the restored record's agreed terms and side is returned in
+ * `sameTermsAs`.
  *
  * The import mark on a fresh install is best-effort after the install succeeds: a
  * valid record is already durable, so a failed marker write must not report the
@@ -309,8 +316,9 @@ function grantsMissingHere(
  *   nothing is written.
  * @throws {ManagedImportAlreadyHeldError} if a live record holds the artifact's
  *   secret; nothing is written.
- * @throws {ManagedImportLiveCopyError} if a live record other than `besideId`
- *   has the artifact's agreed terms and side; nothing is written.
+ * @throws {ManagedImportLiveCopyError} if the import is not scoped and a live
+ *   record other than `besideId` has the artifact's agreed terms and side;
+ *   nothing is written.
  * @throws {ManagedImportOtherExchangeError} if `restoreInto` is set and the
  *   artifact is not that record's backup; nothing is written.
  * @throws {ZodError} if the artifact or the reconstructed record is invalid, or the
@@ -329,6 +337,9 @@ export async function importManagedExchange(
     return {
       record: reconciled.record,
       missingGrants: grantsMissingHere(heldGrants, reconciled.record),
+      ...(reconciled.sameTermsAs !== undefined
+        ? { sameTermsAs: reconciled.sameTermsAs }
+        : {}),
     };
   if (reconciled.kind === "handed-off")
     throw new ManagedImportHandedOffError(reconciled.handoff, reconciled.label);
@@ -449,24 +460,23 @@ export async function importManagedExchangeFile(
  * {@link importManagedExchange} runs, scoped so that only an artifact holding
  * that record's secret revives it. A configuration file, another exchange's
  * backup, and a backup of this exchange taken after it rotated elsewhere are
- * all refused alike.
+ * all refused alike. A listed exchange with the same agreed terms and side is
+ * not asked about, the operator having chosen the record; it is returned in
+ * `sameTermsAs`.
  *
  * @throws {ManagedImportOtherExchangeError} if the file is not that record's
  *   backup; nothing is written.
- * @throws Every other refusal {@link importManagedExchange} raises.
+ * @throws Every other refusal {@link importManagedExchange} raises, less
+ *   {@link ManagedImportLiveCopyError}.
  */
 export async function restoreManagedExchangeFromBackup(
   id: string,
   source: string,
   deps: ManagedImportDeps = defaultDeps,
-  options: Pick<ManagedReviveOptions, "besideId"> = {},
 ): Promise<ManagedImportResult> {
   if (probeImportFile(source) === "command-line-configuration")
     throw new ManagedImportOtherExchangeError();
-  return importManagedExchange(source, deps, {
-    ...options,
-    restoreInto: id,
-  });
+  return importManagedExchange(source, deps, { restoreInto: id });
 }
 
 /** Read a configuration and install it as a fresh configuration-only record. */

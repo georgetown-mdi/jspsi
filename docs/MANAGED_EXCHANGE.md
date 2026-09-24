@@ -1952,7 +1952,9 @@ happens depends on that one exchange (the rules:
 
 - **Moved from here to another device**: the listed entry is restored in place.
   Its row also offers "Restore from backup", which takes only the backup
-  downloaded when it moved and refuses any other file.
+  downloaded when it moved and refuses any other file. It restores without the
+  question below, and names any other listed entry with the same terms and
+  side.
 - **Not in this browser**: it is added as a new entry.
 - **Already running here with the backup's secret**: nothing is imported, and
   the refusal names the entry to open instead.

@@ -63,3 +63,27 @@ export function managedImportGrantNotice(
     consequences: missingGrants.map((grant) => GRANT_CONSEQUENCE[grant]),
   };
 }
+
+/** The heading a scoped restore's notice takes when it names a listed exchange
+ * with the same terms. */
+export const RESTORED_WITH_SAME_TERMS_TITLE = "Exchange restored";
+
+/**
+ * The notice a scoped restore shows when another listed exchange has the
+ * restored one's agreed terms and side: the restore went ahead, since the
+ * operator chose the row, and the other exchange is named so they can tell
+ * the two apart. The grants the restore did not bring follow, if any.
+ */
+export function restoredWithSameTermsNotice(
+  label: string,
+  grantNotice: ManagedImportGrantNotice | undefined,
+): ManagedImportGrantNotice {
+  const named = label === "" ? "another exchange in the list" : `"${label}"`;
+  const restored = `This exchange was restored; ${named} has the same terms and side.`;
+  return {
+    title: RESTORED_WITH_SAME_TERMS_TITLE,
+    lead:
+      grantNotice === undefined ? restored : `${restored} ${grantNotice.lead}`,
+    consequences: grantNotice?.consequences ?? [],
+  };
+}

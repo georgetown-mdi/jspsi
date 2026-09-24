@@ -45,6 +45,7 @@ import {
   PAIR_IMPORTED_NOTICE,
 } from "@recurring/managedImportFiles";
 import { Lobby } from "@exchange/Lobby";
+import { RESTORED_WITH_SAME_TERMS_TITLE } from "@recurring/managedImportGrantNotice";
 import { composeManagedCronExport } from "@psi/managed/managedCronExport";
 import styles from "@styles/app.module.css";
 
@@ -941,6 +942,48 @@ describe("saved list route: a backup reconciles against the exchange it holds", 
       .poll(async () => (await listManagedLocalState()).get(moved.id)?.spent)
       .toBeUndefined();
     expect(await listManagedExchanges()).toHaveLength(2);
+  });
+
+  test("a moved row restores in place beside an exchange with its terms and side, naming it", async () => {
+    const moved = await createRunnableExchange(newExchange());
+    const bytes = backupOf(moved);
+    await spendManagedExchangeIfCurrent(
+      moved.id,
+      moved.sharedSecret,
+      "2026-07-12T09:00:00.000Z",
+    );
+    const unrelated = await createRunnableExchange(
+      newExchange({ label: "Riverbend again" }),
+    );
+    const unrelatedLocalBefore = (await listManagedLocalState()).get(
+      unrelated.id,
+    );
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Restore from backup" }))
+      .toBeInTheDocument();
+
+    await chooseIn(ROW_RESTORE, bytes);
+
+    await expect
+      .element(page.getByText(RESTORED_WITH_SAME_TERMS_TITLE))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText('"Riverbend again" has the same terms and side', {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(page.getByText(LIVE_COPY_IMPORT_TITLE).query()).toBeNull();
+    expect(
+      (await listManagedLocalState()).get(moved.id)?.spent,
+    ).toBeUndefined();
+    expect(await listManagedExchanges()).toHaveLength(2);
+    expect(await getManagedExchange(unrelated.id)).toEqual(unrelated);
+    expect((await listManagedLocalState()).get(unrelated.id)).toEqual(
+      unrelatedLocalBefore,
+    );
   });
 
   test("a moved row's restore refuses another exchange's backup", async () => {

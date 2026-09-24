@@ -509,18 +509,25 @@ describe("restoreManagedExchangeFromBackup takes that exchange's backup alone", 
     expect(deps.installed).toHaveLength(0);
   });
 
-  test("a confirmed live copy is passed on beside the scope", async () => {
-    const deps = recordingDeps({ kind: "other-exchange" });
+  test("a listed exchange with the same terms is returned, not asked about", async () => {
+    const existing = recordHolding({});
+    const deps = recordingDeps({
+      kind: "revived",
+      record: existing,
+      sameTermsAs: { id: "listed-id", label: "Riverbend again" },
+    });
 
-    await expect(
-      restoreManagedExchangeFromBackup("spent-id", goodBytes(), deps, {
-        besideId: "listed-id",
-      }),
-    ).rejects.toThrow();
-    expect(deps.reviveSpent).toHaveBeenCalledWith(
-      expect.anything(),
-      "2026-07-14T12:00:00.000Z",
-      { besideId: "listed-id", restoreInto: "spent-id" },
+    const result = await restoreManagedExchangeFromBackup(
+      existing.id,
+      goodBytes(),
+      deps,
     );
+
+    expect(result.record).toBe(existing);
+    expect(result.sameTermsAs).toEqual({
+      id: "listed-id",
+      label: "Riverbend again",
+    });
+    expect(deps.installed).toHaveLength(0);
   });
 });

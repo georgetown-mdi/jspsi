@@ -1314,7 +1314,9 @@ export async function persistManagedExchangeOutputDirectory(
  * records in the store. Nothing is written except on `"revived"`:
  *
  * - `"revived"` -- a MIGRATION-spent record held the artifact's secret and was
- *   revived in place, holding the revived record.
+ *   revived in place, holding the revived record. After a scoped restore,
+ *   `sameTermsAs` names a live record with the revived record's agreed terms
+ *   and side, if one exists, for the caller to mention.
  * - `"handed-off"` -- a spent record holding the artifact's secret was handed off
  *   by a route of its own ({@link ManagedSpentHandoff}), which the artifact cannot
  *   take back. The caller refuses the import, naming the record the store still
@@ -1326,17 +1328,21 @@ export async function persistManagedExchangeOutputDirectory(
  *   been read. The `label` is empty where the record itself does not parse either.
  * - `"held"` -- a LIVE record holds the artifact's secret already. The caller
  *   refuses the import, naming that record's `label`.
- * - `"live-copy"` -- no live record holds the artifact's secret, and one has its
- *   agreed terms and side ({@link findLiveCopyByTermsAndSide}). The caller
- *   names that record and imports only on the operator's word, passing its `id`
- *   back as `besideId`.
+ * - `"live-copy"` -- an import not scoped to a record found no live record
+ *   holding the artifact's secret, and one with its agreed terms and side
+ *   ({@link findLiveCopyByTermsAndSide}). The caller names that record and
+ *   imports only on the operator's word, passing its `id` back as `besideId`.
  * - `"other-exchange"` -- a restore scoped to one record found the artifact is
  *   not that record's backup: it does not hold the secret that migration-spent
  *   record holds.
  * - `"no-match"` -- nothing above applies, so the caller installs a fresh record.
  */
 export type ManagedReviveOutcome =
-  | { kind: "revived"; record: ManagedExchangeRecord }
+  | {
+      kind: "revived";
+      record: ManagedExchangeRecord;
+      sameTermsAs?: { id: string; label: string };
+    }
   | { kind: "handed-off"; handoff: ManagedSpentHandoff; label: string }
   | { kind: "custody-unreadable"; label: string }
   | { kind: "held"; label: string }
@@ -1347,10 +1353,13 @@ export type ManagedReviveOutcome =
 /** What a backup import asks of the reconciliation beyond the artifact itself. */
 export interface ManagedReviveOptions {
   /** The live record the operator confirmed installing beside, which the
-   * terms-and-side rule then passes over. */
+   * terms-and-side rule then passes over. Unused by a scoped restore, which
+   * never asks. */
   besideId?: string;
   /** The migration-spent record a scoped restore brings back: the artifact must
-   * hold that record's secret, and any other file is `"other-exchange"`. */
+   * hold that record's secret, and any other file is `"other-exchange"`. The
+   * operator chose that record, so no live record is named for them to decide
+   * on; one with its agreed terms and side is reported in `sameTermsAs`. */
   restoreInto?: string;
 }
 
@@ -1370,16 +1379,19 @@ export interface ManagedReviveOptions {
  * 3. A scoped restore whose artifact is not `restoreInto`'s refuses.
  * 4. A LIVE match refuses: it is this exchange, and a second live copy of one
  *    secret splits at the first rotation either side makes.
- * 5. A live record with the artifact's agreed terms and side, other than
- *    `besideId`, is named for the operator to decide on
- *    ({@link findLiveCopyByTermsAndSide}): its secret may have rotated past
- *    the artifact's.
+ * 5. On an import not scoped by `restoreInto`, a live record with the
+ *    artifact's agreed terms and side, other than `besideId`, is named for the
+ *    operator to decide on ({@link findLiveCopyByTermsAndSide}): its secret may
+ *    have rotated past the artifact's. A scoped restore skips this step: the
+ *    operator chose the record, and the secret match confirms it.
  * 6. A match spent by the DEVICE MIGRATION is revived in place: the record's
  *    fields are updated from the artifact (keeping its own `id` and any
  *    persisted input handle or output-folder grant), its spent state cleared,
  *    and the backup and import markers stamped as of `at`. The update is
  *    re-validated through the record schema, so a malformed revive aborts the
- *    transaction and leaves the store untouched.
+ *    transaction and leaves the store untouched. A scoped revive reports a
+ *    live record with the revived record's agreed terms and side in
+ *    `sameTermsAs`.
  *
  * Each stored record is parsed on its own, and an entry this build cannot parse is
  * SKIPPED rather than failing the reconciliation: one invalid record must not block
@@ -1580,7 +1592,7 @@ async function reconcileImportedSecret(
             outcome = { kind: "held", label: held };
             return;
           }
-          if (source === "backup") {
+          if (source === "backup" && options.restoreInto === undefined) {
             const liveCopy = findLiveCopyByTermsAndSide(
               liveRecords,
               reconstructed,
@@ -1628,7 +1640,17 @@ async function reconcileImportedSecret(
             { backup: { backedUpAt: at }, imported: { importedAt: at } },
             match.id,
           );
-          outcome = { kind: "revived", record: revived };
+          const sameTerms =
+            options.restoreInto === undefined
+              ? undefined
+              : findLiveCopyByTermsAndSide(liveRecords, revived);
+          outcome = {
+            kind: "revived",
+            record: revived,
+            ...(sameTerms !== undefined
+              ? { sameTermsAs: { id: sameTerms.id, label: sameTerms.label } }
+              : {}),
+          };
         } catch (error) {
           failure = error;
           transaction.abort();

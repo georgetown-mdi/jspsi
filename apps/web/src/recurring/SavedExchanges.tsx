@@ -63,9 +63,12 @@ import {
   PAIR_IMPORTED_NOTICE,
   managedImportFileChoice,
 } from "./managedImportFiles";
+import {
+  managedImportGrantNotice,
+  restoredWithSameTermsNotice,
+} from "./managedImportGrantNotice";
 import { BetweenVisitNotifications } from "./BetweenVisitNotifications";
 import { loadSavedExchanges } from "./savedExchangesLoad";
-import { managedImportGrantNotice } from "./managedImportGrantNotice";
 import { recoveryRows } from "./savedExchangesRecovery";
 
 import type { ManagedImportGrantNotice } from "./managedImportGrantNotice";
@@ -791,20 +794,15 @@ function ImportExchangeFile() {
 
 /** The scoped restore on a row moved to another device: the same import,
  * taking only the backup that holds this record's secret
- * ({@link restoreManagedExchangeFromBackup}), which revives the row in place.
- * Any other file is refused, naming the list's import for it. */
+ * ({@link restoreManagedExchangeFromBackup}), which revives the row in place
+ * without asking about a listed exchange with the same terms, and names one in
+ * its notice. Any other file is refused, naming the list's import for it. */
 function RestoreFromBackup({ id, label }: { id: string; label: string }) {
   const { onFiles, outcome, importing, confirmLiveCopy, dismiss } =
     useImportFile({
       maxBytes: MAX_IMPORT_FILE_BYTES,
       oversizeReason: UNREADABLE_IMPORT_REASON,
-      importFile: (source, besideId) =>
-        restoreManagedExchangeFromBackup(
-          id,
-          source,
-          undefined,
-          besideOption(besideId),
-        ),
+      importFile: (source) => restoreManagedExchangeFromBackup(id, source),
       failureAlert: (error) =>
         error instanceof ManagedImportOtherExchangeError
           ? {
@@ -948,14 +946,18 @@ function useImportFile({
         // Best-effort persistence on the imported record's origin, the same request
         // a create makes; a denied grant does not fail the import.
         void requestPersistentStorage();
-        const { record, missingGrants } =
+        const { record, missingGrants, sameTermsAs } =
           keySource === undefined
             ? await importFile(source, besideId)
             : await importManagedCommandLinePair(source, keySource);
-        const notice =
+        const grantNotice =
           keySource === undefined
             ? managedImportGrantNotice(missingGrants)
             : PAIR_IMPORTED_NOTICE;
+        const notice =
+          sameTermsAs === undefined
+            ? grantNotice
+            : restoredWithSameTermsNotice(sameTermsAs.label, grantNotice);
         if (notice !== undefined) {
           setOutcome({ grantNotice: { id: record.id, notice } });
           return;

@@ -821,6 +821,53 @@ describe("a backup reconciles per exchange, whatever else is listed", () => {
     expect((await getManagedLocalState(source.id))?.spent).toBeUndefined();
   });
 
+  test("a scoped restore revives in place beside a live record with its terms and side, naming it", async () => {
+    const source = await createRunnableExchange(newExchange());
+    const bytes = backupOf(source);
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      source.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+    );
+    const unrelated = await createRunnableExchange(
+      newExchange({ label: "Riverbend again" }),
+    );
+    const unrelatedBefore = await getManagedExchange(unrelated.id);
+    const unrelatedLocalBefore = await getManagedLocalState(unrelated.id);
+
+    const result = await restoreManagedExchangeFromBackup(source.id, bytes);
+
+    expect(result.record.id).toBe(source.id);
+    expect(result.sameTermsAs).toEqual({
+      id: unrelated.id,
+      label: "Riverbend again",
+    });
+    expect((await getManagedLocalState(source.id))?.spent).toBeUndefined();
+    expect(await listManagedExchanges()).toHaveLength(2);
+    expect(await getManagedExchange(unrelated.id)).toEqual(unrelatedBefore);
+    expect(await getManagedLocalState(unrelated.id)).toEqual(
+      unrelatedLocalBefore,
+    );
+  });
+
+  test("a scoped restore with no live record of its terms and side names none", async () => {
+    const source = await createRunnableExchange(newExchange());
+    const bytes = backupOf(source);
+    await spendManagedExchangeIfCurrent(
+      source.id,
+      source.sharedSecret,
+      "2026-07-14T13:00:00.000Z",
+    );
+    await createRunnableExchange(
+      newExchange({ label: "Another partnership", side: "acceptor" }),
+    );
+
+    const result = await restoreManagedExchangeFromBackup(source.id, bytes);
+
+    expect(result.record.id).toBe(source.id);
+    expect(result.sameTermsAs).toBeUndefined();
+  });
+
   test("a scoped restore refuses another exchange's backup, writing nothing", async () => {
     const source = await createRunnableExchange(newExchange());
     await spendManagedExchangeIfCurrent(

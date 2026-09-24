@@ -1625,9 +1625,9 @@ install.
 
 A record whose sibling entry cannot be read refuses as that section states. The
 refusals decide in this order: hand-off, unreadable sibling, a scoped
-restore's other file (below), live copy by secret. A live copy recognized
-without a secret match (below) is asked about after them and before a revive or
-a fresh install.
+restore's other file (below), live copy by secret. On the list's import, a
+live copy recognized without a secret match (below) is asked about after them
+and before a revive or a fresh install. A scoped restore does not ask (below).
 
 No refusal sends the operator to delete other exchanges: each names the one
 record it is about and what to do with that record.
@@ -1637,8 +1637,9 @@ record it is about and what to do with that record.
 A live copy's secret rotates at every run, so a backup taken before a run holds
 a secret its own live record has moved past, and the secret alone no longer
 finds it. The rule that recognizes it, stated once here for every import that
-installs a runnable record to call; the backup import applies it, and the
-command-line pair import matches on the secret alone:
+installs a runnable record to call; the list's backup import asks on it, a
+scoped restore reports it after reviving (below), and the command-line pair
+import matches on the secret alone:
 
 **A live record whose agreed terms and `side` equal the imported record's names
 that record, and the import installs nothing unless the operator confirms
@@ -1663,6 +1664,13 @@ scoped to that record (`restoreManagedExchangeFromBackup`,
 the secret that record holds; any other file -- another exchange's backup, a
 backup taken after the exchange rotated on the other device, or a command-line
 file -- is refused, naming the list's import for it, and nothing is written.
+
+A scoped restore never asks about a live copy recognized by terms and side: the
+question exists to identify a record the operator has not, and here the
+operator chose the row and the secret match confirms it. The restore revives
+the record, and when a live record has the revived record's agreed terms and
+`side`, the restore's notice names that record in one sentence. It adds no
+confirm step and writes nothing to the other record.
 
 ### Taking a command-line hand-off back
 
