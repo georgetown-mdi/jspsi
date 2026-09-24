@@ -20,6 +20,7 @@ import {
   withManagedExchangeLock,
 } from "./managedExchangeLock";
 import {
+  applyManagedExchangeCommandLinePair,
   applyManagedExchangeCompromiseResponse,
   applyManagedExchangeInputHandle,
   applyManagedExchangeLastRun,
@@ -1384,9 +1385,63 @@ export async function reviveSpentManagedExchange(
   reconstructed: ManagedExchangeRecord,
   at: string,
 ): Promise<ManagedReviveOutcome> {
+  const outcome = await reconcileImportedSecret(reconstructed, at, "backup");
+  return outcome.kind === "held" ? { kind: "no-match" } : outcome;
+}
+
+/**
+ * How {@link reconcileManagedCommandLinePair} reconciled an imported
+ * command-line pair: {@link ManagedReviveOutcome}'s outcomes, read the same
+ * way, plus `"held"` -- a LIVE record holds the pair's secret already. Nothing
+ * was written; the caller refuses the import, naming that record's `label`.
+ */
+export type ManagedPairReconcileOutcome =
+  ManagedReviveOutcome | { kind: "held"; label: string };
+
+/**
+ * Reconcile a record read from a command-line `psilink.yaml` and its
+ * `.psilink.key` against the store, on the rule and in the transaction the
+ * backup import's {@link reviveSpentManagedExchange} uses: a stored record is
+ * the same exchange when it holds the same `sharedSecret`, compared in memory.
+ * A hand-off match and an unreadable sibling refuse exactly as they do there.
+ *
+ * Two outcomes differ, because a pair holds less than a backup does:
+ *
+ * - A LIVE match refuses (`"held"`) rather than reporting no match: installing
+ *   fresh would put a second live copy of one secret beside it, and the pair
+ *   holds nothing that live record lacks. It wins over a migration-spent match
+ *   for the same reason.
+ * - A migration-spent match is revived with the pair's fields laid over the
+ *   stored record ({@link applyManagedExchangeCommandLinePair}) -- the
+ *   document, side, max-age policy, and key pair -- keeping the label,
+ *   schedule, run bookkeeping, standing condition, and platform grants the
+ *   pair has no field for. Its spent state is cleared and it is marked
+ *   imported as of `at`; a backup marker it held is kept, the secret it
+ *   attests being the one the pair holds, and none is stamped.
+ *
+ * @throws {ZodError} if the revived record is invalid; nothing is written.
+ */
+export async function reconcileManagedCommandLinePair(
+  imported: RunnableManagedExchangeRecord,
+  at: string,
+): Promise<ManagedPairReconcileOutcome> {
+  return reconcileImportedSecret(imported, at, "command-line");
+}
+
+/** Which import a reconciliation serves: the app's backup artifact, or a
+ * command-line configuration with its key file. */
+type ManagedImportSource = "backup" | "command-line";
+
+/** The reconciliation both imports run, differing by `source` only where
+ * {@link reconcileManagedCommandLinePair} states. */
+async function reconcileImportedSecret(
+  reconstructed: ManagedExchangeRecord,
+  at: string,
+  source: ManagedImportSource,
+): Promise<ManagedPairReconcileOutcome> {
   const db = await openManagedExchangeDatabase();
   try {
-    return await new Promise<ManagedReviveOutcome>((resolve, reject) => {
+    return await new Promise<ManagedPairReconcileOutcome>((resolve, reject) => {
       const transaction = db.transaction(
         [MANAGED_EXCHANGE_STORE_NAME, MANAGED_EXCHANGE_LOCAL_STORE_NAME],
         "readwrite",
@@ -1398,7 +1453,7 @@ export async function reviveSpentManagedExchange(
       const readRecords = records.getAll();
       const readKeys = local.getAllKeys();
       const readValues = local.getAll();
-      let outcome: ManagedReviveOutcome = { kind: "no-match" };
+      let outcome: ManagedPairReconcileOutcome = { kind: "no-match" };
       let failure: unknown;
       const applyWhenReady = () => {
         if (
@@ -1410,14 +1465,16 @@ export async function reviveSpentManagedExchange(
           return;
         try {
           const spentStates = new Map<string, ManagedSpentState>();
+          const backups = new Map<string, ManagedLocalState["backup"]>();
           const unreadableSiblings = new Set<string>();
           const keys = readKeys.result;
           const values = readValues.result;
           for (let index = 0; index < keys.length; index += 1) {
             const key = String(keys[index]);
             try {
-              const { spent } = parseManagedLocalState(values[index]);
+              const { spent, backup } = parseManagedLocalState(values[index]);
               if (spent !== undefined) spentStates.set(key, spent);
+              if (backup !== undefined) backups.set(key, backup);
             } catch {
               unreadableSiblings.add(key);
             }
@@ -1429,6 +1486,7 @@ export async function reviveSpentManagedExchange(
             { label: string; handoff: ManagedSpentHandoff } | undefined;
           let handedOffUnreadable: ManagedSpentHandoff | undefined;
           let custodyUnreadable: string | undefined;
+          let held: string | undefined;
           for (let index = 0; index < rawRecords.length; index += 1) {
             const raw = rawRecords[index];
             // The store key, not the value's own `id`, which a failed parse leaves
@@ -1453,12 +1511,9 @@ export async function reviveSpentManagedExchange(
               continue;
             }
             const existing = parsed.data;
-            if (
-              spent === undefined ||
-              existing.sharedSecret !== reconstructed.sharedSecret
-            )
-              continue;
-            if (spent.handoff === undefined) match ??= existing;
+            if (existing.sharedSecret !== reconstructed.sharedSecret) continue;
+            if (spent === undefined) held ??= existing.label;
+            else if (spent.handoff === undefined) match ??= existing;
             else
               handedOff ??= { label: existing.label, handoff: spent.handoff };
           }
@@ -1482,7 +1537,28 @@ export async function reviveSpentManagedExchange(
             outcome = { kind: "custody-unreadable", label: custodyUnreadable };
             return;
           }
+          if (source === "command-line" && held !== undefined) {
+            outcome = { kind: "held", label: held };
+            return;
+          }
           if (match === undefined) return;
+          if (source === "command-line") {
+            const revived = applyManagedExchangeCommandLinePair(
+              match,
+              runnableManagedExchangeOrRefuse(reconstructed),
+            );
+            const backup = backups.get(match.id);
+            records.put(revived);
+            local.put(
+              parseManagedLocalState({
+                ...(backup !== undefined ? { backup } : {}),
+                imported: { importedAt: at },
+              }),
+              match.id,
+            );
+            outcome = { kind: "revived", record: revived };
+            return;
+          }
           const revived = parseManagedExchangeRecord({
             ...reconstructed,
             id: match.id,

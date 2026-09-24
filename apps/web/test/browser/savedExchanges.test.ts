@@ -16,8 +16,11 @@ import {
   listManagedExchanges,
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
+
 import {
+  buildManagedExchangeRecord,
   composeManagedExchangeFile,
+  runnableManagedExchange,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
 import {
@@ -28,7 +31,15 @@ import {
   listManagedLocalState,
   markManagedExchangeBackedUp,
 } from "@psi/managed/managedLocalState";
-import { BACKUP_NOT_CONFIGURATION_REASON } from "@recurring/managedImportFailure";
+
+import {
+  ALREADY_HELD_IMPORT_TITLE,
+  BACKUP_NOT_CONFIGURATION_REASON,
+} from "@recurring/managedImportFailure";
+import {
+  KEY_FILE_ALONE_REASON,
+  PAIR_IMPORTED_NOTICE,
+} from "@recurring/managedImportFiles";
 import { Lobby } from "@exchange/Lobby";
 import { composeManagedCronExport } from "@psi/managed/managedCronExport";
 import styles from "@styles/app.module.css";
@@ -76,6 +87,28 @@ vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => {
 // create/accept/import affordances. The unavailable degrade is a separate file (it
 // mocks the store open); the pure load ordering and its failure classification are
 // unit-tested without a database.
+
+// The import controls reach the store through this module. It is mocked so the
+// in-flight tests can hold one import pending; `importOverride`, when set,
+// replaces both the single-file and the pair import for one test.
+let importOverride: (() => Promise<never>) | undefined;
+vi.mock("@psi/managed/managedExchangeImport", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  const realConfiguration = actual.importManagedConfigurationFile as (
+    source: string,
+  ) => Promise<unknown>;
+  const realPair = actual.importManagedCommandLinePair as (
+    source: string,
+    keySource: string,
+  ) => Promise<unknown>;
+  return {
+    ...actual,
+    importManagedConfigurationFile: (source: string) =>
+      importOverride ? importOverride() : realConfiguration(source),
+    importManagedCommandLinePair: (source: string, keySource: string) =>
+      importOverride ? importOverride() : realPair(source, keySource),
+  };
+});
 
 // Assert on hrefs rather than navigation: the router boundary is stubbed to a plain
 // anchor, so a rendered Link is an <a href> and useNavigate is a no-op.
@@ -795,5 +828,219 @@ describe("saved list route: a populated list imports a command-line configuratio
     expect(stored.map((entry) => entry.id)).toEqual([record.id]);
     const local = await listManagedLocalState();
     expect(local.get(record.id)?.spent?.handoff).toBe("command-line");
+  });
+});
+
+describe("saved list route: a psilink.yaml imports with the .psilink.key beside it", () => {
+  /** Choose `files` in the one file input the surface renders, as one pick. */
+  async function chooseFiles(
+    files: Array<{ bytes: string; name: string }>,
+  ): Promise<void> {
+    await userEvent.upload(
+      page.elementLocator(
+        document.querySelector('input[type="file"]') as HTMLElement,
+      ),
+      files.map(({ bytes, name }) => new File([bytes], name)),
+    );
+  }
+
+  /** The two files the app's own command-line export writes for a record that
+   * is not stored here. */
+  function exportedPair(): {
+    configuration: string;
+    key: string;
+    sharedSecret: string;
+  } {
+    const record = runnableManagedExchangeOrRefuse(
+      buildManagedExchangeRecord(
+        newExchange({ label: "Exported", side: "acceptor" }),
+      ),
+    );
+    const exported = composeManagedCronExport(record);
+    return {
+      configuration: exported.config.text,
+      key: exported.key.text,
+      sharedSecret: record.sharedSecret,
+    };
+  }
+
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(window, "fetch");
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    importOverride = undefined;
+  });
+
+  /** Whether any request this page made held `secret` in its address or body. */
+  function anyRequestHeld(secret: string): boolean {
+    return fetchSpy.mock.calls.some((call: Array<unknown>) =>
+      call.some((argument) => {
+        if (typeof argument === "string") return argument.includes(secret);
+        if (argument instanceof URL || argument instanceof Request)
+          return argument.toString().includes(secret);
+        const body = (argument as RequestInit | undefined)?.body;
+        return typeof body === "string" && body.includes(secret);
+      }),
+    );
+  }
+
+  test("the pair lands as an exchange that runs here, and the page says so", async () => {
+    await createRunnableExchange(newExchange());
+    const { configuration, key, sharedSecret } = exportedPair();
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .toBeInTheDocument();
+
+    await chooseFiles([
+      { bytes: configuration, name: "psilink.yaml" },
+      { bytes: key, name: ".psilink.key" },
+    ]);
+
+    await expect
+      .element(page.getByText(PAIR_IMPORTED_NOTICE.title))
+      .toBeInTheDocument();
+    const stored = await listManagedExchanges();
+    const imported = stored.filter(
+      (record) => record.sharedSecret === sharedSecret,
+    );
+    expect(imported).toHaveLength(1);
+    expect(runnableManagedExchange(imported[0])).toBe(true);
+    expect(document.body.innerHTML).not.toContain(sharedSecret);
+    expect(anyRequestHeld(sharedSecret)).toBe(false);
+  });
+
+  test.each([
+    { path: "the pair", withKey: true },
+    { path: "the configuration alone", withKey: false },
+  ])(
+    "while $path imports, the control is withheld and a second pick starts nothing",
+    async ({ withKey }) => {
+      await createRunnableExchange(newExchange());
+      const { configuration, key } = exportedPair();
+      let calls = 0;
+      let settle: (() => void) | undefined;
+      importOverride = () => {
+        calls += 1;
+        return new Promise<never>((_resolve, reject) => {
+          settle = () => reject(new Error("held"));
+        });
+      };
+      const files = [
+        { bytes: configuration, name: "psilink.yaml" },
+        ...(withKey ? [{ bytes: key, name: ".psilink.key" }] : []),
+      ];
+      app.render(createElement(SavedExchanges));
+      const control = page.getByRole("button", {
+        name: "Import a psilink.yaml",
+      });
+      await expect.element(control).toBeEnabled();
+
+      await chooseFiles(files);
+      await expect.poll(() => calls).toBe(1);
+      await expect.element(control).toBeDisabled();
+
+      await chooseFiles(files);
+      expect(calls).toBe(1);
+
+      settle?.();
+      await expect.element(control).toBeEnabled();
+      expect(calls).toBe(1);
+    },
+  );
+
+  test("the configuration alone still lands as a configuration only", async () => {
+    await createRunnableExchange(newExchange());
+    const { configuration } = exportedPair();
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .toBeInTheDocument();
+
+    await chooseFiles([{ bytes: configuration, name: "psilink.yaml" }]);
+
+    await expect
+      .poll(async () => (await listManagedExchanges()).length)
+      .toBe(2);
+    const imported = (await listManagedExchanges()).filter(
+      (record) => record.sharedSecret === undefined,
+    );
+    expect(imported).toHaveLength(1);
+    expect(page.getByText(PAIR_IMPORTED_NOTICE.title).query()).toBeNull();
+  });
+
+  test("a malformed key file is refused by what is wrong, showing and storing nothing of it", async () => {
+    const listed = await createRunnableExchange(newExchange());
+    const { configuration, sharedSecret } = exportedPair();
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .toBeInTheDocument();
+
+    await chooseFiles([
+      { bytes: configuration, name: "psilink.yaml" },
+      {
+        bytes: JSON.stringify({ sharedSecret, comment: sharedSecret }),
+        name: ".psilink.key",
+      },
+    ]);
+
+    await expect
+      .element(
+        page.getByText("it holds a field other than sharedSecret and expires", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain(sharedSecret);
+    expect((await listManagedExchanges()).map((entry) => entry.id)).toEqual([
+      listed.id,
+    ]);
+    expect(anyRequestHeld(sharedSecret)).toBe(false);
+  });
+
+  test("a key file chosen alone is refused before it is read", async () => {
+    const listed = await createRunnableExchange(newExchange());
+    const { key, sharedSecret } = exportedPair();
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .toBeInTheDocument();
+
+    await chooseFiles([{ bytes: key, name: ".psilink.key" }]);
+
+    await expect
+      .element(page.getByText(KEY_FILE_ALONE_REASON))
+      .toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain(sharedSecret);
+    expect((await listManagedExchanges()).map((entry) => entry.id)).toEqual([
+      listed.id,
+    ]);
+  });
+
+  test("a pair whose exchange already runs here is refused, naming it", async () => {
+    const listed = await createRunnableExchange(
+      newExchange({ label: "Riverbend quarterly" }),
+    );
+    const exported = composeManagedCronExport(listed);
+    app.render(createElement(SavedExchanges));
+    await expect
+      .element(page.getByRole("button", { name: "Import a psilink.yaml" }))
+      .toBeInTheDocument();
+
+    await chooseFiles([
+      { bytes: exported.config.text, name: "psilink.yaml" },
+      { bytes: exported.key.text, name: "psilink.key" },
+    ]);
+
+    await expect
+      .element(page.getByText(ALREADY_HELD_IMPORT_TITLE))
+      .toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain(listed.sharedSecret);
+    expect(await listManagedExchanges()).toHaveLength(1);
   });
 });

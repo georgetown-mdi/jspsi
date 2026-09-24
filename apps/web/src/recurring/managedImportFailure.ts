@@ -36,8 +36,11 @@ import { ZodError } from "zod";
 
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
+import {
+  ManagedConfigurationRefusedError,
+  ManagedKeyFileRefusedError,
+} from "@psi/managed/managedCommandLineImport";
 import { ManagedArtifactOutdatedError } from "@psi/managed/managedExchangeArtifact";
-import { ManagedConfigurationRefusedError } from "@psi/managed/managedCommandLineImport";
 import { ManagedImportBackupNotConfigurationError } from "@psi/managed/managedExchangeImport";
 
 /** The heading every import refusal here is shown under. */
@@ -118,4 +121,50 @@ export function configurationImportFailureReason(error: unknown): string {
   if (error instanceof ManagedImportBackupNotConfigurationError)
     return BACKUP_NOT_CONFIGURATION_REASON;
   return UNREADABLE_CONFIGURATION_REASON;
+}
+
+/** The pair import was given the app's backup file as its configuration. */
+export const BACKUP_NOT_PAIR_REASON =
+  "This is a backup file exported from this app, not a command-line " +
+  "psilink.yaml. A backup file is imported on its own, without a key file.";
+
+/** The pair import's key file is over the cap, refused before it is read. */
+export const OVERSIZE_KEY_FILE_REASON =
+  "The key file is larger than a .psilink.key can be. Choose the " +
+  ".psilink.key psilink wrote beside this psilink.yaml and import the two " +
+  "again. Nothing was imported.";
+
+/**
+ * Which refusal a psilink.yaml imported with its `.psilink.key` is shown as,
+ * where the refusal is about the files. A configuration or key file this app
+ * will not take states its own reason, escaped for display at this one
+ * altitude; neither reason holds a byte of the key file. A backup file is named
+ * as one; everything else leaves the configuration file to check.
+ */
+export function pairImportFailureReason(error: unknown): string {
+  if (
+    error instanceof ManagedConfigurationRefusedError ||
+    error instanceof ManagedKeyFileRefusedError
+  )
+    return sanitizeErrorForDisplay(error);
+  if (error instanceof ManagedImportBackupNotConfigurationError)
+    return BACKUP_NOT_PAIR_REASON;
+  return UNREADABLE_CONFIGURATION_REASON;
+}
+
+/** The heading a pair import is refused under when this browser already runs
+ * the exchange its key file belongs to. */
+export const ALREADY_HELD_IMPORT_TITLE = "That exchange is already here";
+
+/** The refusal a pair import meets when a record this browser runs already
+ * holds the key file's secret: it is the same exchange, so nothing is added. */
+export function alreadyHeldImportReason(label: string): string {
+  const named = label === "" ? "That exchange" : `"${label}"`;
+  return (
+    `${named} already runs in this browser with the secret this .psilink.key ` +
+    "holds, so nothing was imported. Open it from the list. If the command " +
+    "line runs it on a schedule too, stop one of the two: each run changes " +
+    "the shared secret, and the copy that falls behind can no longer connect " +
+    "to your partner."
+  );
 }

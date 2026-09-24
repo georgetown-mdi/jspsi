@@ -231,3 +231,21 @@ export async function markManagedExchangeImported(
     imported: { importedAt: at },
   }));
 }
+
+/**
+ * Mark a record imported as of the import instant, and nothing else -- a fresh
+ * install from a command-line `psilink.yaml` and its `.psilink.key`. The import
+ * marker is the same restore evidence {@link markManagedExchangeImported}
+ * stamps; the backup marker is not stamped, since it attests the app's own
+ * backup file and the pair is not one (docs/spec/MANAGED_EXCHANGE_RECORD.md,
+ * "The backup marker, the spent state, and the import marker").
+ */
+export async function markManagedExchangeKeyImported(
+  id: string,
+  at: string,
+): Promise<void> {
+  await readModifyWriteLocalState(id, (current) => ({
+    ...current,
+    imported: { importedAt: at },
+  }));
+}
