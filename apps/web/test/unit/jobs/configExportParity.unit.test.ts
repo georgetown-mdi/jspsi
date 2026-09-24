@@ -439,6 +439,34 @@ describe("the sftp credential paths a loaded configuration keeps in the export",
     return composedServer(handoff.template.yaml);
   }
 
+  /** The full rendered hand-off YAML of a run over `document` with the run's own
+   * credential `runCredential`, for the assertion that an inline mounted-document
+   * value never reaches the template TEXT (composedServer only checks the parsed
+   * field, and a leak anywhere in the file is what a no-leak assertion holds). */
+  function exportedYaml(
+    document: ExchangeSpec,
+    runCredential: Partial<JobSftpServerEntry>,
+    converted: boolean,
+  ): string {
+    const handoff = buildJobHandoff(
+      validSftpIntent({ linkageTerms: validLinkageTerms() }),
+      {
+        host: "sftp.example.org",
+        hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+        ...runCredential,
+      },
+      {
+        credentialPasted: false,
+        filedropSplit: false,
+        mountedDocument: document,
+        mountedDocumentConverted: converted,
+      },
+    );
+    if (handoff.template.kind !== "config")
+      throw new Error("an exchange hand-off composed no template");
+    return handoff.template.yaml;
+  }
+
   test("an unconverted export states the password path as read", () => {
     const server = exportedServer(
       sftpDocument({ password: "@/home/operator/.psilink/password" }),
@@ -492,6 +520,75 @@ describe("the sftp credential paths a loaded configuration keeps in the export",
       false,
     );
     expect(server.password).toBe(HANDOFF_CREDENTIAL_PATH_PLACEHOLDER);
+  });
+
+  test("an inline private key and passphrase in the document reach no export", () => {
+    const inlinePrivateKey = "an-inline-private-key-value";
+    const inlinePassphrase = "an-inline-passphrase-value";
+    const yaml = exportedYaml(
+      sftpDocument({
+        privateKey: inlinePrivateKey,
+        privateKeyPassphrase: inlinePassphrase,
+      }),
+      { privateKey: RUN_KEY_PATH, privateKeyPassphrase: RUN_PASSPHRASE_PATH },
+      false,
+    );
+    expect(yaml).not.toContain(inlinePrivateKey);
+    expect(yaml).not.toContain(inlinePassphrase);
+    const server = composedServer(yaml);
+    expect(server.private_key).toBe(HANDOFF_CREDENTIAL_PATH_PLACEHOLDER);
+    expect(server.private_key_passphrase).toBe(
+      HANDOFF_PASSPHRASE_PATH_PLACEHOLDER,
+    );
+  });
+
+  test("a converted export states placeholders over inline document credentials", () => {
+    const inlinePassword = "an-inline-password-value";
+    const passwordYaml = exportedYaml(
+      sftpDocument({ password: inlinePassword }),
+      { password: RUN_PASSWORD_PATH },
+      true,
+    );
+    expect(passwordYaml).not.toContain(inlinePassword);
+    expect(composedServer(passwordYaml).password).toBe(
+      HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
+    );
+
+    const inlinePrivateKey = "an-inline-private-key-value";
+    const inlinePassphrase = "an-inline-passphrase-value";
+    const keyYaml = exportedYaml(
+      sftpDocument({
+        privateKey: inlinePrivateKey,
+        privateKeyPassphrase: inlinePassphrase,
+      }),
+      { privateKey: RUN_KEY_PATH, privateKeyPassphrase: RUN_PASSPHRASE_PATH },
+      true,
+    );
+    expect(keyYaml).not.toContain(inlinePrivateKey);
+    expect(keyYaml).not.toContain(inlinePassphrase);
+    const key = composedServer(keyYaml);
+    expect(key.private_key).toBe(HANDOFF_CREDENTIAL_PATH_PLACEHOLDER);
+    expect(key.private_key_passphrase).toBe(
+      HANDOFF_PASSPHRASE_PATH_PLACEHOLDER,
+    );
+  });
+
+  test("an unconverted export carries an @path key but not an inline passphrase", () => {
+    const inlinePassphrase = "an-inline-passphrase-value";
+    const yaml = exportedYaml(
+      sftpDocument({
+        privateKey: "@/home/operator/.ssh/id_ed25519",
+        privateKeyPassphrase: inlinePassphrase,
+      }),
+      { privateKey: RUN_KEY_PATH, privateKeyPassphrase: RUN_PASSPHRASE_PATH },
+      false,
+    );
+    expect(yaml).not.toContain(inlinePassphrase);
+    const server = composedServer(yaml);
+    expect(server.private_key).toBe("@/home/operator/.ssh/id_ed25519");
+    expect(server.private_key_passphrase).toBe(
+      HANDOFF_PASSPHRASE_PATH_PLACEHOLDER,
+    );
   });
 
   test("a sign-in method the run changed keeps the run's placeholder", () => {
