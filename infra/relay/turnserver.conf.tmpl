@@ -1,7 +1,7 @@
 # coturn configuration for the psilink standing relay.
 #
 # render-config.sh substitutes every value written between double underscores
-# below and writes the result at mode 600, because the rendered file carries the
+# below and writes the result at mode 600, because the rendered file can hold the
 # static authentication secret. This template is tracked; the rendered file is
 # not.
 #
@@ -37,9 +37,13 @@ max-port=__MAX_PORT__
 fingerprint
 
 # The credential model: username is <unix-expiry>:<name>, password is the base64
-# HMAC-SHA1 of that username under the secret below. mint-credential.sh is the
-# only supported minting path, and realm must match what it signs against.
+# HMAC-SHA1 of that username under a shared secret. coturn accepts a credential
+# signed under any row of the userdb's turn_secret table -- one per exchange,
+# added by register-exchange.sh and removed by revoke-exchange.sh -- or under
+# the optional static secret, which render-config.sh drops when the host holds
+# none. realm must match what every secret is registered and signed under.
 use-auth-secret
+userdb=/var/lib/coturn/turndb
 static-auth-secret=__STATIC_AUTH_SECRET__
 realm=__REALM__
 

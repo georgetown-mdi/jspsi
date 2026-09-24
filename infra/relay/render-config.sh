@@ -10,8 +10,10 @@
 # executable printing "<public>/<private>" on one line; aws/external-ip.sh is the
 # AWS implementation and nothing else here knows about a metadata endpoint.
 #
-# The rendered file carries the static authentication secret, so it is created at
-# mode 600 before any content reaches it and is never written anywhere else.
+# The rendered file can hold the static authentication secret, so it is created
+# at mode 600 before any content reaches it and is never written anywhere else.
+# The static secret is optional: without the file, the rendered configuration
+# authenticates against the per-exchange secrets table alone.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -29,7 +31,6 @@ REALM="${PSILINK_RELAY_REALM:-}"
 [ -n "$REALM" ] || die "PSILINK_RELAY_REALM is unset in $ENV_FILE; refusing to guess a realm"
 
 SECRET_FILE="${PSILINK_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
-[ -f "$SECRET_FILE" ] || die "no secret at $SECRET_FILE; install.sh mints one"
 
 MIN_PORT="${PSILINK_RELAY_MIN_PORT:-49152}"
 MAX_PORT="${PSILINK_RELAY_MAX_PORT:-49200}"
@@ -52,12 +53,21 @@ PRIVATE_IP="${ADDRS##*/}"
 # The secret is read into the render and nowhere else. It is not exported, not
 # passed as an argument, and not echoed, so it never reaches a process listing,
 # a unit file, or the journal.
-SECRET="$(cat "$SECRET_FILE")"
-[ -n "$SECRET" ] || die "$SECRET_FILE is empty"
+if [ -f "$SECRET_FILE" ]; then
+  SECRET="$(cat "$SECRET_FILE")"
+  [ -n "$SECRET" ] || die "$SECRET_FILE is empty; delete it to run on the secrets table alone"
+  STATIC_SUBSTITUTION="s#__STATIC_AUTH_SECRET__#$SECRET#g"
+  STATIC_NOTE="static secret and secrets table"
+else
+  SECRET=""
+  STATIC_SUBSTITUTION="/^static-auth-secret=__STATIC_AUTH_SECRET__\$/d"
+  STATIC_NOTE="secrets table only"
+fi
+
 # The substitution below is a sed expression, so a secret carrying a metacharacter
 # would be rewritten on its way into the file and coturn would authenticate
-# against something other than what mint-credential.sh signs with. install.sh
-# mints hex; an operator-supplied secret is held to an alphabet that survives.
+# against something other than what mint-credential.sh signs with, so the secret
+# is held to an alphabet that survives.
 case "$SECRET" in
   *[!A-Za-z0-9_-]*) die "$SECRET_FILE holds characters outside [A-Za-z0-9_-]; regenerate it with: openssl rand -hex 32" ;;
 esac
@@ -83,7 +93,7 @@ sed -e "s#__LISTENING_IP__#$PRIVATE_IP#g" \
     -e "s#__USER_QUOTA__#$USER_QUOTA#g" \
     -e "s#__TOTAL_QUOTA__#$TOTAL_QUOTA#g" \
     -e "s#__MAX_BPS__#$MAX_BPS#g" \
-    -e "s#__STATIC_AUTH_SECRET__#$SECRET#g" \
+    -e "$STATIC_SUBSTITUTION" \
     "$TMPL" > "$TMP"
 
 # A placeholder left in a setting is one this script has not been taught about,
@@ -105,5 +115,5 @@ if [ -n "${PSILINK_RELAY_IMAGE_UID:-}" ]; then
   chown "$PSILINK_RELAY_IMAGE_UID" "$OUT"
 fi
 
-printf 'rendered %s (realm %s, external %s/%s, relay ports %s-%s)\n' \
-  "$OUT" "$REALM" "$PUBLIC_IP" "$PRIVATE_IP" "$MIN_PORT" "$MAX_PORT"
+printf 'rendered %s (realm %s, external %s/%s, relay ports %s-%s, %s)\n' \
+  "$OUT" "$REALM" "$PUBLIC_IP" "$PRIVATE_IP" "$MIN_PORT" "$MAX_PORT" "$STATIC_NOTE"

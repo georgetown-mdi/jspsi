@@ -9,6 +9,8 @@ acme.env
 acme/
 turnserver.conf
 static-auth-secret
+exchange-keys
+exchange-keys.lock
 *.pem
 *.key
 *.crt

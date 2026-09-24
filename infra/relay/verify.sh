@@ -8,7 +8,7 @@
 # shapes assumed in advance. Fix what a later run gets wrong rather than
 # loosening a probe until it passes.
 #
-# Three probes, in the order a failure matters:
+# Four probes, in the order a failure matters:
 #
 #   handshake     a real TLS handshake on 443/tcp, and the certificate the relay
 #                 serves for its own realm
@@ -16,6 +16,11 @@
 #                 credential minted for this run
 #   internal-peer the same client asking to reach the cloud metadata endpoint and
 #                 an RFC1918 address, which the relay must refuse
+#   secrets table two keys registered for this run both allocate, a key never
+#                 registered is refused, a credential keyed with a registered
+#                 key's 32 decoded bytes rather than its 64 hex characters is
+#                 refused (docs/spec/PROTOCOL.md, Relay credential derivation),
+#                 and a revoked key's new allocation is refused
 #
 # The third is the one that cannot be inferred from the second: a relay that
 # allocates is working, and a relay that allocates toward its own VPC and the
@@ -159,14 +164,78 @@ else
   certificate_report "$HS"
 fi
 
+# --- keys for this run --------------------------------------------------------
+# Two exchanges registered under fixed ids, so a run that died before its cleanup
+# is replaced rather than accumulated by the next one.
+VERIFY_A=psilink-verify-a
+VERIFY_B=psilink-verify-b
+KEY_A="$(openssl rand -hex 32)"
+KEY_B="$(openssl rand -hex 32)"
+KEY_UNREGISTERED="$(openssl rand -hex 32)"
+# Cleanup revokes each id, which drops its mapping line, then removes each key
+# from the table by value: a register can add the row and still fail, leaving a
+# key no mapping line holds.
+cleanup() {
+  local id
+  for id in "$VERIFY_A" "$VERIFY_B"; do
+    "$HERE/revoke-exchange.sh" "$id" > /dev/null 2>&1 || true
+  done
+  (
+    # shellcheck source=exchange-keys.sh
+    . "$HERE/exchange-keys.sh"
+    set -- "$VERIFY_A" "$KEY_A" "$VERIFY_B" "$KEY_B"
+    while [ "$#" -gt 0 ]; do
+      if [ -n "$2" ]; then
+        remove_key_by_value "$2"
+        case "$?" in
+          1) ;;
+          0) printf 'WARNING: the key this run registered for %s is still in the secrets table; run revoke-exchange.sh %s if %s has a line for it, otherwise %s\n' "$1" "$1" "$MAP_FILE" "$(list_table_hint)" >&2 ;;
+          *) printf 'WARNING: could not read the secrets table to confirm the key this run registered for %s left it; %s\n' "$1" "$(list_table_hint)" >&2 ;;
+        esac
+      fi
+      shift 2
+    done
+  ) < /dev/null || printf 'WARNING: could not check the secrets table for the keys this run registered for %s and %s; see the message above\n' "$VERIFY_A" "$VERIFY_B" >&2
+  return 0
+}
+trap cleanup EXIT
+TABLE_READY=1
+register() {
+  local out
+  if ! out="$("$HERE/register-exchange.sh" "$1" "$2" 2>&1)"; then
+    report fail "could not register $1 for this run" "$(printf '%s' "$out" | tr '\n' ' ')"
+    TABLE_READY=0
+  fi
+}
+register "$VERIFY_A" "$KEY_A"
+register "$VERIFY_B" "$KEY_B"
+
+# The recipe mint-credential.sh uses, over a key given here. With hexkey the key
+# is the 32 bytes the hex decodes to, which coturn must refuse.
+mint() {
+  printf '%s' "$1" | openssl dgst -sha1 -hmac "$2" -binary | openssl base64 | tr -d '\n'
+}
+mint_over_decoded_bytes() {
+  printf '%s' "$1" | openssl dgst -sha1 -mac hmac -macopt "hexkey:$2" -binary | openssl base64 | tr -d '\n'
+}
+run_user() { printf '%s:%s' "$(( $(date -u +%s) + 600 ))" "$1"; }
+
 # --- a credential for this run ----------------------------------------------
+# From the static secret where the host holds one, so that path stays driven;
+# from the first registered key where it does not.
 TURN_USER=""; TURN_CRED=""
-if CRED_OUT="$("$HERE/mint-credential.sh" verify 600 2>&1)"; then
-  TURN_USER="$(printf '%s' "$CRED_OUT" | sed -n 's/^username:  *//p' | head -1)"
-  TURN_CRED="$(printf '%s' "$CRED_OUT" | sed -n 's/^credential:  *//p' | head -1)"
-else
-  report unclear "could not mint a credential to verify with" \
-    "$(printf '%s' "$CRED_OUT" | tr '\n' ' ' | cut -c1-160)"
+SECRET_FILE="${PSILINK_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
+if [ -f "$SECRET_FILE" ]; then
+  if CRED_OUT="$("$HERE/mint-credential.sh" verify 600 2>&1)"; then
+    TURN_USER="$(printf '%s' "$CRED_OUT" | sed -n 's/^username:  *//p' | head -1)"
+    TURN_CRED="$(printf '%s' "$CRED_OUT" | sed -n 's/^credential:  *//p' | head -1)"
+  else
+    report unclear "could not mint a credential to verify with" \
+      "$(printf '%s' "$CRED_OUT" | tr '\n' ' ' | cut -c1-160)"
+  fi
+elif [ "$TABLE_READY" = 1 ]; then
+  TURN_USER="$(run_user verify)"
+  TURN_CRED="$(mint "$TURN_USER" "$KEY_A")"
 fi
 
 # One TURNS client run through the image, which is where turnutils_uclient lives.
@@ -174,13 +243,20 @@ fi
 # take these flags the same way; only install.sh's build line differs between
 # them.
 uclient() {
-  local peer="$1"
+  local peer="$1" user="${2:-$TURN_USER}" cred="${3:-$TURN_CRED}"
   # The trailing argument is the TCP connect target; coturn's own 401 challenge
   # carries the realm it authenticates against (turnserver.conf's REALM), so
   # swapping this address does not change what realm the exchange below
   # authenticates under.
   timeout 60 "$RUNTIME" run --rm --network host --entrypoint turnutils_uclient "$IMAGE" \
-    -t -S -p 443 -u "$TURN_USER" -w "$TURN_CRED" -e "$peer" -n 2 -c -v "$CONNECT" 2>&1
+    -t -S -p 443 -u "$user" -w "$cred" -e "$peer" -n 2 -c -v "$CONNECT" 2>&1
+}
+
+# Measured 2026-09-03 against coturn 4.17.2: a successful run through this
+# image's turnutils_uclient emits none of 'allocate success', 'relay address',
+# or 'allocated' -- it ends with "Total transmit time is N" and a clean close.
+allocated() {
+  printf '%s' "$1" | grep -qi 'allocate.*success\|relay address\|allocated\|total transmit time'
 }
 
 if [ -n "$TURN_USER" ] && [ -n "$TURN_CRED" ]; then
@@ -196,11 +272,7 @@ if [ -n "$TURN_USER" ] && [ -n "$TURN_CRED" ]; then
     fi
   else
     OUT="$(uclient 203.0.113.9)"
-    # Measured 2026-09-03 against coturn 4.17.2: a successful run through this
-    # image's turnutils_uclient emits none of 'allocate success', 'relay
-    # address', or 'allocated' -- it ends with "Total transmit time is N" and a
-    # clean close (data sent to the black-hole peer, 0 received, as expected).
-    if printf '%s' "$OUT" | grep -qi 'allocate.*success\|relay address\|allocated\|total transmit time'; then
+    if allocated "$OUT"; then
       report pass "the relay allocated (no PSILINK_RELAY_VERIFY_PEER set, so no data leg was exercised)"
     else
       report fail "no allocation success or transmit-time close was observed" "$(printf '%s' "$OUT" | tr '\n' ' ' | cut -c1-200)"
@@ -222,6 +294,52 @@ if [ -n "$TURN_USER" ] && [ -n "$TURN_CRED" ]; then
   done
 else
   report unclear "no credential, so no allocation and no refusal was probed"
+fi
+
+# --- the secrets table ---------------------------------------------------------
+# Measured 2026-09-23 against coturn 4.18.0: a credential under no registered
+# secret is answered 401 on every retry, and over TURNS turnutils_uclient gives
+# up after about 0.6 s (30 retries) with "Cannot complete Allocation" and exit
+# status 255.
+expect_allocates() {
+  local label="$1" out
+  out="$(uclient 203.0.113.9 "$2" "$3")"
+  if allocated "$out"; then
+    report pass "$label allocated"
+  else
+    report fail "$label did not allocate" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
+  fi
+}
+expect_refused() {
+  local label="$1" out
+  out="$(uclient 203.0.113.9 "$2" "$3")"
+  if allocated "$out"; then
+    report fail "$label was NOT refused"
+  elif printf '%s' "$out" | grep -q 'Cannot complete Allocation'; then
+    report pass "$label was refused"
+  else
+    report unclear "could not tell whether $label was refused" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-200)"
+  fi
+}
+
+if [ "$TABLE_READY" = 1 ]; then
+  U="$(run_user verify-a)"
+  expect_allocates "a credential under registered key A" "$U" "$(mint "$U" "$KEY_A")"
+  U="$(run_user verify-unregistered)"
+  expect_refused "a credential under a key never registered" "$U" "$(mint "$U" "$KEY_UNREGISTERED")"
+  U="$(run_user verify-b)"
+  expect_refused "a credential keyed with key B's 32 decoded bytes" "$U" "$(mint_over_decoded_bytes "$U" "$KEY_B")"
+  expect_allocates "the same username's credential keyed with key B's 64 hex characters" "$U" "$(mint "$U" "$KEY_B")"
+  if REV_OUT="$("$HERE/revoke-exchange.sh" "$VERIFY_A" 2>&1)"; then
+    # Measured: a new allocation is refused within about 200 ms of the delete.
+    sleep 1
+    U="$(run_user verify-a-revoked)"
+    expect_refused "a new allocation under revoked key A" "$U" "$(mint "$U" "$KEY_A")"
+  else
+    report fail "could not revoke key A" "$(printf '%s' "$REV_OUT" | tr '\n' ' ' | cut -c1-160)"
+  fi
+else
+  report unclear "no key was registered, so the secrets table was not probed"
 fi
 
 printf '\n%s pass, %s fail, %s unclear\n' "$PASS" "$FAIL" "$UNCLEAR"

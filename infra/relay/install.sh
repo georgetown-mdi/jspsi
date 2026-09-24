@@ -4,9 +4,9 @@
 #
 #   install.sh [--skip-verify]
 #
-# What it does, in order: installs a container runtime, mints a static
-# authentication secret if this host has none, builds the image from the pinned
-# Dockerfile beside this file, obtains a certificate if none is present, renders
+# What it does, in order: installs a container runtime, builds the image from the
+# pinned Dockerfile beside this file, creates the data directory that holds the
+# per-exchange secrets table, obtains a certificate if none is present, renders
 # the configuration, installs the relay's unit and the two timers, and starts the
 # relay. It then runs verify.sh, which is the only step that says whether the
 # result carries an exchange.
@@ -130,14 +130,16 @@ command -v openssl >/dev/null 2>&1 || dnf -y install openssl
 command -v curl >/dev/null 2>&1 || dnf -y install curl
 
 # --- the static secret ------------------------------------------------------
+# Optional, and never minted here: a host that holds one keeps it, beside the
+# per-exchange secrets table, until the operator deletes it (README.md,
+# Per-exchange keys).
 SECRET_FILE="${PSILINK_RELAY_SECRET_FILE:-$ETC/static-auth-secret}"
 install -d -m 700 "$ETC"
 install -d -m 755 "$ETC/certs"
-if [ ! -f "$SECRET_FILE" ]; then
-  log "minting a static authentication secret at $SECRET_FILE"
-  ( umask 077; openssl rand -hex 32 > "$SECRET_FILE" )
+if [ -f "$SECRET_FILE" ]; then
+  log "keeping the static authentication secret at $SECRET_FILE"
+  chmod 600 "$SECRET_FILE"
 fi
-chmod 600 "$SECRET_FILE"
 
 # --- the image --------------------------------------------------------------
 log "building $IMAGE from the pinned base in $HERE/Dockerfile"
@@ -161,10 +163,17 @@ esac
 log "the image runs as uid $IMAGE_UID"
 record_env_value PSILINK_RELAY_IMAGE_UID "$IMAGE_UID"
 
+# --- the secrets table ------------------------------------------------------
+# coturn reads the table's SQLite file as the image's account, and the key
+# scripts write it through the same image, so the directory is that account's.
+# turnadmin creates the file on the first registration.
+install -d -m 700 -o "$IMAGE_UID" /var/lib/psilink-relay
+
 # --- the scripts this host runs ---------------------------------------------
 install -d -m 755 "$LIBEXEC" "$LIBEXEC/aws" "$LIBEXEC/certs"
-install -m 755 "$HERE/render-config.sh" "$HERE/verify.sh" "$HERE/mint-credential.sh" "$LIBEXEC/"
-install -m 644 "$HERE/turnserver.conf.tmpl" "$LIBEXEC/"
+install -m 755 "$HERE/render-config.sh" "$HERE/verify.sh" "$HERE/mint-credential.sh" \
+  "$HERE/register-exchange.sh" "$HERE/revoke-exchange.sh" "$LIBEXEC/"
+install -m 644 "$HERE/turnserver.conf.tmpl" "$HERE/exchange-keys.sh" "$LIBEXEC/"
 install -m 755 "$HERE/aws/external-ip.sh" "$LIBEXEC/aws/"
 install -m 755 "$HERE/certs/renew.sh" "$HERE/certs/deploy-hook.sh" "$LIBEXEC/certs/"
 
