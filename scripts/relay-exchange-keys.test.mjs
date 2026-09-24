@@ -439,8 +439,7 @@ describe("revoke-exchange.sh", () => {
     host.register("1.0", KEY_B);
     const result = host.revoke("01");
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("exchange-id is not registered");
-    expect(result.stderr).not.toContain("01");
+    expect(result.stderr).toContain("exchange-id 01 is not registered");
     expect(result.turnadmin).toEqual([]);
     expect(host.mapping()).toBe(`1 ${KEY_A}\n1.0 ${KEY_B}\n`);
   });
@@ -462,8 +461,7 @@ describe("revoke-exchange.sh", () => {
     const host = fixtureHost();
     const result = host.revoke("exchange-1");
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("exchange-id is not registered");
-    expect(result.stderr).not.toContain("exchange-1");
+    expect(result.stderr).toContain("exchange-id exchange-1 is not registered");
     expect(result.turnadmin).toEqual([]);
   });
 
