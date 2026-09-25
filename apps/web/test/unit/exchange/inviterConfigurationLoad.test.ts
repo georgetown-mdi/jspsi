@@ -169,8 +169,15 @@ function profileOf(csv: AcquiredCsv): ProfiledJobInput {
   };
 }
 
-/** The console's commit of a mounted input file: the draft is seeded from the
- * file's own headers, as it is for a console with no configuration open. */
+/** The delimiter the console's current choice reads a file by. */
+function currentDelimiter(state: InviterScreenState): string | undefined {
+  const resolved = resolveCsvDelimiter(state.delimiterChoice);
+  return resolved.ok ? resolved.delimiter : undefined;
+}
+
+/** The console's commit of a mounted input file, profiled by the current
+ * delimiter: the draft is seeded from the file's own headers, as it is for a
+ * console with no configuration open. */
 function withFileCommitted(
   state: InviterScreenState,
   csv: AcquiredCsv,
@@ -178,6 +185,7 @@ function withFileCommitted(
   return inviterScreenReducer(state, {
     type: "console-file-seeded",
     source: profileOf(csv),
+    delimiter: currentDelimiter(state),
     acquired: csv,
     editor: editorFromCsv("County Health", csv),
   });
@@ -608,6 +616,7 @@ describe("the open configuration holds across the files it is derived over", () 
     const reprofiled = inviterScreenReducer(applied, {
       type: "console-file-reprofiled",
       source: profileOf(csv),
+      delimiter: currentDelimiter(applied),
       acquired: csv,
       editor,
       announcement: "Re-profiled with the file's current contents",
@@ -1268,6 +1277,84 @@ describe("the delimiter moves with the read the seal guards", () => {
     };
     const late = loadedInto(sealed, sftpDocument());
     expect(late.delimiterChoice).toBe(INVITER_SCREEN_INITIAL.delimiterChoice);
+  });
+});
+
+// The console profiles the committed file by the delimiter in effect, so a
+// configuration read that lands a different one after the operator moved past
+// the file step leaves those columns read by a delimiter the run will not use.
+// No step past the file step may show them.
+describe("a delimiter a late read lands under a committed file", () => {
+  /** A file committed under the default comma, with the configuration read
+   * still in flight when the operator moves on to `section`. */
+  function advancedWhileReading(
+    section: "columns" | "review" | "keys",
+  ): InviterScreenState {
+    const committed = withFileCommitted(INVITER_SCREEN_INITIAL, acquired());
+    const reading = inviterScreenReducer(committed, {
+      type: "mounted-configuration-reading",
+    });
+    return inviterScreenReducer(reading, { type: "section-shown", section });
+  }
+
+  test("a new delimiter drops the columns and returns to the file step", () => {
+    const advanced = advancedWhileReading("columns");
+    expect(advanced.section).toBe("columns");
+    expect(advanced.acquired?.columns).toEqual(COLUMNS);
+
+    const landed = loadedInto(advanced, sftpDocument({ csvDelimiter: "|" }));
+    const resolved = resolveCsvDelimiter(landed.delimiterChoice);
+    expect(resolved.ok && resolved.delimiter).toBe("|");
+    expect(landed.section).toBe("file");
+    expect(landed.lastSpineStep).toBe("file");
+    expect(landed.consoleSource).toBeUndefined();
+    expect(landed.acquired).toBeUndefined();
+    expect(landed.editor).toBeUndefined();
+    expect(landed.intakeAlert?.title).toBe("Choose your file again");
+    // The configuration itself opened; only the columns went.
+    expect(landed.mountedConfiguration.status).toBe("opened");
+  });
+
+  test("a Customize tab or the review step is left the same way", () => {
+    for (const section of ["review", "keys"] as const) {
+      const landed = loadedInto(
+        advancedWhileReading(section),
+        sftpDocument({ csvDelimiter: "|" }),
+      );
+      expect(landed.section).toBe("file");
+      expect(landed.acquired).toBeUndefined();
+    }
+  });
+
+  test("a file chosen again by the new delimiter reaches the columns step", () => {
+    const landed = loadedInto(
+      advancedWhileReading("columns"),
+      sftpDocument({ csvDelimiter: "|" }),
+    );
+    const recommitted = withFileRead(landed);
+    const columns = inviterScreenReducer(recommitted, {
+      type: "section-shown",
+      section: "columns",
+    });
+    expect(columns.section).toBe("columns");
+    expect(columns.consoleSourceDelimiter).toBe("|");
+    expect(columns.acquired?.columns).toEqual(COLUMNS);
+  });
+
+  test("the delimiter the columns were read by keeps the columns step", () => {
+    const landed = loadedInto(
+      advancedWhileReading("columns"),
+      sftpDocument({ csvDelimiter: "," }),
+    );
+    expect(landed.section).toBe("columns");
+    expect(landed.acquired?.columns).toEqual(COLUMNS);
+  });
+
+  test("on the file step the commit is left to the file picker", () => {
+    const committed = withFileCommitted(INVITER_SCREEN_INITIAL, acquired());
+    const landed = loadedInto(committed, sftpDocument({ csvDelimiter: "|" }));
+    expect(landed.section).toBe("file");
+    expect(landed.consoleSource).toBe(committed.consoleSource);
   });
 });
 
