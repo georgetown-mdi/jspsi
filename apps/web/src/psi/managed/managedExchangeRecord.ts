@@ -125,9 +125,10 @@ export function channelThisAppDoesNotRun(
 }
 
 /**
- * The top-level document parts this app holds unchanged and cannot run. A
+ * The top-level document parts this app holds unchanged and may not run. A
  * `signing` block configures receipt signing, which this app does not do, so a
- * run here would complete without the receipt the document asks for.
+ * run here would complete without the receipt the document asks for -- unless
+ * its mode is `none`, which asks for no receipt ({@link partAsksWhatThisAppLacks}).
  */
 export const DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN = [
   "signing",
@@ -137,18 +138,30 @@ export const DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN = [
 export type DocumentPartThisAppDoesNotRun =
   (typeof DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN)[number];
 
+/** Whether `part`, as `exchangeFile` states it, asks for something this app
+ * does not do. A `signing` block asks for a receipt unless its mode is `none`,
+ * which the block states explicitly and this app meets by signing nothing. */
+function partAsksWhatThisAppLacks(
+  exchangeFile: ExchangeSpec,
+  part: DocumentPartThisAppDoesNotRun,
+): boolean {
+  const stated = exchangeFile[part];
+  return stated !== undefined && stated.mode !== "none";
+}
+
 /**
  * The parts of a document this app holds but cannot run, in a fixed order. The
  * one place "does this document run here" is read off its parts rather than
  * its channel: the record schema refuses a secret beside one, so a record
  * stating one is a configuration only, and every surface that withholds the
- * run for one names it from here.
+ * run for one names it from here. A part that asks for nothing this app lacks
+ * -- a `signing` block whose mode is `none` -- is held unchanged and runs.
  */
 export function documentPartsThisAppDoesNotRun(
   exchangeFile: ExchangeSpec,
 ): Array<DocumentPartThisAppDoesNotRun> {
-  return DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN.filter(
-    (part) => exchangeFile[part] !== undefined,
+  return DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN.filter((part) =>
+    partAsksWhatThisAppLacks(exchangeFile, part),
   );
 }
 

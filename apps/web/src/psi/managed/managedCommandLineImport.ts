@@ -33,8 +33,10 @@
  *   read for that one policy and dropped.
  *
  * A configuration on any channel imports, and so does one stating a part this
- * app cannot run -- a `signing` block, held unchanged for the file Alcove
- * runs, every `@` in it as the text the file wrote. This app runs webrtc
+ * app cannot run -- a `signing` block asking for a receipt, held unchanged for
+ * the file Alcove runs, every `@` in it as the text the file wrote. A block
+ * whose mode is `none` asks for none and is held the same way on a record
+ * that runs here. This app runs webrtc
  * exchanges without receipt signing, and that limit is met where a run would
  * start rather than here: such a record is a configuration only, which the
  * record's own shape keeps from every run (docs/spec/MANAGED_EXCHANGE_RECORD.md,

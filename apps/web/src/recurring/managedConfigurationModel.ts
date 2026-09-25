@@ -144,12 +144,16 @@ export function configurationOnlyLead(record: ManagedExchangeRecord): string {
 }
 
 /** The list row's one-line status for a configuration-only exchange: the
- * channel where this app does not run it, then the parts it cannot run, then
- * the key file that stayed on the command line. */
+ * channel where this app does not run it, with the parts it cannot run beside
+ * it, then the key file that stayed on the command line. */
 export function configurationOnlyStatus(record: ManagedExchangeRecord): string {
-  if (channelThisAppDoesNotRun(record.exchangeFile) !== undefined)
-    return CHANNEL_ELSEWHERE_STATUS;
+  const channel = channelThisAppDoesNotRun(record.exchangeFile);
   const parts = unrunnablePartNames(record);
+  if (channel !== undefined)
+    return parts.length === 0
+      ? CHANNEL_ELSEWHERE_STATUS
+      : `Configuration only - this app cannot run its ${channel} channel or ` +
+          `its ${parts.join(", ")} settings, run it with Alcove`;
   if (parts.length > 0)
     return (
       `Configuration only - this app cannot run its ${parts.join(", ")} ` +

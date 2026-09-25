@@ -113,8 +113,43 @@ describe("a signing block this app cannot run", () => {
     );
   });
 
+  test.each([
+    [
+      "sftp",
+      "Configuration only - this app cannot run its sftp channel or its signing settings, run it with Alcove",
+    ],
+    [
+      "filedrop",
+      "Configuration only - this app cannot run its filedrop channel or its signing settings, run it with Alcove",
+    ],
+  ] as const)(
+    "on %s, the list row names the block beside the channel",
+    (channel, status) => {
+      expect(configurationOnlyStatus(configuration(channel, { signing }))).toBe(
+        status,
+      );
+    },
+  );
+
   test("is named by the lead rather than among the held settings", () => {
     expect(heldSettings(configuration("webrtc", { signing }))).toEqual([]);
+  });
+});
+
+describe("a signing block whose mode is none", () => {
+  const signing = { mode: "none" } as const;
+
+  test("is no reason the run is withheld, and is held like any other setting", () => {
+    const sftp = configuration("sftp", { signing });
+
+    expect(configurationOnlyStatus(sftp)).toBe(
+      "Configuration only - this app cannot run it, run it with Alcove",
+    );
+    expect(configurationOnlyLead(sftp)).not.toContain("states signing");
+    expect(heldSettings(sftp)).toContain("signing");
+    expect(configurationOnlyStatus(configuration("webrtc", { signing }))).toBe(
+      "Configuration only - edit it here, run it with Alcove",
+    );
   });
 });
 

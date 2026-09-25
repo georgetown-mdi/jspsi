@@ -11,7 +11,8 @@
  * ({@link composeManagedExchangeFile}), plus the `authentication` block the
  * export injects from the local max-age policy and the parts this app holds
  * unchanged without running them ({@link DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN}:
- * a `signing` block, whose record is a configuration only). The shared
+ * a `signing` block, whose record is a configuration only unless its mode is
+ * `none`). The shared
  * exchange-file schema is wider than both: it can represent a TURN
  * `credential`, a `provider_options` map, an `ice_provision` auth block, a
  * PeerJS `server.key`/`server.username`, and a shared secret, and the CLI

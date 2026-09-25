@@ -135,25 +135,34 @@ limit is met where a run would start, not at the import. The surfaces read the
 channel off the document to say which reason applies -- the channel, where it is
 one this app does not run, and the key file otherwise.
 
-**A record whose document states a `signing` block is one.** This app does not
-sign exchange receipts, so a run here would complete without the receipt the
-block asks for. The record schema refuses a `sharedSecret` beside the block on
-the same terms as beside another channel, so the one narrowing withholds the
-run, and an artifact holding both is refused whole rather than installed, under
-the generic newer-version reason, since no artifact this app exports holds
-both; a record such an artifact installed before this rule fails the list read
-and is discarded from the recovery surface. The command-line import holds the
-block unchanged -- every field, an `@` in any of
-its values kept as text and never resolved in the browser -- no editor changes
-it, and the export writes it back as read. The configuration page names the
-block, as the file spells it, as the part this app cannot run, in place of the
-key-file reason on `webrtc` and beside the channel reason on `sftp` and
-`filedrop`, and the list row names it in place of the key-file reason; the
-page's list of settings held without an editor leaves it out, since that reason
-already names it. The parts this app cannot
-run are one list (`DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN`,
+**A record whose document states a `signing` block asking for a receipt is
+one.** This app does not sign exchange receipts, so a run here would complete
+without the receipt a `certificate` or `session-derived` block asks for. The
+record schema refuses a `sharedSecret` beside such a block on the same terms as
+beside another channel, so the one narrowing withholds the run, and an artifact
+holding both is refused whole rather than installed, under the generic
+newer-version reason, since no artifact this app exports holds both; a record
+such an artifact installed before this rule fails the list read and is
+discarded from the recovery surface. The command-line import holds the block
+unchanged -- every field, an `@` in any of its values kept as text and never
+resolved in the browser -- no editor changes it, and the export writes it back
+as read. The configuration page names the block, as the file spells it, as the
+part this app cannot run, in place of the key-file reason on `webrtc` and
+beside the channel reason on `sftp` and `filedrop`, and the list row names it
+in place of the key-file reason on `webrtc` and beside the channel on `sftp`
+and `filedrop`; the page's list of settings held without an editor leaves it
+out, since that reason already names it. The parts this app cannot run are one
+list (`DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN`, read through
+`documentPartsThisAppDoesNotRun`,
 `apps/web/src/psi/managed/managedExchangeRecord.ts`), which the record schema,
 the import and export allowlist, and the surfaces all read.
+
+**A `signing` block whose mode is `none` is not one.** It asks for no receipt,
+which this app meets by signing nothing, so it takes no part in the narrowing:
+a pair stating it imports runnable, the record holds it beside a secret, and
+both exports -- the command-line configuration and the backup artifact --
+write it back unchanged. It is held as any other setting without an editor,
+and named among them.
 
 **The withheld run is the record's shape, not a flag.** Every path that runs,
 rotates, re-invites, hands off, or backs up an exchange takes the narrowed record
@@ -231,7 +240,7 @@ under the re-take's size cap, applied before the file is read.
   The refusal names each problem in fixed words and states no byte of the file:
   no field value, no field name it did not expect, no parser message.
 - A configuration this app does not run -- on `sftp` or `filedrop`, or stating
-  a `signing` block -- with its key file. The record schema holds a secret only
+  a `signing` block whose mode is not `none` -- with its key file. The record schema holds a secret only
   where this app runs the exchange, and the operator chose the key file to run
   it here, so the pair is refused, naming the reason and the configuration-only
   import as the way to edit it here, rather than installed without the key.

@@ -1169,8 +1169,9 @@ no longer connect to your partner. What the pair import takes and refuses:
   time, or holds any other field is refused, saying which, and nothing is
   imported. The refusal never shows what the file holds.
 - **Only an exchange this browser runs.** An sftp or filedrop configuration, or
-  one with a `signing` block, is refused with its key file; import the
-  `alcove.yaml` on its own to edit it here.
+  one whose `signing` block asks for a receipt, is refused with its key file;
+  import the `alcove.yaml` on its own to edit it here. A `signing` block with
+  `mode: none` asks for none, so it runs here and is kept as written.
 - **One copy of an exchange.** An exchange is recognized by its shared secret. If
   this browser already runs the exchange the key file belongs to, nothing is
   imported and the refusal names it. If you handed it off to the command line
@@ -1204,10 +1205,10 @@ place of the Run and schedule controls:
   not conduct -- it runs live browser exchanges (webrtc) only. The page names the
   channel and says to run the exchange with Alcove on the command line; a key
   file would not change that.
-- **A configuration with a `signing` block** asks for a signed exchange receipt,
-  which this browser does not produce. The page names `signing` as the part
-  this app cannot run, on any channel, and so does the list on webrtc; a key
-  file would not change that either.
+- **A configuration with a `signing` block** in `certificate` or
+  `session-derived` mode asks for a signed exchange receipt, which this browser
+  does not produce. The page and the list name `signing` as the part this app
+  cannot run, on any channel; a key file would not change that either.
 
 Nothing about the exchange on the other machine changes by importing its
 configuration -- it keeps running there, from the files it already has.

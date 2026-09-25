@@ -38,8 +38,9 @@
  *   exporting it is how the operator runs it, and an sftp `@path` reference it
  *   holds is written back as read, for the CLI to resolve
  *   (`apps/cli/src/util/atSignRefs.ts`). A `signing` block a configuration-only
- *   record holds is written back as read too; the record schema refuses one
- *   beside a secret, so no artifact installs it.
+ *   record holds is written back as read too, and so is one whose mode is
+ *   `none` on a record that runs here; the record schema refuses any other
+ *   mode beside a secret, so no artifact installs one.
  *
  * The key file is a plaintext credential under the CLI key file's own trust
  * model: custody and storage permissions, never a passphrase (the spec's
