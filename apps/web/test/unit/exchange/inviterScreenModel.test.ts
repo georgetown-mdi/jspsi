@@ -381,6 +381,7 @@ describe("the console's mounted-file commit", () => {
     const committed = inviterScreenReducer(named, {
       type: "console-file-seeded",
       source: PROFILE,
+      delimiter: ",",
       acquired: csv,
       editor: editorFromCsv("Dana Okafor", csv),
     });
@@ -401,6 +402,7 @@ describe("the console's mounted-file commit", () => {
     const first = inviterScreenReducer(INVITER_SCREEN_INITIAL, {
       type: "console-file-seeded",
       source: PROFILE,
+      delimiter: ",",
       acquired: csv,
       editor: editorFromCsv("Dana Okafor", csv),
       alert: unmatchableFileAlert(),
@@ -408,6 +410,7 @@ describe("the console's mounted-file commit", () => {
     const second = inviterScreenReducer(first, {
       type: "console-file-seeded",
       source: PROFILE,
+      delimiter: ",",
       acquired: csv,
       editor: editorFromCsv("Dana Okafor", csv),
       alert: unmatchableFileAlert(),
@@ -480,6 +483,7 @@ describe("what a voided commit can still compose", () => {
     return inviterScreenReducer(state, {
       type: "console-file-seeded",
       source: PROFILE,
+      delimiter: ",",
       acquired: csv,
       editor: editorFromCsv("Dana Okafor", csv),
     });

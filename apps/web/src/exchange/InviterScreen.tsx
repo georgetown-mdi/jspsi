@@ -994,6 +994,7 @@ export function InviterScreen() {
       dispatch({
         type: "console-file-seeded",
         source: profile,
+        delimiter: csvDelimiter,
         acquired: csv,
         editor: seeded,
         notice,
@@ -1017,6 +1018,7 @@ export function InviterScreen() {
         dispatch({
           type: "console-file-reprofiled",
           source: profile,
+          delimiter: csvDelimiter,
           acquired: csv,
           editor: editorReprofiled(editor, csv),
           notice,

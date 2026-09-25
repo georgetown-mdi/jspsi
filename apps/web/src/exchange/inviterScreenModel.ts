@@ -22,9 +22,12 @@ import {
 import { availableTransports, transportOffered } from "@psi/transportChooser";
 import { isJobChannel } from "@jobs/intentSchemas";
 
+import {
+  INITIAL_CSV_DELIMITER_CHOICE,
+  resolveCsvDelimiter,
+} from "@components/csvDelimiterChoice";
 import { CONNECTION_TUNING_DEFAULT } from "@console/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@console/exchangeFilesModel";
-import { INITIAL_CSV_DELIMITER_CHOICE } from "@components/csvDelimiterChoice";
 import { canonicalPartnerBoundTerms } from "@console/loadedConfig";
 
 import { EMPTY_SAVE_FIELDS } from "./saveExchangeModel";
@@ -113,6 +116,9 @@ export interface InviterScreenState {
    * coverage sweep, and the preview samples. Undefined on the hosted build, which
    * reads the file in the browser instead. */
   consoleSource: ProfiledJobInput | undefined;
+  /** The field delimiter {@link consoleSource} was profiled by, held beside it
+   * so its columns can be checked against the current {@link delimiterChoice}. */
+  consoleSourceDelimiter: string | undefined;
   /** The retained browser File the mint re-parses at its fail-closed parse boundary. */
   sourceFile: File | undefined;
   /** The File System Access handle a drop attached to the selected file, where the
@@ -258,6 +264,7 @@ export const INVITER_SCREEN_INITIAL: InviterScreenState = {
   lastSpineStep: "file",
   acquired: undefined,
   consoleSource: undefined,
+  consoleSourceDelimiter: undefined,
   sourceFile: undefined,
   sourceHandle: undefined,
   editor: undefined,
@@ -319,10 +326,12 @@ export type InviterScreenAction =
     }
   /** The parse settled (or was refused); the file step's spinner stops. */
   | { type: "read-finished" }
-  /** The console committed a mounted file, reseeding the draft from its profile. */
+  /** The console committed a mounted file, reseeding the draft from its profile,
+   * which was read by `delimiter`. */
   | {
       type: "console-file-seeded";
       source: ProfiledJobInput;
+      delimiter: string | undefined;
       acquired: AcquiredCsv;
       editor: InviterEditor;
       notice?: AlertContent;
@@ -338,6 +347,7 @@ export type InviterScreenAction =
   | {
       type: "console-file-reprofiled";
       source: ProfiledJobInput;
+      delimiter: string | undefined;
       acquired: AcquiredCsv;
       editor: InviterEditor;
       notice?: AlertContent;
@@ -446,6 +456,7 @@ export type InviterScreenAction =
 const NO_FILE = {
   acquired: undefined,
   consoleSource: undefined,
+  consoleSourceDelimiter: undefined,
   sourceFile: undefined,
   sourceHandle: undefined,
   editor: undefined,
@@ -454,6 +465,58 @@ const NO_FILE = {
 
 /** Apply one action to the inviter console's state. */
 export function inviterScreenReducer(
+  state: InviterScreenState,
+  action: InviterScreenAction,
+): InviterScreenState {
+  return withColumnsReadByCurrentDelimiter(applyAction(state, action));
+}
+
+/** Why a committed console file's columns no longer apply, or undefined while
+ * they do: they apply only while the current delimiter choice resolves and
+ * equals the delimiter the file was read by. */
+function consoleColumnsStaleAlert(
+  state: InviterScreenState,
+): AlertContent | undefined {
+  if (state.consoleSource === undefined) return undefined;
+  const resolution = resolveCsvDelimiter(state.delimiterChoice);
+  if (!resolution.ok)
+    return {
+      title: "Set a valid field delimiter",
+      message:
+        "The field delimiter setting is not valid, so your file's columns cannot be read by it. Fix the delimiter, then choose the file again.",
+    };
+  if (resolution.delimiter === state.consoleSourceDelimiter) return undefined;
+  return {
+    title: "Choose your file again",
+    message:
+      "The field delimiter changed after your file's columns were read, so those columns no longer apply. Choose the file again to read it by the new delimiter.",
+  };
+}
+
+// On the file step the server file picker re-profiles the file on screen when
+// the delimiter moves, voids the commit itself, and holds its gate closed on a
+// delimiter that does not resolve. Past it no picker is mounted, so columns
+// that no longer apply are dropped here and the operator is returned to that
+// step. A sealed draft is an invitation already minted over its columns, which
+// the seal's own guards keep in step.
+function withColumnsReadByCurrentDelimiter(
+  state: InviterScreenState,
+): InviterScreenState {
+  if (state.section === "file" || state.editor?.sealed === true) return state;
+  const alert = consoleColumnsStaleAlert(state);
+  if (alert === undefined) return state;
+  return {
+    ...state,
+    ...NO_FILE,
+    section: "file",
+    lastSpineStep: "file",
+    sanitizedNotice: undefined,
+    savedExchange: undefined,
+    intakeAlert: alert,
+  };
+}
+
+function applyAction(
   state: InviterScreenState,
   action: InviterScreenAction,
 ): InviterScreenState {
@@ -511,6 +574,7 @@ export function inviterScreenReducer(
         ...state,
         sanitizedNotice: action.notice,
         consoleSource: action.source,
+        consoleSourceDelimiter: action.delimiter,
         acquired: action.acquired,
         editor: action.editor,
         savedExchange: undefined,
@@ -531,6 +595,7 @@ export function inviterScreenReducer(
         ...state,
         sanitizedNotice: action.notice,
         consoleSource: action.source,
+        consoleSourceDelimiter: action.delimiter,
         acquired: action.acquired,
         editor: action.editor,
         // The draft stands, so an open configuration's terms stand with it over
@@ -789,7 +854,12 @@ export function inviterScreenReducer(
           maxAgeEnabled: RECEIPTS_DEFAULT.maxAgeEnabled,
           maxAgeDays: RECEIPTS_DEFAULT.maxAgeDays,
         },
-        delimiterChoice: INITIAL_CSV_DELIMITER_CHOICE,
+        // A committed file was read by the operator's own delimiter, not the
+        // configuration's, so closing the configuration keeps it.
+        delimiterChoice:
+          state.consoleSource === undefined
+            ? INITIAL_CSV_DELIMITER_CHOICE
+            : state.delimiterChoice,
         ...(action.editor !== undefined ? { editor: action.editor } : {}),
         editorAnnouncement:
           "Closed the configuration. These terms come from your own file's columns.",
