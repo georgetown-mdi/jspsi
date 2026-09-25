@@ -189,7 +189,12 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
     // socketServer is never closed. There is therefore no reinstantiation that
     // would stack listeners, and no closed socketServer for a stale listener to
     // dispatch to.
-    server.on("upgrade", (req, socket, head) => {
+    //
+    // Prepended so it runs ahead of every co-resident `upgrade` listener, even
+    // one registered first (Vite's HMR handler, attached before this lazily
+    // constructed server): the release window's answer baseline must be taken
+    // before such a listener writes its answer, or that answer reads as none.
+    server.prependListener("upgrade", (req, socket, head) => {
       if (!this.socketServer.shouldHandle(req)) {
         this._releaseUnhandledUpgrade(server, socket);
         return;
