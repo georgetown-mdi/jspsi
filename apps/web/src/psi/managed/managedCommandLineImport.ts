@@ -81,7 +81,6 @@ import {
   literalCredentialFields,
   serverFieldsNotHeld,
 } from "./managedCommandLineDocument";
-import { MAX_KEY_FILE_IMPORT_BYTES } from "./managedRetake";
 
 import type { ConnectionConfig, ExchangeSpec } from "@alcove/core";
 import type {
@@ -96,6 +95,11 @@ import type {
  * before the bounded parse. The same cap the backup artifact takes: both are
  * small operator-held documents, and one control reads either. */
 export const MAX_CONFIGURATION_IMPORT_BYTES = 1_000_000;
+
+/** Upper bound, in bytes, on a key file this app will read, applied before the
+ * sensitive parse's own structural bound. The file holds one secret and one
+ * instant, so anything larger is not the file the operator meant to choose. */
+export const MAX_KEY_FILE_IMPORT_BYTES = 10_000;
 
 /** The label a file-name-free import starts the record at. The operator names
  * the exchange in the settings editor; an empty label is what every surface

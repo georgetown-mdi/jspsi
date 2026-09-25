@@ -20,16 +20,21 @@ import {
   UNREADABLE_IMPORT_REASON,
   UNRECOGNIZED_IMPORT_REASON,
   alreadyHeldBackupImportReason,
+  chosenCopyImportReason,
   importFailureReason,
   liveCopyImportReason,
   liveCopyOpenLabel,
   otherExchangeRestoreReason,
+  sideMismatchImportReason,
+  storedCopyImportReason,
+  storedCopyTakeLabel,
 } from "@recurring/managedImportFailure";
 import {
   encodeManagedExchangeArtifact,
   importManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
 } from "@psi/managed/managedExchangeArtifact";
+import { ManagedImportChosenCopyError } from "@psi/managed/managedExchangeImport";
 
 import type {
   NewManagedExchange,
@@ -315,5 +320,69 @@ describe("what a backup import says about an exchange already listed", () => {
       expect(reason, name).not.toMatch(/\bevery\b|\ball\b/i);
       expect(reason, name).not.toMatch(/no recurring exchanges/i);
     }
+  });
+});
+
+describe("what a pair import says about a stored exchange it may belong to", () => {
+  test("names the one exchange, what it is, and each way on", () => {
+    const reason = storedCopyImportReason([
+      { id: "a", label: "Riverbend", state: "configuration-only" },
+    ]);
+    expect(reason).toContain('"Riverbend"');
+    expect(reason).toMatch(/configuration without its key file/);
+    expect(reason).toMatch(/Nothing was imported/);
+    expect(reason).toMatch(/complete it with these files/);
+    expect(reason).toMatch(/add these files as a new one/);
+    expect(reason).not.toMatch(/stop its scheduled run/);
+  });
+
+  test("offering a hand-off back says to stop the command line first", () => {
+    const reason = storedCopyImportReason([
+      { id: "a", label: "", state: "handed-off" },
+    ]);
+    expect(reason).toMatch(/handed off to the command line/);
+    expect(reason).toMatch(/take it back with these files/);
+    expect(reason).toMatch(/stop its scheduled run/);
+  });
+
+  test("names several exchanges together", () => {
+    const copies = [
+      { id: "a", label: "Riverbend", state: "migration-spent" },
+      { id: "b", label: "", state: "handed-off" },
+    ] as const;
+    expect(storedCopyImportReason(copies)).toMatch(
+      /2 exchanges in the list \("Riverbend", and 1 with no name\)/,
+    );
+    expect(storedCopyTakeLabel(copies, 0)).toBe('Restore "Riverbend"');
+    expect(storedCopyTakeLabel(copies, 1)).toBe("Take listed exchange 2 back");
+  });
+
+  test("each button says what it does to the exchange", () => {
+    expect(
+      storedCopyTakeLabel([{ id: "a", label: "", state: "handed-off" }], 0),
+    ).toBe("Take it back");
+    expect(
+      storedCopyTakeLabel(
+        [{ id: "a", label: "Riverbend", state: "configuration-only" }],
+        0,
+      ),
+    ).toBe('Complete "Riverbend"');
+  });
+
+  test("a pair for the other side names the exchange and the partner's files", () => {
+    const reason = sideMismatchImportReason("Riverbend");
+    expect(reason).toContain('"Riverbend"');
+    expect(reason).toMatch(/other side/);
+    expect(reason).toMatch(/partner's files/);
+    expect(reason).toMatch(/nothing was imported/);
+  });
+
+  test("a chosen exchange that could not take the files says what to do", () => {
+    expect(
+      chosenCopyImportReason(new ManagedImportChosenCopyError("run-in-flight")),
+    ).toMatch(/When it finishes, import the files again/);
+    expect(
+      chosenCopyImportReason(new ManagedImportChosenCopyError("changed")),
+    ).toMatch(/changed since you chose it.*Import the files again/);
   });
 });

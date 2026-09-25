@@ -1,21 +1,55 @@
 import { describe, expect, test, vi } from "vitest";
-import { generateSharedSecret } from "@alcove/core";
+import { generateSharedSecret, getDefaultLinkageTerms } from "@alcove/core";
 
 import {
-  parseManagedKeyFile,
-  retakeManagedExchange,
-} from "@psi/managed/managedRetake";
+  buildManagedExchangeRecord,
+  composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
+} from "@psi/managed/managedExchangeRecord";
+import { composeManagedCronExport } from "@psi/managed/managedCronExport";
+import { decideRetake } from "@psi/managed/managedPairRecognition";
+import { retakeManagedExchange } from "@psi/managed/managedRetake";
 
+import type {
+  ManagedExchangeSide,
+  RunnableManagedExchangeRecord,
+} from "@psi/managed/managedExchangeRecord";
 import type { ManagedRetakeDeps } from "@psi/managed/managedRetake";
 import type { ManagedRetakeOutcome } from "@psi/managed/managedExchangeStore";
 
-// The take-back's file half: what it accepts as the command-line run's key file,
-// and that a file it will not take never reaches the store. The store step itself
-// (the locked cross-store transaction) is exercised against real IndexedDB in
-// test/browser/managedExchangeBackup.test.ts.
+// The take-back's file half: it reads the command-line run's alcove.yaml with
+// the .alcove.key beside it, a pair it will not take never reaches the store,
+// and a pair on other terms or the other side is refused by the store step's
+// check. The store step itself (the locked cross-store transaction) is
+// exercised against real IndexedDB in test/browser/managedExchangeBackup.test.ts.
 
-const secret = generateSharedSecret();
 const at = "2026-09-01T09:00:00.000Z";
+
+function handedOffRecord(
+  side: ManagedExchangeSide = "inviter",
+  identity = "County Health Dept",
+): RunnableManagedExchangeRecord {
+  return runnableManagedExchangeOrRefuse(
+    buildManagedExchangeRecord({
+      label: "Riverbend quarterly",
+      exchangeFile: composeManagedExchangeFile({
+        connection: { channel: "webrtc", host: "signaling.example.org" },
+        linkageTerms: getDefaultLinkageTerms(identity),
+      }),
+      side,
+      sharedSecret: generateSharedSecret(),
+    }),
+  );
+}
+
+/** The two files the command-line export writes for `record`. */
+function filesOf(record: RunnableManagedExchangeRecord): {
+  configuration: string;
+  key: string;
+} {
+  const exported = composeManagedCronExport(record);
+  return { configuration: exported.config.text, key: exported.key.text };
+}
 
 function deps(
   outcome: ManagedRetakeOutcome = { kind: "not-handed-off" },
@@ -26,76 +60,65 @@ function deps(
   };
 }
 
-describe("the key file the take-back reads", () => {
-  test("takes the pair the command-line export writes", () => {
-    const expires = "2026-09-01T00:00:00.000Z";
-    expect(
-      parseManagedKeyFile(JSON.stringify({ sharedSecret: secret })),
-    ).toEqual({ sharedSecret: secret });
-    expect(
-      parseManagedKeyFile(JSON.stringify({ sharedSecret: secret, expires })),
-    ).toEqual({ sharedSecret: secret, expires });
-  });
+/** A store step deciding on `stored` as the real one does inside its
+ * transaction ({@link decideRetake}). */
+function storeHolding(
+  stored: RunnableManagedExchangeRecord,
+): ManagedRetakeDeps {
+  return {
+    retake: (_id, _at, taken) => {
+      const decided = decideRetake(stored, taken);
+      return Promise.resolve(
+        decided.kind === "mismatch"
+          ? decided
+          : { kind: "retaken", record: decided.record },
+      );
+    },
+    now: () => new Date(at),
+  };
+}
 
-  test("refuses a pair holding anything else, rather than dropping it", () => {
-    // Reader-rejects-unknown: a file holding a field this build does not know is
-    // not a key file this build can act on, and installing the secret out of it
-    // would silently discard whatever else it directed.
-    expect(() =>
-      parseManagedKeyFile(
-        JSON.stringify({ sharedSecret: secret, signing: "elsewhere" }),
-      ),
-    ).toThrow();
-    expect(() =>
-      parseManagedKeyFile(JSON.stringify({ sharedSecret: "not-a-secret" })),
-    ).toThrow();
-  });
-
-  test("names the file and nothing the parser read", () => {
-    // The file's bytes are the secret, so a failure may name the file only (the
-    // sensitive-parse chokepoint's rule), never a span of what it parsed.
-    const bytes = `{"sharedSecret": "${secret}"`;
-    expect(() => parseManagedKeyFile(bytes)).toThrow(
-      /command-line key file could not be parsed as JSON/,
-    );
-    try {
-      parseManagedKeyFile(bytes);
-    } catch (error) {
-      expect(String(error)).not.toContain(secret);
+describe("files the take-back will not read", () => {
+  test("are reported, and the store is never reached", async () => {
+    const { configuration } = filesOf(handedOffRecord());
+    for (const files of [
+      { configuration, key: "not json at all" },
+      { configuration: "not: [a configuration", key: "{}" },
+    ]) {
+      const boundaries = deps();
+      await expect(
+        retakeManagedExchange("exchange-1", files, boundaries),
+      ).resolves.toEqual({ kind: "unreadable-files" });
+      expect(boundaries.retake).not.toHaveBeenCalled();
     }
   });
 });
 
-describe("a file the take-back will not read", () => {
-  test("is reported, and the store is never reached", async () => {
-    const boundaries = deps();
-    await expect(
-      retakeManagedExchange("exchange-1", "not json at all", boundaries),
-    ).resolves.toEqual({ kind: "unreadable-key-file" });
-    expect(boundaries.retake).not.toHaveBeenCalled();
-  });
-});
-
 describe("a take-back the store accepts", () => {
-  test("passes the parsed pair through, and no pair where no file was chosen", async () => {
-    // No file is the case the ruling covers with "no run happened since the
+  test("passes the pair read from both files through, and none where no file was chosen", async () => {
+    // No files is the case the operator attests "no run happened since the
     // hand-off": the stored secret is still the partnership's, so the store is
     // asked to clear the spent state and change nothing else.
-    const expires = "2026-09-01T00:00:00.000Z";
+    const onTheCommandLine = handedOffRecord();
     const boundaries = deps();
     await retakeManagedExchange(
       "exchange-1",
-      JSON.stringify({ sharedSecret: secret, expires }),
+      filesOf(onTheCommandLine),
       boundaries,
     );
-    expect(boundaries.retake).toHaveBeenCalledWith("exchange-1", at, {
-      sharedSecret: secret,
-      expires,
-    });
+    expect(boundaries.retake).toHaveBeenCalledWith(
+      "exchange-1",
+      at,
+      expect.objectContaining({
+        sharedSecret: onTheCommandLine.sharedSecret,
+        side: onTheCommandLine.side,
+        exchangeFile: onTheCommandLine.exchangeFile,
+      }),
+    );
 
-    const withoutFile = deps();
-    await retakeManagedExchange("exchange-1", undefined, withoutFile);
-    expect(withoutFile.retake).toHaveBeenCalledWith(
+    const withoutFiles = deps();
+    await retakeManagedExchange("exchange-1", undefined, withoutFiles);
+    expect(withoutFiles.retake).toHaveBeenCalledWith(
       "exchange-1",
       at,
       undefined,
@@ -107,9 +130,59 @@ describe("a take-back the store accepts", () => {
       { kind: "run-in-flight" },
       { kind: "gone" },
       { kind: "not-handed-off" },
+      { kind: "mismatch", on: "terms" },
     ] as const)
       await expect(
         retakeManagedExchange("exchange-1", undefined, deps(outcome)),
       ).resolves.toEqual(outcome);
+  });
+});
+
+describe("the pair is checked against the handed-off record", () => {
+  test("the record's own pair after a run there is taken back with its secret", async () => {
+    const stored = handedOffRecord();
+    const rotated = { ...stored, sharedSecret: generateSharedSecret() };
+
+    const result = await retakeManagedExchange(
+      stored.id,
+      filesOf(rotated),
+      storeHolding(stored),
+    );
+
+    expect(result.kind).toBe("retaken");
+    if (result.kind === "retaken")
+      expect(result.record.sharedSecret).toBe(rotated.sharedSecret);
+  });
+
+  test("the partner's pair, on the other side, is refused", async () => {
+    const stored = handedOffRecord("inviter");
+    const partners = handedOffRecord("acceptor");
+
+    await expect(
+      retakeManagedExchange(stored.id, filesOf(partners), storeHolding(stored)),
+    ).resolves.toEqual({ kind: "mismatch", on: "side" });
+  });
+
+  test("another exchange's pair, on other terms, is refused", async () => {
+    const stored = handedOffRecord();
+    const other = handedOffRecord("inviter", "Another Dept");
+    const otherTerms = {
+      ...other,
+      exchangeFile: {
+        ...other.exchangeFile,
+        linkageTerms: {
+          ...other.exchangeFile.linkageTerms,
+          linkageKeys: other.exchangeFile.linkageTerms.linkageKeys.slice(1),
+        },
+      },
+    };
+
+    await expect(
+      retakeManagedExchange(
+        stored.id,
+        filesOf(otherTerms),
+        storeHolding(stored),
+      ),
+    ).resolves.toEqual({ kind: "mismatch", on: "terms" });
   });
 });

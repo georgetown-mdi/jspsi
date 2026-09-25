@@ -6,8 +6,8 @@
  * The action is attested, because the operator is the only one who knows the two
  * things the browser cannot see: whether the scheduled run on the other machine has
  * been stopped, and whether it has run since the hand-off. So the confirmation
- * states what taking it back does, what must already be true, which file answers
- * the second question, and what choosing the wrong one costs -- and declining
+ * states what taking it back does, what must already be true, which files answer
+ * the second question, and what choosing the wrong ones costs -- and declining
  * writes nothing.
  *
  * The refusals are held apart on what the operator does next, as the hand-off's own
@@ -33,29 +33,42 @@ export const RETAKE_LEAD =
   "running it, each run changes the shared secret and the other one stops " +
   "being able to connect to your partner.";
 
-/** Which file to choose, why, and what the wrong one costs. Every command-line run
- * writes the secret it rotated to back into `.alcove.key`, so that file is where
- * the partnership's current secret is after a run there. The file holds nothing
- * naming the exchange it belongs to, so nothing here can tell this exchange's key
- * file from another exchange's or from a stale copy of it, and whichever is chosen
- * replaces the only secret this browser holds. The confirmation states that cost
- * and where the right file is; it does not refuse the operator's choice. */
+/** Which files to choose, why, and what the wrong ones cost. Every command-line
+ * run writes the secret it rotated to back into `.alcove.key`, so that file is
+ * where the partnership's current secret is after a run there. The key file names
+ * no exchange, so the `alcove.yaml` beside it is chosen too, and a pair on other
+ * terms or the other side is refused. Nothing here tells a stale key file from
+ * the current one, or this exchange's from another on the same terms and side,
+ * and whichever is chosen replaces the only secret this browser holds. The
+ * confirmation states that cost and where the right files are. */
 export const RETAKE_KEY_FILE_NOTE =
   "If that machine has run this exchange since you handed it off, choose the " +
-  ".alcove.key file you saved there -- each run changes the shared secret and " +
-  "writes it to that file, so it holds the one your partner expects. Take it " +
-  "from the folder holding this exchange's alcove.yaml: every exchange's key " +
-  "file has that same name, and the one you choose replaces the only copy of " +
-  "the secret this browser has for this exchange. Another exchange's file, or " +
-  "an older copy of this one, leaves this exchange unable to connect to your " +
-  "partner, and the way back is a fresh invitation they have to accept again.";
+  "alcove.yaml and the .alcove.key beside it, both at once, from the folder " +
+  "you saved them to there -- each run changes the shared secret and writes it " +
+  "to the .alcove.key, so it holds the one your partner expects. Files for " +
+  "other terms or the other side are refused. The key file you choose " +
+  "replaces the only copy of the secret this browser has for this exchange, " +
+  "so an older copy of it, or another exchange's on the same terms, leaves " +
+  "this exchange unable to connect to your partner, and the way back is a " +
+  "fresh invitation they have to accept again.";
 
 /** The case needing no file, and the way out when the file cannot be produced. The
  * fresh invitation is the recovery a secret this browser cannot match always has. */
 export const RETAKE_NO_KEY_FILE_NOTE =
-  "If it has not run since you handed it off, you do not need the file. If you " +
-  "cannot get the file, take the exchange back without it and create a fresh " +
-  "invitation for your partner from this page.";
+  "If it has not run since you handed it off, you do not need the files. If " +
+  "you cannot get them, take the exchange back without them and create a " +
+  "fresh invitation for your partner from this page.";
+
+/** The files the confirmation was given are not an `alcove.yaml` and the
+ * `.alcove.key` beside it: one file, more than two, or two that are not one of
+ * each. Refused before either is read. */
+export const RETAKE_NOT_A_PAIR: ManagedRetakeRefusal = {
+  title: "Choose both files",
+  reason:
+    "Choose the alcove.yaml and the .alcove.key beside it, both in the same " +
+    "file chooser. The .alcove.key alone cannot show which exchange it " +
+    "belongs to. Nothing changed here.",
+};
 
 /** The confirmation's own button: what pressing it does, in the words of the
  * action. */
@@ -68,22 +81,36 @@ export interface ManagedRetakeRefusal {
   reason: string;
 }
 
+/** What a pair on other agreed terms, or on the other side, is refused with. The
+ * other side's files are what the partner holds: the same terms and, after the
+ * same run, the same secret. */
+const RETAKE_MISMATCH_REASON: Record<"terms" | "side", string> = {
+  terms:
+    "The alcove.yaml you chose states different terms from this exchange, so " +
+    "these are another exchange's files and nothing was taken back. Choose " +
+    "the two files from the folder this exchange was handed off to.",
+  side:
+    "The alcove.yaml you chose is for the other side of this exchange -- your " +
+    "partner's files state the same terms from their side -- so nothing was " +
+    "taken back. Choose the two files you saved when you handed it off.",
+};
+
 /** The refusal each non-writing result of a take-back is shown as. Exhaustive over
  * those results, so one added without copy of its own fails to compile rather than
  * reaching the operator under another's heading.
  *
- * An unreadable key file names the file and what to check about it, never anything
- * the parser read: the file's bytes are the secret. */
+ * Unreadable files are named with what to check about them, never anything the
+ * parser read: the key file's bytes are the secret. */
 const RETAKE_REFUSALS: Record<
-  Exclude<ManagedRetakeResult["kind"], "retaken">,
+  Exclude<ManagedRetakeResult["kind"], "retaken" | "mismatch">,
   ManagedRetakeRefusal
 > = {
-  "unreadable-key-file": {
-    title: "That file could not be read",
+  "unreadable-files": {
+    title: "Those files could not be read",
     reason:
-      "This is not a .alcove.key file this app can read. Check that you chose " +
-      "the .alcove.key from the machine running this exchange, and that it " +
-      "was not modified. Nothing changed here.",
+      "These are not an alcove.yaml and .alcove.key this app can take back. " +
+      "Check that you chose the two files from the machine running this " +
+      "exchange, and that neither was modified. Nothing changed here.",
   },
   "run-in-flight": {
     title: RUN_IN_FLIGHT_HANDOFF_TITLE,
@@ -112,9 +139,14 @@ const RETAKE_REFUSALS: Record<
 
 /** The refusal for a result that wrote nothing. */
 export function managedRetakeRefusal(
-  kind: Exclude<ManagedRetakeResult["kind"], "retaken">,
+  result: Exclude<ManagedRetakeResult, { kind: "retaken" }>,
 ): ManagedRetakeRefusal {
-  return RETAKE_REFUSALS[kind];
+  if (result.kind === "mismatch")
+    return {
+      title: "Those are not this exchange's files",
+      reason: RETAKE_MISMATCH_REASON[result.on],
+    };
+  return RETAKE_REFUSALS[result.kind];
 }
 
 /** What a take-back the store could not complete shows. The store raises only where

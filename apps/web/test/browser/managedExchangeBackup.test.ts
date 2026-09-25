@@ -1447,6 +1447,16 @@ describe("taking a command-line hand-off back", () => {
     return record;
   }
 
+  /** What the command-line pair of `record` reads as once its key file holds
+   * `key`: the same terms and side, and the key file's secret. */
+  function pairHolding(
+    record: RunnableManagedExchangeRecord,
+    key: { sharedSecret: string; expires?: string },
+  ): RunnableManagedExchangeRecord {
+    const { expires: _expires, ...rest } = record;
+    return { ...rest, ...key };
+  }
+
   test("a re-take with no key file makes the record live, leaving the secret alone", async () => {
     // The operator attests that no command-line run has happened, so nothing is read
     // in and the backup taken before the hand-off still holds the stored secret.
@@ -1476,7 +1486,7 @@ describe("taking a command-line hand-off back", () => {
     const outcome = await retakeHandedOffManagedExchange(
       record.id,
       retakenAt,
-      key,
+      pairHolding(record, key),
     );
 
     const stored = await getManagedExchange(record.id);
@@ -1614,9 +1624,11 @@ describe("taking a command-line hand-off back", () => {
     // imported tier's re-invite rather than the attack checklist.
     const record = await handedOff();
 
-    await retakeHandedOffManagedExchange(record.id, retakenAt, {
-      sharedSecret: generateSharedSecret(),
-    });
+    await retakeHandedOffManagedExchange(
+      record.id,
+      retakenAt,
+      pairHolding(record, { sharedSecret: generateSharedSecret() }),
+    );
     await recordManagedExchangeLastRun(
       record.id,
       failedRun(Date.now(), "failed", "auth"),
@@ -1662,9 +1674,11 @@ describe("taking a command-line hand-off back", () => {
     const record = await handedOff();
 
     await expect(
-      retakeHandedOffManagedExchange(record.id, retakenAt, {
-        sharedSecret: "not-a-shared-secret",
-      }),
+      retakeHandedOffManagedExchange(
+        record.id,
+        retakenAt,
+        pairHolding(record, { sharedSecret: "not-a-shared-secret" }),
+      ),
     ).rejects.toThrow();
 
     expect(await getManagedExchange(record.id)).toEqual(record);
