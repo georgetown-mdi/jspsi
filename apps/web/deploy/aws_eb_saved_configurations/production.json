@@ -118,7 +118,7 @@
           "ResourceName": "AWSEBEC2LaunchTemplate",
           "Namespace": "aws:autoscaling:launchconfiguration",
           "OptionName": "SecurityGroups",
-          "Value": "sg-0f57df31cf3bbf9d8"
+          "Value": "sg-08da0fd680f84d036"
         },
         {
           "ResourceName": "AWSEBAutoScalingGroup",
@@ -430,14 +430,6 @@
         {
           "Namespace": "aws:elasticbeanstalk:sns:topics",
           "OptionName": "Notification Topic Name"
-        },
-        {
-          "Namespace": "aws:elasticbeanstalk:trafficsplitting",
-          "OptionName": "EvaluationTime"
-        },
-        {
-          "Namespace": "aws:elasticbeanstalk:trafficsplitting",
-          "OptionName": "NewVersionPercent"
         },
         {
           "Namespace": "aws:elasticbeanstalk:xray",

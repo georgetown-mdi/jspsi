@@ -192,7 +192,7 @@ The workflow holds no AWS key. It assumes `alcove-origin-drift-check`, a role wi
          "Condition": {
            "StringEquals": {
              "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-             "token.actions.githubusercontent.com:sub": "repo:georgetown-mdi/alcove:ref:refs/heads/main"
+             "token.actions.githubusercontent.com:sub": "repo:georgetown-mdi@50965319/alcove@1011394533:ref:refs/heads/main"
            }
          }
        }

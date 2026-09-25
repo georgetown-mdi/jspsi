@@ -93,11 +93,11 @@ What it reads comes from the committed files beside it rather than from a typed-
 | Value             | Recorded                                                                                                                                                                                            |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Role name         | `alcove-origin-drift-check`                                                                                                                                                                        |
-| Trust condition   | `token.actions.githubusercontent.com:sub` equals `repo:georgetown-mdi/alcove:ref:refs/heads/main` and `:aud` equals `sts.amazonaws.com`, on the account's GitHub OIDC provider                        |
+| Trust condition   | `token.actions.githubusercontent.com:sub` equals `repo:georgetown-mdi@50965319/alcove@1011394533:ref:refs/heads/main` and `:aud` equals `sts.amazonaws.com`, on the account's GitHub OIDC provider |
 | Permitted actions | `sts:GetCallerIdentity`; `s3:GetObject` on `arn:aws:s3:::elasticbeanstalk-<region>-<account-id>/cert/public.crt`, the one object the check reads; `ec2:DescribeSecurityGroups`. No write action, and no other read |
 | Role ARN          | The `AWS_ORIGIN_DRIFT_ROLE_ARN` repository secret. It is a secret rather than a variable because an ARN states the account id, which this repository keeps out of its files                          |
 
-The trust condition names the default branch's ref, so the role is assumable from `main` alone: a dispatch from any other branch stops at the role-assumption step.
+The trust condition names the default branch's ref, so the role is assumable from `main` alone: a dispatch from any other branch stops at the role-assumption step. The subject is GitHub's immutable form, which states the owner's and the repository's numeric ids beside their names: a repository rename or transfer switches GitHub to this format, so a trust written with the plain name stops matching at the rename.
 
 `ec2:DescribeSecurityGroups` is granted on `*` rather than on the one group. Whether IAM accepts a security-group ARN as the resource of a Describe call is the account holder's to find out against IAM itself, which nothing in this repository can call; the runbook says to narrow it where IAM takes it.
 
