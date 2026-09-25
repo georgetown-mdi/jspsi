@@ -9,6 +9,7 @@ import {
   createMessagePipe,
   errorMessage,
   fromEventConnection,
+  isReceiveDeadlineFailure,
   parseOrProtocolError,
   receiveParsed,
 } from "../../src/connection/messageConnection";
@@ -268,6 +269,33 @@ test("fromEventConnection: a silent peer trips the inactivity deadline", async (
   // The deadline latches a terminal state observed by later calls.
   await expect(connB.receive()).rejects.toBeInstanceOf(ConnectionError);
   await expect(connB.send("x")).rejects.toBeInstanceOf(ConnectionError);
+});
+
+test("fromEventConnection: only the receive deadline is a receive-deadline failure", async () => {
+  const [, silent] = makeEventConnections();
+  const deadline = await fromEventConnection(silent, {
+    inactivityTimeoutMs: 20,
+  })
+    .receive()
+    .catch((e: unknown) => e);
+  expect(isReceiveDeadlineFailure(deadline)).toBe(true);
+
+  // A transport-kind failure the transport raised is not one, nor is a plain
+  // ConnectionError built with the same kind and text.
+  const [, refusing] = makeEventConnections();
+  const bridged = fromEventConnection(refusing, {
+    inactivityTimeoutMs: 60_000,
+  });
+  const parked = bridged.receive().catch((e: unknown) => e);
+  refusing.emit("error", new Error("the listing was refused"));
+  const refusal = await parked;
+  expect((refusal as ConnectionError).kind).toBe("transport");
+  expect(isReceiveDeadlineFailure(refusal)).toBe(false);
+  expect(
+    isReceiveDeadlineFailure(
+      new ConnectionError((deadline as Error).message, "transport"),
+    ),
+  ).toBe(false);
 });
 
 test("fromEventConnection: a transport that names no timeout still gets the default deadline", async () => {

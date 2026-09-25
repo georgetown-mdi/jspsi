@@ -11,7 +11,7 @@ import {
 } from "./utils/crypto.js";
 import type { HandshakeRole } from "./types.js";
 import {
-  ConnectionError,
+  isReceiveDeadlineFailure,
   type MessageConnection,
 } from "./connection/messageConnection.js";
 import { AuthenticationError, markPeerWaitTimeout } from "./errors.js";
@@ -411,17 +411,17 @@ async function sendAbort(conn: MessageConnection): Promise<void> {
   }
 }
 
-// Receive one handshake message, bounded by the 30 s handshake timeout. A
-// transport-kind ConnectionError (the timeout firing, or the peer dropping the
-// connection) is re-thrown as the distinct timeout error and never triggers an
-// abort: the peer is already gone, so there is no one left to notify.
+// Receive one handshake message, bounded by the 30 s handshake timeout. The
+// receive deadline firing is re-thrown as the distinct timeout error; any other
+// receive failure -- a transport refusal, a dropped link -- is re-thrown as it
+// is, so the operator reads its own class and message. Neither sends an abort:
+// the receive path is what failed, so there is no one to notify over it.
 async function receiveHandshake(conn: MessageConnection): Promise<unknown> {
   try {
     return await conn.receive(HANDSHAKE_TIMEOUT_MS);
   } catch (e) {
-    if (e instanceof ConnectionError && e.kind === "transport") {
+    if (isReceiveDeadlineFailure(e))
       throw markPeerWaitTimeout(new Error(TIMEOUT_FAILURE, { cause: e }));
-    }
     throw e;
   }
 }
@@ -475,10 +475,10 @@ interface KexResult {
  *   classification.
  * @throws {Error} if `psk` is not 32 bytes. Because `runKex` is async this
  *   is a rejected promise, not a synchronous throw.
- * @throws {ConnectionError} unchanged if the connection terminates for a
- *   non-transport reason (e.g. a local {@link MessageConnection.close}
- *   during the handshake) -- such a close is not masked as an
- *   authentication failure.
+ * @throws {ConnectionError} unchanged if the connection terminates for any
+ *   other reason (a transport refusal, a dropped link, a local
+ *   {@link MessageConnection.close} during the handshake) -- masked neither
+ *   as a timeout nor as an authentication failure.
  *
  * @param requestEncryption  This party's request for the additional
  *   application-encryption layer. Sent on this party's handshake message and

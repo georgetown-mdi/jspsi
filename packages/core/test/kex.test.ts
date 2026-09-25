@@ -10,7 +10,11 @@ import {
   hmacSha256,
   sha256,
 } from "../src/utils/crypto";
-import { AuthenticationError, isPeerWaitTimeout } from "../src/errors";
+import {
+  AuthenticationError,
+  isPeerWaitTimeout,
+  UsageError,
+} from "../src/errors";
 import {
   ConnectionError,
   createMessagePipe,
@@ -553,6 +557,27 @@ test("the handshake times out if the peer never responds", async () => {
   // Tagged as a peer-wait timeout so a consumer that also knows the run swept
   // the shared folder at entry can offer that as the likely cause.
   expect(isPeerWaitTimeout(err)).toBe(true);
+});
+
+test("a transport refusal during the handshake is reported as itself, not as a timeout", async () => {
+  // The file-sync poll loop refusing a partner message mid-handshake: the
+  // bridge fails the connection at once with the refusal as its cause, and no
+  // deadline fired, so the key exchange must not call it a timeout.
+  const eventConn = new PassthroughConnection();
+  const conn = fromEventConnection(eventConn, { inactivityTimeoutMs: 60_000 });
+  const refusal = new UsageError(
+    "message file p-12.json has an unrecognized wire format",
+  );
+  const pending = runKex(conn, "responder", PSK_A, false).catch(
+    (e: unknown) => e,
+  );
+  eventConn.emit("error", refusal);
+  const err = await pending;
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("transport");
+  expect((err as Error).message).toBe(refusal.message);
+  expect((err as Error).cause).toBe(refusal);
+  expect(isPeerWaitTimeout(err)).toBe(false);
 });
 
 test("runKex rejects when the psk is not 32 bytes", async () => {
