@@ -63,6 +63,24 @@ export const ERROR_CLASS_EXIT_CODES: ReadonlyArray<{
     plant: () => new AuthenticationError("key exchange authentication failed"),
   },
   {
+    planted:
+      'an AuthenticationError behind a ConnectionError of kind "transport"',
+    code: 77,
+    plant: () =>
+      new ConnectionError("the message send failed", "transport", {
+        cause: new AuthenticationError("key exchange authentication failed"),
+      }),
+  },
+  {
+    planted:
+      'an AuthenticationError behind a ConnectionError of kind "security"',
+    code: 69,
+    plant: () =>
+      new ConnectionError("a frame failed its integrity check", "security", {
+        cause: new AuthenticationError("an inner refusal"),
+      }),
+  },
+  {
     planted: "an InternalConsistencyError",
     code: 70,
     plant: () =>

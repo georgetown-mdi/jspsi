@@ -666,10 +666,27 @@ test("assertEventStreamFdOpen refuses an fd 3 open only for reading", () => {
   withFd3OpenedAs("r", () => {
     expect(() => assertEventStreamFdOpen()).toThrow(UsageError);
     expect(() => assertEventStreamFdOpen()).toThrow(
-      /file descriptor 3 is open but not writable/,
+      /file descriptor 3 is not open for writing/,
     );
   });
 });
+
+// A supervisor that leaves fd 3 closed hands it to the runtime's event loop,
+// which passes fstat; the zero-length write then fails with ENXIO on macOS and
+// EINVAL on Linux.
+test.each(["ENXIO", "EINVAL"])(
+  "assertEventStreamFdOpen refuses an fd 3 whose write fails with %s",
+  (code) => {
+    vi.spyOn(fs, "fstatSync").mockReturnValue({} as fs.Stats);
+    vi.spyOn(fs, "writeSync").mockImplementation(() => {
+      throw Object.assign(new Error(`${code}: write`), { code });
+    });
+    expect(() => assertEventStreamFdOpen()).toThrow(UsageError);
+    expect(() => assertEventStreamFdOpen()).toThrow(
+      /file descriptor 3 is not open for writing; spawn Alcove/,
+    );
+  },
+);
 
 test("assertEventStreamFdOpen accepts a writable fd 3 and writes nothing to it", () => {
   withFd3OpenedAs("w", () => {

@@ -89,10 +89,11 @@ export function worseReceiptVerdictExitCode(a: number, b: number): number {
 /**
  * The process exit code a caught command error reports: EX_USAGE (64) for a
  * {@link UsageError} or a {@link ConnectionError} of kind `usage`, bare or
- * behind a `transport`-kind wrap ({@link usageFaultBehindTransportWrap}),
+ * behind `transport`-kind wraps ({@link firstLinkBehindTransportWraps}),
  * {@link INTERNAL_FAULT_EXIT_CODE} (70) for an {@link InternalConsistencyError},
  * {@link AUTHENTICATION_FAILED_EXIT_CODE} (77) for an
- * {@link AuthenticationError}, otherwise the error's own numeric `exitCode`
+ * {@link AuthenticationError}, bare or behind the same wraps, otherwise the
+ * error's own numeric `exitCode`
  * when it has one, else EX_UNAVAILABLE (69). The classification a boundary
  * reads when its errors vary; a boundary whose errors are all usage faults
  * exits 64 outright.
@@ -113,10 +114,10 @@ export function worseReceiptVerdictExitCode(a: number, b: number): number {
  * `process.exit`.
  */
 export function exitCodeForError(err: unknown): number {
-  if (isUsageFault(err)) return 64;
-  if (usageFaultBehindTransportWrap(err)) return 64;
+  const unwrapped = firstLinkBehindTransportWraps(err);
+  if (isUsageFault(unwrapped)) return 64;
   if (err instanceof InternalConsistencyError) return INTERNAL_FAULT_EXIT_CODE;
-  if (err instanceof AuthenticationError)
+  if (unwrapped instanceof AuthenticationError)
     return AUTHENTICATION_FAILED_EXIT_CODE;
   const own = (err as { exitCode?: unknown } | null | undefined)?.exitCode;
   return typeof own === "number" ? own : 69;
@@ -130,23 +131,26 @@ function isUsageFault(err: unknown): boolean {
 }
 
 /**
- * Whether `err` is a `transport`-kind {@link ConnectionError} whose cause,
- * through further `transport`-kind links only, is a usage fault. The message
- * bridge (`fromEventConnection`) wraps every send and poll failure that way,
- * so a {@link UsageError} the file-sync transport raised -- a bounded-transport
- * refusal, an unexpected or corrupt file, a consumption timeout -- reaches a
- * command boundary behind it. Any other kind ends the walk, so a `security`
- * failure keeps its own code whatever it wraps.
+ * The first link of `err`'s cause chain that is not a `transport`-kind
+ * {@link ConnectionError}, walking at most {@link MAX_ERROR_CAUSE_DEPTH}
+ * links; `err` itself when it is not one. The message bridge
+ * (`fromEventConnection`) wraps every send and poll failure that way, so a
+ * {@link UsageError} the file-sync transport raised, or an
+ * {@link AuthenticationError}, reaches a command boundary behind it. Any other
+ * kind ends the walk, so a `security` failure keeps its own code whatever it
+ * wraps.
  */
-function usageFaultBehindTransportWrap(err: unknown): boolean {
+function firstLinkBehindTransportWraps(err: unknown): unknown {
   let link: unknown = err;
-  for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH; depth++) {
-    if (!(link instanceof ConnectionError) || link.kind !== "transport")
-      return false;
+  for (
+    let depth = 0;
+    depth < MAX_ERROR_CAUSE_DEPTH &&
+    link instanceof ConnectionError &&
+    link.kind === "transport";
+    depth++
+  )
     link = link.cause;
-    if (isUsageFault(link)) return true;
-  }
-  return false;
+  return link;
 }
 
 /**

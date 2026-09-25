@@ -513,36 +513,30 @@ export function buildErrorEvent(error: unknown, phase: ErrorPhase): ErrorEvent {
 // --- Fail-closed fd-3 preflight ----------------------------------------------
 
 /**
- * Assert that {@link EVENT_STREAM_FD} is actually open, throwing a
+ * Assert that {@link EVENT_STREAM_FD} is open for writing, throwing a
  * {@link UsageError} (CLI exit 64) if it is not. Called at startup, before any
  * exchange work, when `--event-stream` is given: if the operator asked for the
  * stream but spawned the process without wiring fd 3, fail loud and early rather
- * than silently dropping every event or crashing mid-run on the first write. An
- * `fstat` on an unopened descriptor raises `EBADF`; any error is treated as
- * fail-closed. A descriptor open only for reading passes `fstat`, so a
- * zero-length write follows it: it writes nothing, and raises `EBADF` on a
- * descriptor this process cannot write (measured on macOS and Linux).
+ * than silently dropping every event or crashing mid-run on the first write.
+ * Both an `fstat` and a zero-length write, which writes nothing, must succeed.
+ * `fstat` alone passes a descriptor open only for reading, and one the
+ * supervisor left closed, which the Node runtime's own event loop then holds
+ * (measured on macOS and Linux). The write's error code differs across those
+ * cases and platforms, so any failure is refused and none is named.
  */
 export function assertEventStreamFdOpen(): void {
-  let problem: string | undefined;
   try {
     fs.fstatSync(EVENT_STREAM_FD);
-    try {
-      fs.writeSync(EVENT_STREAM_FD, Buffer.alloc(0), 0, 0);
-    } catch {
-      problem = "is open but not writable";
-    }
+    fs.writeSync(EVENT_STREAM_FD, Buffer.alloc(0), 0, 0);
   } catch {
-    problem = "is not open";
-  }
-  if (problem !== undefined)
     throw new UsageError(
-      `--event-stream was given but file descriptor ${EVENT_STREAM_FD} ` +
-        `${problem}; spawn Alcove with that descriptor wired to the write end ` +
-        "of a pipe your supervisor reads, or drop --event-stream. Format: " +
-        "https://github.com/georgetown-mdi/alcove/blob/main/docs/spec/" +
-        "CLI_EVENTS.md",
+      `--event-stream was given but file descriptor ${EVENT_STREAM_FD} is ` +
+        "not open for writing; spawn Alcove with that descriptor wired to the " +
+        "write end of a pipe your supervisor reads, or drop --event-stream. " +
+        "Format: https://github.com/georgetown-mdi/alcove/blob/main/docs/" +
+        "spec/CLI_EVENTS.md",
     );
+  }
 }
 
 // --- fd-3 writer -------------------------------------------------------------
