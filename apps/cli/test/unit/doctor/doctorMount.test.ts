@@ -140,6 +140,27 @@ describe("shares whose semantics differ from a local disk", () => {
     expect(check.action).toContain("--lockless-rendezvous");
   });
 
+  test("a second create failing with an I/O error is untested, not a refusal", () => {
+    let creates = 0;
+    const flaky: MountFs = {
+      ...nodeMountFs,
+      createExclusive: (file) => {
+        creates += 1;
+        if (creates === 2)
+          throw Object.assign(new Error("i/o"), { code: "EIO" });
+        nodeMountFs.createExclusive(file);
+      },
+    };
+    const directory = tempDirectory();
+    fs.writeFileSync(path.join(directory, MARKER), `${TOKEN}\n`);
+    const report = runMountChecks(directory, INPUT, flaky);
+    const check = checkById(report, "exclusive_create");
+    expect(check.status).toBe("skipped");
+    expect(check.summary).toContain("EIO");
+    expect(check.action).toContain("--lockless-rendezvous");
+    expect(fs.readdirSync(directory)).toEqual([]);
+  });
+
   test("one that will not rename onto an existing file asks for the same flag", () => {
     const noClobber: MountFs = {
       ...nodeMountFs,
@@ -184,7 +205,9 @@ describe("the real filesystem implementation", () => {
   test("createExclusive refuses a second create", () => {
     const file = path.join(tempDirectory(), "x");
     nodeMountFs.createExclusive(file);
-    expect(() => nodeMountFs.createExclusive(file)).toThrow();
+    expect(() => nodeMountFs.createExclusive(file)).toThrow(
+      expect.objectContaining({ code: "EEXIST" }),
+    );
   });
 
   test("remove tolerates a file that is not there", () => {
