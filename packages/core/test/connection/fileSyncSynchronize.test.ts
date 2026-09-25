@@ -22,7 +22,10 @@ import {
   responsibleFilesOf,
   makeRendezvousPair,
 } from "../utils/fileSyncConnectionFixture";
-import { HELLO_MAX_BYTES } from "../../src/connection/fileSyncRendezvous";
+import {
+  HELLO_MAX_BYTES,
+  peerIdLengthRefusal,
+} from "../../src/connection/fileSyncRendezvous";
 
 test("synchronize() cleans up hello and lock files when createExclusive() throws EEXIST", async () => {
   // Simulates the losing party in the lock-file race: createExclusive() throws
@@ -1634,6 +1637,60 @@ test("synchronize() lock path writes hello as <id>-hello.json and self-hello det
   );
   expect(helloInStore).toBeDefined();
 });
+
+// --- synchronize(): id length -------------------------------------------------
+
+test("peerIdLengthRefusal admits ids whose derived names fit in 255 bytes and refuses one byte more", () => {
+  const self = "0".repeat(36);
+  expect(peerIdLengthRefusal(self, "p".repeat(176))).toBeUndefined();
+  expect(peerIdLengthRefusal("p".repeat(176), self)).toBeUndefined();
+  const refusal = peerIdLengthRefusal(self, "p".repeat(177));
+  expect(refusal).toBeInstanceOf(UsageError);
+  expect(refusal!.message).toContain("256 bytes");
+  // Multi-byte characters count in bytes, not characters.
+  const twoByteChar = String.fromCharCode(0xe9);
+  expect(peerIdLengthRefusal(self, twoByteChar.repeat(89))).toBeInstanceOf(
+    UsageError,
+  );
+});
+
+for (const mode of [
+  {
+    name: "retain",
+    opts: {
+      locklessRendezvous: true,
+      retainFiles: true,
+      timestampInFilename: true,
+    },
+  },
+  { name: "lock", opts: {} },
+]) {
+  test(`synchronize() (${mode.name}) refuses a partner id too long for the names derived from it, on both sides`, async () => {
+    const { connA, connB } = makeRendezvousPair(
+      "0".repeat(36),
+      mode.opts,
+      "p".repeat(200),
+      mode.opts,
+      { timeToLiveMs: 5_000, pollingFrequency: 5 },
+    );
+    const results = await Promise.allSettled([
+      connA.synchronize(),
+      connB.synchronize(),
+    ]);
+    const refusals = results.filter(
+      (r) =>
+        r.status === "rejected" &&
+        r.reason instanceof UsageError &&
+        (r.reason as Error).message.includes("ids are too long together"),
+    );
+    // Both parties read each other's hello in lockless mode; on the lock path
+    // the party that reads the other's hello first refuses.
+    expect(refusals.length).toBeGreaterThanOrEqual(
+      mode.name === "retain" ? 2 : 1,
+    );
+    await Promise.all([connA.close(), connB.close()]);
+  });
+}
 
 // --- synchronize(): lockless mode ---------------------------------------------
 

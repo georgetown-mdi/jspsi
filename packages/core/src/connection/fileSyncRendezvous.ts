@@ -278,6 +278,49 @@ export function bilateralMismatch(
   return undefined;
 }
 
+// The file name byte limit (NAME_MAX) on the filesystems and SFTP servers the
+// transport targets.
+/** @internal */
+export const MAX_FILE_NAME_BYTES = 255;
+
+// The longest name either party writes that holds both ids: the retain-mode
+// ack of a timestamped message, sized at a six-digit counter and the frame
+// cap's byte count. Its length depends only on the sum of the two ids, so both
+// parties reach the same verdict.
+const longestTwoIdNameBytes = (selfId: string, peerId: string): number =>
+  new TextEncoder().encode(
+    ackMarkerName(
+      selfId,
+      messageFilename({
+        id: peerId,
+        timestampInFilename: true,
+        byteCount: MAX_FRAME_SIZE_BYTES,
+        seq: 999_999,
+        ts: 0,
+      }).slice(0, -".json".length),
+    ),
+  ).length;
+
+// Refuses a peer id that, with this party's id, would make a file name the
+// exchange writes longer than MAX_FILE_NAME_BYTES. Called at every site that
+// reads a peer hello before writing a name derived from it.
+/** @internal */
+export function peerIdLengthRefusal(
+  selfId: string,
+  peerId: string,
+): UsageError | undefined {
+  const bytes = longestTwoIdNameBytes(selfId, peerId);
+  if (bytes <= MAX_FILE_NAME_BYTES) return undefined;
+  const idBytes = (id: string) => new TextEncoder().encode(id).length;
+  return new UsageError(
+    `the two parties' ids are too long together: the partner's id is ` +
+      `${idBytes(peerId)} bytes and this party's is ${idBytes(selfId)}, so ` +
+      `file names built from them reach ${bytes} bytes, over the ` +
+      `${MAX_FILE_NAME_BYTES}-byte limit. Set a shorter peer_id on the ` +
+      "party that configured a long one.",
+  );
+}
+
 // True when `name` is a peer's hello (`<peerId>-hello.json`): it ends with
 // HELLO_SUFFIX, recovers a non-empty id (peerIdFromControlName), and that id
 // is not the querying party's own. The single definition of "a peer hello",
@@ -1346,6 +1389,9 @@ export class FileSyncRendezvous {
       deps.resetSessionState();
       throw mismatch;
     }
+    // Nothing is written or committed yet, so there is nothing to roll back.
+    const idTooLong = peerIdLengthRefusal(deps.id(), peerId);
+    if (idTooLong) throw idTooLong;
 
     // Sentinel-mediated arrival closes the joiner partial-failure window. A
     // bare delete(peer hello) then put(my hello) is observable as an
@@ -1566,6 +1612,8 @@ export class FileSyncRendezvous {
             // that read our hello at its own two-hellos branch).
             const mismatch = bilateralMismatch(peerEnvelope, deps.options());
             if (mismatch) throw mismatch;
+            const idTooLong = peerIdLengthRefusal(deps.id(), peerId);
+            if (idTooLong) throw idTooLong;
 
             // Acknowledge the peer's hello with a zero-length marker named
             // after it (`<myId>-<peerHelloStem>-ack.json`). This is a
@@ -1936,6 +1984,8 @@ export class FileSyncRendezvous {
               .safeDelete(`${scope.inboundPath}/${lockFile.name}`);
             throw mismatch;
           }
+          const idTooLong = peerIdLengthRefusal(deps.id(), otherId);
+          if (idTooLong) throw idTooLong;
 
           // first to arrive => should wait for first message
           deps.setHandshakeRole(arrivedFirst ? "responder" : "initiator");
@@ -2007,6 +2057,11 @@ export class FileSyncRendezvous {
           // and the sweep are both skipped.
           const mismatch = bilateralMismatch(peerEnvelope, deps.options());
           if (mismatch) throw mismatch;
+          const idTooLong = peerIdLengthRefusal(
+            deps.id(),
+            otherFile.name.slice(0, -HELLO_SUFFIX.length),
+          );
+          if (idTooLong) throw idTooLong;
 
           // arrived first, should wait for a message
           deps.setHandshakeRole("responder");
@@ -2070,6 +2125,8 @@ export class FileSyncRendezvous {
           );
           const mismatch = bilateralMismatch(peerEnvelope, deps.options());
           if (mismatch) throw mismatch;
+          const idTooLong = peerIdLengthRefusal(deps.id(), deps.peerId()!);
+          if (idTooLong) throw idTooLong;
 
           const lockName =
             `${arrivedFirst ? deps.id() : deps.peerId()}-` +
