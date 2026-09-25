@@ -112,6 +112,14 @@ export interface MessageConnection {
    * where the call is a no-op. See docs/spec/CHANNEL_SECURITY.md.
    */
   setInboundFrameCap?(maxBytes: number | undefined): void;
+  /**
+   * Optional: the interval at which the underlying transport polls for inbound
+   * frames, or `undefined` for a transport that pushes them. A frame the peer
+   * sends reaches {@link receive} up to one interval after it was written, so
+   * a request/response wait on a polling transport spans up to two intervals
+   * beyond network time.
+   */
+  inboundPollIntervalMs?(): number | undefined;
 }
 
 /** The transport's interface to push inbound events into the queue. */
@@ -187,6 +195,11 @@ interface TransportHooks {
    * `setInboundFrameCap` a no-op.
    */
   setInboundFrameCap?: (maxBytes: number | undefined) => void;
+  /**
+   * Optional: the transport's inbound poll interval (see
+   * {@link MessageConnection.inboundPollIntervalMs}); a push transport omits it.
+   */
+  inboundPollIntervalMs?: () => number;
 }
 
 type TransportConnect = (controls: TransportControls) => TransportHooks;
@@ -626,6 +639,10 @@ export class QueuedMessageConnection implements MessageConnection {
   setInboundFrameCap(maxBytes: number | undefined): void {
     this.hooks.setInboundFrameCap?.(maxBytes);
   }
+
+  inboundPollIntervalMs(): number | undefined {
+    return this.hooks.inboundPollIntervalMs?.();
+  }
 }
 
 /**
@@ -682,6 +699,7 @@ export function fromEventConnection(
         // so the connection's setInboundFrameCap no-ops. Bound to `conn` so the
         // method keeps its receiver when invoked through the hook.
         setInboundFrameCap: conn.setInboundFrameCap?.bind(conn),
+        inboundPollIntervalMs: conn.inboundPollIntervalMs?.bind(conn),
       };
     },
     {

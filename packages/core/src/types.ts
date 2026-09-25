@@ -102,6 +102,11 @@ export type Connection = {
   // (the WebRTC data channel, fixed at MAX_WEBRTC_FRAME_BYTES) omits this. See
   // docs/spec/CHANNEL_SECURITY.md.
   setInboundFrameCap?: (maxBytes: number | undefined) => void;
+  // Optional: the interval at which this transport polls for inbound frames. A
+  // transport that polls delivers a frame up to one interval after the peer
+  // wrote it, so a caller bounding a request/response wait adds it; a
+  // transport that pushes frames (WebRTC) omits this.
+  inboundPollIntervalMs?: () => number;
 };
 
 type Role = "starter" | "joiner" | "either";

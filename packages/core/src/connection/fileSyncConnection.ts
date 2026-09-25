@@ -597,6 +597,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.messageLoop.setInboundFrameCap(maxBytes);
   }
 
+  /** Implements `Connection.inboundPollIntervalMs`. */
+  inboundPollIntervalMs(): number {
+    return this.options.pollingFrequency;
+  }
+
   // The last message this party sent, owned by the message loop; close()'s
   // delete-mode drain reads it through this delegating getter so its teardown
   // sequencing is unchanged.
