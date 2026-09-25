@@ -26,6 +26,7 @@ A spawned agent does not read it. `CLAUDE.md` alone holds the rules that bind it
 
 - The session model, Fable included, is the owner's choice, never an agent's, reserved for planning a complicated issue, a high-stakes review (new crypto, at-rest, protocol), or adjudicating a gated role round: a Fable spawn needs the owner's explicit per-spawn approval and is never inherited; accept a harness downgrade, never argue it. Enforced by `require-fable-approval.mjs` (`Agent` spawns) and `require-workflow-fable-approval.mjs` (a `Workflow` call naming Fable literally); a committed `Workflow` script's `agent()` call inherits the SESSION model when it omits `model:`, so every one pins a literal tier (`npm run check:workflow-agent-models`).
 - Never SendMessage an agent to continue substantive work: the delivered message switches it to the session model on its next turn. Course-correct via TaskStop plus a fresh spawn -- fix rounds are fresh spawns too. Enforced by `block-model-drop-sendmessage.mjs`, whose header carries the `[accept-model-drop]` message override.
+- A completion notification whose note says the agent stopped with background work of its own still running is interim: the harness resumes the agent when that work ends, and the same task id notifies again with the result. Act on that second notification, not the first. The probe behind it: `.claude/hooks/block-sleep-poll.probe.md`.
 
 ## Decisions, briefs and reporting
 

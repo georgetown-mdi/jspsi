@@ -20,6 +20,13 @@ function verdict(command) {
   return runHook({ tool_name: "Bash", tool_input: { command } });
 }
 
+function background(command) {
+  return runHook({
+    tool_name: "Bash",
+    tool_input: { command, run_in_background: true },
+  });
+}
+
 function expectBlocked(commands) {
   for (const command of commands) {
     const { status, stderr } = verdict(command);
@@ -52,11 +59,8 @@ describe("block-sleep-poll hook", () => {
     expectAllowed(["sleep 1", "sleep 0.5", "sleep 4.9"]);
   });
 
-  it("allows a wait that is bounded by a condition rather than the clock", () => {
+  it("allows a sleep that is not part of a wait loop", () => {
     expectAllowed([
-      "until curl -sf localhost:3000; do sleep 5; done",
-      "until curl -sf http://localhost:3000/health; do sleep 2; done",
-      "while ! test -f build/done; do sleep 30; done",
       "sleep 60 && npm run build",
       "npm run dev & sleep 30; curl localhost:3000",
       "timeout 60 sleep 30",
@@ -80,11 +84,16 @@ describe("block-sleep-poll hook", () => {
     expectAllowed(["sleep 90 &", "sleep", "sleep infinity", "sleep -- 90"]);
   });
 
-  it("blocks an unbounded loop that waits on a process, naming the bounded form", () => {
+  it("blocks a sleeping wait loop with no bound, whatever it waits on", () => {
     const refused = [
+      'until ! ps aux | grep -q "[e]slint"; do sleep 10; done',
+      'while ps aux | grep "[e]slint" >/dev/null; do sleep 30; done; echo linted',
+      "until curl -sf localhost:3000; do sleep 5; done",
+      "while ! test -f build/done; do sleep 30; done",
       "until [ -f /tmp/out ] && ! kill -0 $(pgrep -f vitest); do sleep 30; done",
       'while kill -0 "$pid" 2>/dev/null; do sleep 2; done',
       "while pgrep -f 'npm run build' >/dev/null\ndo\n  sleep 5\ndone",
+      "while sleep 5; do curl -sf localhost:3000 && break; done",
       "npm run build & until ! pgrep -f rollup; do sleep 1; done; echo built",
       "timeout 30 npm test; while kill -0 1234; do sleep 2; done",
       "timeout 5 bash -c 'true'; while kill -0 1234; do sleep 2; done",
@@ -94,31 +103,83 @@ describe("block-sleep-poll hook", () => {
       const { status, stderr } = verdict(command);
       expect(status, command).toBe(2);
       expect(stderr, command).toContain("no upper bound");
-      expect(stderr, command).toContain("timeout 600 bash -c");
+      expect(stderr, command).toContain("timeout 600 sh -c");
       expect(stderr, command).toContain("$((n+=1))");
     }
   });
 
-  it("allows a process wait bounded by a timeout wrapper or a counter", () => {
+  it("allows a wait loop bounded by a timeout wrapper, a counter or a deadline", () => {
     expectAllowed([
-      "timeout 600 bash -c 'while kill -0 1234 2>/dev/null; do sleep 2; done'",
+      `timeout 600 sh -c 'until ! ps aux | grep -q "[e]slint"; do sleep 10; done'`,
+      "timeout 600 bash -c 'until curl -sf localhost:3000; do sleep 2; done'",
       'timeout 600 bash -c "while kill -0 $pid 2>/dev/null; do sleep 2; done"',
       "timeout -s KILL 10m sh -c 'until ! pgrep -f vitest; do sleep 5; done'",
-      'n=0; while kill -0 "$pid" 2>/dev/null && [ $((n+=1)) -le 300 ]; do sleep 2; done',
+      "gtimeout 600 zsh -c 'until test -f build/done; do sleep 2; done'",
+      "n=0; until curl -sf localhost:3000 || [ $((n+=1)) -gt 300 ]; do sleep 2; done",
       "i=0; until ! pgrep vitest; do sleep 2; i=$((i+1)); [ $i -ge 60 ] && break; done",
-      "while kill -0 $pid && (( SECONDS < 600 )); do sleep 2; done",
-      "while kill -0 $pid && [ $SECONDS -lt 600 ]; do sleep 2; done",
+      "while ! test -f out && (( SECONDS < 600 )); do sleep 2; done",
+      "end=$((SECONDS+600)); while kill -0 $pid && [ $SECONDS -lt $end ]; do sleep 2; done",
+      "stop=$(( $(date +%s) + 600 )); until curl -sf localhost:3000 || [ $(date +%s) -ge $stop ]; do sleep 2; done",
     ]);
   });
 
-  it("allows a process check that is not a sleeping wait loop", () => {
+  it("allows a loop that does not sleep, or that is not an until or while loop", () => {
     expectAllowed([
       "kill -0 1234 && echo alive",
       "pgrep -f vitest || npm test",
       "while pgrep -f vitest; do pkill -f vitest; done",
-      "for i in $(seq 60); do kill -0 $pid || break; sleep 2; done",
+      "for i in $(seq 60); do curl -sf localhost:3000 && break; sleep 2; done",
       "grep -n 'until ! kill -0' .claude/hooks/*.mjs",
     ]);
+  });
+
+  it("blocks a background command that no timeout bounds, naming the wrapped form", () => {
+    const refused = [
+      "npm run lint",
+      "sleep 20; echo done",
+      "cd apps/web && timeout 900 npm test",
+      "timeout 0 npm run dev",
+      "timeout 0s npm run dev",
+      "timeout 600",
+      "timeout npm run dev",
+      "timeout 600 npm run build && npm run dev",
+      "timeout 600 npm run build; npm run dev",
+      "timeout 600 npm run build || npm run dev",
+      "timeout 600 npm run build\nnpm run dev",
+      "env timeout 600 npm run lint",
+    ];
+    for (const command of refused) {
+      const { status, stderr } = background(command);
+      expect(status, command).toBe(2);
+      expect(stderr, command).toContain("run_in_background");
+      expect(stderr, command).toContain("timeout 900 sh -c");
+    }
+  });
+
+  it("allows a background command a non-zero timeout bounds whole", () => {
+    for (const command of [
+      "timeout 900 npm run lint",
+      "  timeout 15m npm test -w apps/cli",
+      "timeout 900 npm run lint 2>&1 | tee /tmp/lint.log",
+      "timeout -s KILL -k 5 1h npm run test:browser -w apps/web",
+      "timeout --kill-after=5 --preserve-status 0.5h npm test",
+      "gtimeout 600 npm run build",
+      "timeout 900 sh -c 'cd apps/web && npm test; echo done'",
+      'timeout 900 bash -c "npm run build && npm test"',
+      "timeout 600 sh -c 'until curl -sf localhost:3000; do sleep 2; done'",
+    ]) {
+      expect(background(command).status, command).toBe(0);
+    }
+  });
+
+  it("reads the background rule only on a run_in_background call", () => {
+    expectAllowed(["npm run lint", "timeout 0 npm test"]);
+    expect(
+      runHook({
+        tool_name: "Bash",
+        tool_input: { command: "npm run lint", run_in_background: false },
+      }).status,
+    ).toBe(0);
   });
 
   it("allows a malformed or absent payload rather than wedging Bash", () => {
