@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import { pack, unpack } from "peerjs-js-binarypack";
+import { Peer } from "peerjs";
 
 import {
   ConnectionError,
@@ -191,7 +192,8 @@ describe("boundChunkReassembly: wire-byte, chunk, and partial bounds", () => {
     expect(err).toBeInstanceOf(ConnectionError);
     expect(err.kind).toBe("protocol");
     expect(err.message).toContain("size limit");
-    expect(conn._chunkedData[1].count).toBe(2);
+    expect(conn.handledChunks).toBe(2);
+    expect(conn.partialCount).toBe(0);
     expect(conn.delivered).toEqual([]);
   });
 
@@ -681,6 +683,108 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
       MAX_WEBRTC_FRAME_BYTES,
     );
   });
+});
+
+/**
+ * A connection whose `_handleChunk` is the installed PeerJS binary
+ * connection's own method. The class is not exported, so it is read from a
+ * `Peer`'s serializer table; in Node the `Peer` aborts as browser-incompatible
+ * before opening its server socket. `_handleDataMessage` records the frames
+ * the reassembler completes instead of unpacking them.
+ */
+function realPeerJsReassembler() {
+  const peer = new Peer("reassembly-probe", {
+    host: "127.0.0.1",
+    port: 1,
+    secure: false,
+  });
+  peer.on("error", () => {});
+  const binaryConnection = (
+    peer as unknown as {
+      _serializers: Record<string, { prototype: object }>;
+    }
+  )._serializers.binary;
+  peer.destroy();
+  const conn = Object.create(binaryConnection.prototype) as {
+    _chunkedData: Record<number, unknown>;
+    _handleChunk: (chunk: unknown) => void;
+    _handleDataMessage: (message: { data: Uint8Array }) => void;
+  };
+  const delivered: Array<Uint8Array> = [];
+  conn._chunkedData = {};
+  conn._handleDataMessage = (message) => {
+    delivered.push(message.data);
+  };
+  const fail = vi.fn();
+  boundChunkReassembly(conn as unknown as DataConnection, fail);
+  return { conn, delivered, fail };
+}
+
+describe("boundChunkReassembly over the real PeerJS reassembler", () => {
+  const slice = (byte: number): Uint8Array => new Uint8Array([byte, byte]);
+
+  test("reassembles a frame whose chunks arrive out of order", () => {
+    const { conn, delivered, fail } = realPeerJsReassembler();
+
+    conn._handleChunk({ __peerData: 1, n: 1, total: 2, data: slice(2) });
+    conn._handleChunk({ __peerData: 1, n: 0, total: 2, data: slice(1) });
+
+    expect(fail).not.toHaveBeenCalled();
+    expect(delivered).toEqual([new Uint8Array([1, 1, 2, 2])]);
+    expect(conn._chunkedData).toEqual({});
+  });
+
+  const refusedSecondChunks: Array<[string, Record<string, unknown>, string]> =
+    [
+      [
+        "an index at the declared count",
+        { n: 3, total: 3 },
+        "has a malformed chunk envelope: its chunk index is outside the " +
+          "declared count",
+      ],
+      [
+        "an index repeating the first chunk's",
+        { n: 0, total: 3 },
+        "repeats a chunk index it already sent",
+      ],
+      [
+        'the index "length"',
+        { n: "length", total: 3 },
+        "has a malformed chunk envelope: its chunk index is outside the " +
+          "declared count",
+      ],
+      [
+        'the index "__proto__"',
+        { n: "__proto__", total: 3 },
+        "has a malformed chunk envelope: its chunk index is outside the " +
+          "declared count",
+      ],
+      [
+        "a second chunk count",
+        { n: 1, total: 2 },
+        "declares two different chunk counts for one frame",
+      ],
+    ];
+
+  test.each(refusedSecondChunks)(
+    "fails closed on a chunk with %s and releases the partial",
+    (_label, fields, detail) => {
+      const { conn, delivered, fail } = realPeerJsReassembler();
+
+      conn._handleChunk({ __peerData: 1, n: 0, total: 3, data: slice(1) });
+      conn._handleChunk({ __peerData: 1, data: slice(2), ...fields });
+      conn._handleChunk({ __peerData: 1, n: 1, total: 3, data: slice(3) });
+      conn._handleChunk({ __peerData: 1, n: 2, total: 3, data: slice(4) });
+
+      expect(fail).toHaveBeenCalledTimes(1);
+      const err = fail.mock.calls[0][0] as ConnectionError;
+      expect(err).toBeInstanceOf(ConnectionError);
+      expect(err.kind).toBe("protocol");
+      expect(err.message).toBe(`inbound WebRTC frame ${detail}`);
+      expect(delivered).toEqual([]);
+      expect(conn._chunkedData).toEqual({});
+    },
+  );
 });
 
 describe("checkDeliveredFrameBound", () => {
