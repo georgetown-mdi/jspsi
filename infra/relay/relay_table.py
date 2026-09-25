@@ -79,6 +79,11 @@ class TableError(Exception):
     """The table could not be read or written; the message never holds a key."""
 
 
+class ProofRefused(Refused):
+    """A rotation or revocation whose proof does not verify against the key the
+    exchange holds when the write takes the table's lock."""
+
+
 def valid_exchange_id(exchange_id):
     return (
         isinstance(exchange_id, str)
@@ -177,35 +182,30 @@ def iso_time(seconds):
     return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def register(conn, realm, exchange_id, key, max_age_days, now, allow_verify_id=False):
-    """Adds the key's row and points the exchange at it, deleting the exchange's
-    prior row in the same transaction. Registering the key the exchange already
-    holds renews its stamp and lapse. Returns the registration."""
-    check_registration(exchange_id, key, max_age_days, allow_verify_id)
-    if not realm:
-        raise Refused("ALCOVE_RELAY_REALM is unset")
-    now = int(now)
+def _write_key(conn, realm, exchange_id, key, max_age_days, now, prior):
+    """Adds the key's row and points the exchange at it, deleting `prior`, the
+    exchange's mapped (realm, key) or None, in the caller's transaction."""
+    holder = conn.execute("SELECT exchange_id FROM alcove_exchange WHERE key = ?", (key,)).fetchone()
+    if holder is not None and holder[0] != exchange_id:
+        raise Refused("the key is already registered for exchange %s; revoke that exchange first" % holder[0])
+    conn.execute("INSERT OR IGNORE INTO turn_secret (realm, value) VALUES (?, ?)", (realm, key))
+    if prior is not None and (prior[0], prior[1]) != (realm, key):
+        conn.execute("DELETE FROM turn_secret WHERE realm = ? AND value = ?", prior)
+    conn.execute(
+        "INSERT OR REPLACE INTO alcove_exchange (exchange_id, realm, key, registered_at, max_age_days) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (exchange_id, realm, key, now, max_age_days),
+    )
+    if prior is None:
+        return "registered"
+    return "renewed" if prior[1] == key else "replaced"
 
-    def body():
-        holder = conn.execute("SELECT exchange_id FROM alcove_exchange WHERE key = ?", (key,)).fetchone()
-        if holder is not None and holder[0] != exchange_id:
-            raise Refused("the key is already registered for exchange %s; revoke that exchange first" % holder[0])
-        prior = conn.execute(
-            "SELECT realm, key FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,)
-        ).fetchone()
-        conn.execute("INSERT OR IGNORE INTO turn_secret (realm, value) VALUES (?, ?)", (realm, key))
-        if prior is not None and (prior[0], prior[1]) != (realm, key):
-            conn.execute("DELETE FROM turn_secret WHERE realm = ? AND value = ?", prior)
-        conn.execute(
-            "INSERT OR REPLACE INTO alcove_exchange (exchange_id, realm, key, registered_at, max_age_days) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (exchange_id, realm, key, now, max_age_days),
-        )
-        if prior is None:
-            return "registered"
-        return "renewed" if prior[1] == key else "replaced"
 
-    outcome = _transaction(conn, body)
+def _mapped(conn, exchange_id):
+    return conn.execute("SELECT realm, key FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,)).fetchone()
+
+
+def _registration(outcome, realm, exchange_id, max_age_days, now):
     return {
         "outcome": outcome,
         "exchange_id": exchange_id,
@@ -214,6 +214,73 @@ def register(conn, realm, exchange_id, key, max_age_days, now, allow_verify_id=F
         "max_age_days": max_age_days,
         "lapses_at": lapses_at(now, max_age_days),
     }
+
+
+def register(conn, realm, exchange_id, key, max_age_days, now, allow_verify_id=False):
+    """Adds the key's row and points the exchange at it, deleting the exchange's
+    prior row in the same transaction. Registering the key the exchange already
+    holds renews its stamp and lapse. Returns the registration."""
+    check_registration(exchange_id, key, max_age_days, allow_verify_id)
+    if not realm:
+        raise Refused("ALCOVE_RELAY_REALM is unset")
+    now = int(now)
+    outcome = _transaction(
+        conn, lambda: _write_key(conn, realm, exchange_id, key, max_age_days, now, _mapped(conn, exchange_id))
+    )
+    return _registration(outcome, realm, exchange_id, max_age_days, now)
+
+
+def enroll(conn, realm, exchange_id, key, max_age_days, now, allow_verify_id=False):
+    """Adds the key's row and maps an exchange this relay does not yet hold,
+    refusing an id already mapped. Returns the registration."""
+    check_registration(exchange_id, key, max_age_days, allow_verify_id)
+    if not realm:
+        raise Refused("ALCOVE_RELAY_REALM is unset")
+    now = int(now)
+
+    def body():
+        if _mapped(conn, exchange_id) is not None:
+            raise Refused(
+                "exchange-id %s is already enrolled on this relay; rotate its key, or revoke it and enroll it again"
+                % exchange_id
+            )
+        return _write_key(conn, realm, exchange_id, key, max_age_days, now, None)
+
+    outcome = _transaction(conn, body)
+    return _registration(outcome, realm, exchange_id, max_age_days, now)
+
+
+def _held_key_proven(conn, exchange_id, proves_possession):
+    """The exchange's mapped (realm, key) once `proves_possession` accepts that
+    key. Called inside the write transaction, so the key it checks is the key
+    the write replaces or deletes."""
+    mapped = _mapped(conn, exchange_id)
+    if mapped is None:
+        raise Refused("exchange-id %s is not enrolled on this relay; enroll it with the relay-owner token" % exchange_id)
+    if proves_possession(mapped[1]) is not True:
+        raise ProofRefused(
+            "the request's proof does not verify against the key exchange %s holds on this relay" % exchange_id
+        )
+    return mapped
+
+
+def rotate(conn, realm, exchange_id, key, max_age_days, now, proves_possession):
+    """register(), for a caller proving it holds the exchange's current key.
+    `proves_possession(current_key)` runs under the table's write lock and the
+    write happens only if it returns True, so a proof made under a replaced key
+    is refused and two rotations from one key cannot both succeed. Registering
+    the key the exchange already holds renews it. Returns the registration."""
+    check_registration(exchange_id, key, max_age_days)
+    if not realm:
+        raise Refused("ALCOVE_RELAY_REALM is unset")
+    now = int(now)
+
+    def body():
+        prior = _held_key_proven(conn, exchange_id, proves_possession)
+        return _write_key(conn, realm, exchange_id, key, max_age_days, now, prior)
+
+    outcome = _transaction(conn, body)
+    return _registration(outcome, realm, exchange_id, max_age_days, now)
 
 
 def describe_registration(registration):
@@ -230,22 +297,34 @@ def describe_registration(registration):
     )
 
 
+def _delete_mapped(conn, exchange_id, mapped):
+    deleted = conn.execute("DELETE FROM turn_secret WHERE realm = ? AND value = ?", mapped).rowcount
+    conn.execute("DELETE FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,))
+    return {"exchange_id": exchange_id, "realm": mapped[0], "key_was_listed": deleted > 0}
+
+
 def revoke(conn, exchange_id):
     """Deletes the exchange's row and its mapping in one transaction."""
     if not valid_exchange_id(exchange_id):
         raise Refused(ID_REFUSAL)
 
     def body():
-        mapped = conn.execute(
-            "SELECT realm, key FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,)
-        ).fetchone()
+        mapped = _mapped(conn, exchange_id)
         if mapped is None:
             raise Refused("exchange-id %s is not registered on this relay" % exchange_id)
-        deleted = conn.execute("DELETE FROM turn_secret WHERE realm = ? AND value = ?", mapped).rowcount
-        conn.execute("DELETE FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,))
-        return {"exchange_id": exchange_id, "realm": mapped[0], "key_was_listed": deleted > 0}
+        return _delete_mapped(conn, exchange_id, mapped)
 
     return _transaction(conn, body)
+
+
+def revoke_with_proof(conn, exchange_id, proves_possession):
+    """revoke(), for a caller proving it holds the exchange's current key, under
+    the write lock as rotate() does."""
+    if not valid_exchange_id(exchange_id):
+        raise Refused(ID_REFUSAL)
+    return _transaction(
+        conn, lambda: _delete_mapped(conn, exchange_id, _held_key_proven(conn, exchange_id, proves_possession))
+    )
 
 
 def describe_revocation(revocation):

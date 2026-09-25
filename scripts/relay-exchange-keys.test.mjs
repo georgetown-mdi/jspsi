@@ -764,6 +764,193 @@ except relay_table.TableError as error:
   });
 });
 
+describe.skipIf(runningAsRoot)(
+  "relay_table.py enrollment and proven writes",
+  () => {
+    // A proves_possession stand-in accepting exactly one key, recording each key
+    // it was asked about.
+    const HOLDS = `
+asked = []
+def holds(expected):
+    def check(current):
+        asked.append(current)
+        return current == expected
+    return check
+def attempt(write):
+    try:
+        return write()
+    except relay_table.ProofRefused as error:
+        return {"proof_refused": str(error)}
+    except relay_table.Refused as error:
+        return {"refused": str(error)}
+`;
+
+    it("enrolls an exchange and refuses an id already enrolled, changing nothing", () => {
+      const host = fixtureHost();
+      const result = python(
+        `${MODULE}${HOLDS}
+first = relay_table.enroll(conn, "${REALM}", "exchange-1", "${KEY_A}", 30, 0)
+again = attempt(lambda: relay_table.enroll(conn, "${REALM}", "exchange-1", "${KEY_B}", None, 5))
+taken = attempt(lambda: relay_table.enroll(conn, "${REALM}", "exchange-2", "${KEY_A}", None, 5))
+print(json.dumps([first["outcome"], again, taken]))`,
+        [host.turndb],
+      );
+      expect(result[0]).toBe("registered");
+      expect(result[1].refused).toContain(
+        "exchange-id exchange-1 is already enrolled on this relay",
+      );
+      expect(result[2].refused).toContain(
+        "the key is already registered for exchange exchange-1",
+      );
+      expect(JSON.stringify(result)).not.toMatch(HEX64);
+      expect(host.rows()).toEqual([listed(KEY_LISTED), listed(KEY_A)].sort());
+      expect(host.mapping()).toEqual([
+        { id: "exchange-1", realm: REALM, key: KEY_A, at: 0, days: 30 },
+      ]);
+    });
+
+    it("rotates under a proof of the held key, and refuses one under any other", () => {
+      const host = fixtureHost();
+      const result = python(
+        `${MODULE}${HOLDS}
+relay_table.enroll(conn, "${REALM}", "exchange-1", "${KEY_A}", None, 0)
+wrong = attempt(lambda: relay_table.rotate(conn, "${REALM}", "exchange-1", "${KEY_C}", None, 5, holds("${KEY_B}")))
+rotated = relay_table.rotate(conn, "${REALM}", "exchange-1", "${KEY_B}", 7, 10, holds("${KEY_A}"))["outcome"]
+stale = attempt(lambda: relay_table.rotate(conn, "${REALM}", "exchange-1", "${KEY_C}", None, 20, holds("${KEY_A}")))
+print(json.dumps([wrong, rotated, stale, asked]))`,
+        [host.turndb],
+      );
+      const [wrong, rotated, stale, asked] = result;
+      expect(wrong.proof_refused).toBe(
+        "the request's proof does not verify against the key exchange exchange-1 holds on this relay",
+      );
+      expect(rotated).toBe("replaced");
+      expect(stale.proof_refused).toBeDefined();
+      expect(asked).toEqual([KEY_A, KEY_A, KEY_B]);
+      expect(host.rows()).toEqual([listed(KEY_LISTED), listed(KEY_B)].sort());
+      expect(host.mapping()).toEqual([
+        { id: "exchange-1", realm: REALM, key: KEY_B, at: 10, days: 7 },
+      ]);
+    });
+
+    it("renews the row when the rotation names the key already held", () => {
+      const host = fixtureHost();
+      const result = python(
+        `${MODULE}${HOLDS}
+relay_table.enroll(conn, "${REALM}", "exchange-1", "${KEY_A}", 1, 0)
+first = relay_table.rotate(conn, "${REALM}", "exchange-1", "${KEY_B}", 30, 10, holds("${KEY_A}"))
+second = relay_table.rotate(conn, "${REALM}", "exchange-1", "${KEY_B}", 30, 20, holds("${KEY_B}"))
+print(json.dumps([first["outcome"], second["outcome"]]))`,
+        [host.turndb],
+      );
+      expect(result).toEqual(["replaced", "renewed"]);
+      expect(host.mapping()).toEqual([
+        { id: "exchange-1", realm: REALM, key: KEY_B, at: 20, days: 30 },
+      ]);
+    });
+
+    it("refuses a proven write to an exchange not enrolled, asking for no proof", () => {
+      const host = fixtureHost();
+      const result = python(
+        `${MODULE}${HOLDS}
+rotated = attempt(lambda: relay_table.rotate(conn, "${REALM}", "exchange-1", "${KEY_A}", None, 0, holds("${KEY_A}")))
+revoked = attempt(lambda: relay_table.revoke_with_proof(conn, "exchange-1", holds("${KEY_A}")))
+print(json.dumps([rotated, revoked, asked]))`,
+        [host.turndb],
+      );
+      for (const refusal of result.slice(0, 2)) {
+        expect(refusal.refused).toBe(
+          "exchange-id exchange-1 is not enrolled on this relay; enroll it with the relay-owner token",
+        );
+      }
+      expect(result[2]).toEqual([]);
+      expect(host.rows()).toEqual([listed(KEY_LISTED)]);
+    });
+
+    it("accepts a proof only on an exact True, not any truthy answer", () => {
+      const host = fixtureHost();
+      const result = python(
+        `${MODULE}${HOLDS}
+relay_table.enroll(conn, "${REALM}", "exchange-1", "${KEY_A}", None, 0)
+print(json.dumps(attempt(lambda: relay_table.rotate(conn, "${REALM}", "exchange-1", "${KEY_B}", None, 5, lambda current: b"mac"))))`,
+        [host.turndb],
+      );
+      expect(result.proof_refused).toBeDefined();
+      expect(host.mapping().map(({ key }) => key)).toEqual([KEY_A]);
+    });
+
+    it("revokes under a proof of the held key, and refuses one under any other", () => {
+      const host = fixtureHost();
+      const result = python(
+        `${MODULE}${HOLDS}
+relay_table.enroll(conn, "${REALM}", "exchange-1", "${KEY_A}", None, 0)
+wrong = attempt(lambda: relay_table.revoke_with_proof(conn, "exchange-1", holds("${KEY_B}")))
+kept = [row[0] for row in conn.execute("SELECT key FROM alcove_exchange")]
+revoked = relay_table.revoke_with_proof(conn, "exchange-1", holds("${KEY_A}"))
+print(json.dumps([wrong, kept, revoked]))`,
+        [host.turndb],
+      );
+      expect(result[0].proof_refused).toBeDefined();
+      expect(result[1]).toEqual([KEY_A]);
+      expect(result[2]).toEqual({
+        exchange_id: "exchange-1",
+        realm: REALM,
+        key_was_listed: true,
+      });
+      expect(host.rows()).toEqual([listed(KEY_LISTED)]);
+      expect(host.mapping()).toEqual([]);
+    });
+
+    it("lets only one of two rotations proven under the same key succeed", () => {
+      const host = fixtureHost();
+      // Rotation A holds the write lock inside its proof check while rotation B
+      // starts on a second connection; B's check must not run until A commits,
+      // and must then see A's key.
+      const result = python(
+        `${MODULE}
+import threading, time
+relay_table.enroll(conn, "${REALM}", "exchange-1", "${KEY_A}", None, 0)
+a_checking, release_a = threading.Event(), threading.Event()
+asked, outcome = {"a": [], "b": []}, {}
+def check(name, pause):
+    def run(current):
+        asked[name].append(current)
+        if pause:
+            a_checking.set()
+            release_a.wait(10)
+        return current == "${KEY_A}"
+    return run
+def rotate(name, key, pause):
+    own = relay_table.open_table(sys.argv[1])
+    try:
+        outcome[name] = relay_table.rotate(own, "${REALM}", "exchange-1", key, None, 1, check(name, pause))["outcome"]
+    except relay_table.ProofRefused:
+        outcome[name] = "proof refused"
+    finally:
+        own.close()
+a = threading.Thread(target=rotate, args=("a", "${KEY_B}", True))
+b = threading.Thread(target=rotate, args=("b", "${KEY_C}", False))
+a.start()
+a_checking.wait(10)
+b.start()
+time.sleep(0.5)
+b_checked_while_a_held_lock = len(asked["b"]) > 0
+release_a.set()
+a.join()
+b.join()
+print(json.dumps([outcome, asked, b_checked_while_a_held_lock]))`,
+        [host.turndb],
+      );
+      const [outcome, asked, bCheckedEarly] = result;
+      expect(outcome).toEqual({ a: "replaced", b: "proof refused" });
+      expect(asked).toEqual({ a: [KEY_A], b: [KEY_B] });
+      expect(bCheckedEarly).toBe(false);
+      expect(host.rows()).toEqual([listed(KEY_LISTED), listed(KEY_B)].sort());
+      expect(host.mapping().map(({ key }) => key)).toEqual([KEY_B]);
+    });
+  },
+);
+
 const REGISTRAR_TOKEN = "7".repeat(64);
 let certDir;
 
