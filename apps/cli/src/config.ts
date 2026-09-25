@@ -1394,8 +1394,12 @@ export function reconcileConflictError(params: {
  * Does not guard against overwriting an existing file; callers provision
  * through `provisionConfigAndKey`, which runs the conflict gate first.
  */
-export function saveConfig(configPath: string, spec: ExchangeSpec): void {
-  writeFileOwnerOnly(configPath, serializeExchangeDocument(spec));
+export function saveConfig(
+  configPath: string,
+  spec: ExchangeSpec,
+  options: { exclusive?: boolean } = {},
+): void {
+  writeFileOwnerOnly(configPath, serializeExchangeDocument(spec), options);
 }
 
 /**

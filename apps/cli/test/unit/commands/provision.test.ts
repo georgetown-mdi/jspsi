@@ -9,6 +9,7 @@ import {
   provisionConfigAndKey,
   provisionLeftConfigOnDisk,
 } from "../../../src/commands/provision";
+import { persistExpectedPayloadColumns, saveConfig } from "../../../src/config";
 import { loadKeyFile } from "../../../src/keyFile";
 
 // 43-char base64url token satisfying the sharedSecret format constraint.
@@ -351,3 +352,128 @@ test("assertNoProvisionConflicts keeps the same-path guard even when narrowing t
     assertNoProvisionConflicts({ configPath: both, keyPath: both }, ["key"]),
   ).toThrow(UsageError);
 });
+
+// --- create-if-absent and record order ---------------------------------------
+
+/**
+ * Run `fn` with `hidden` reported absent to every lstat, as though the file
+ * appeared only after the conflict gate looked.
+ */
+function withFileAppearingAfterGate<T>(hidden: string, fn: () => T): T {
+  const realLstat = fs.lstatSync;
+  const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
+    target: fs.PathLike,
+    options?: fs.StatSyncOptions,
+  ) => {
+    if (target === hidden)
+      throw Object.assign(new Error("ENOENT: no such file or directory"), {
+        code: "ENOENT",
+      });
+    return realLstat(target, options);
+  }) as typeof fs.lstatSync);
+  try {
+    return fn();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+test("provisionConfigAndKey refuses a config that appears after the gate, leaving it as it was", () => {
+  fs.writeFileSync(configPath, "appeared: late\n");
+  withFileAppearingAfterGate(configPath, () =>
+    expect(() =>
+      provisionConfigAndKey(
+        sampleSpec(),
+        { sharedSecret: TOKEN },
+        { configPath, keyPath },
+      ),
+    ).toThrow(`refusing to overwrite existing file: ${configPath}`),
+  );
+  expect(fs.readFileSync(configPath, "utf8")).toBe("appeared: late\n");
+  expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+test("provisionConfigAndKey refuses a key that appears after the gate and removes the config it wrote", () => {
+  fs.writeFileSync(keyPath, "appeared late\n");
+  withFileAppearingAfterGate(keyPath, () =>
+    expect(() =>
+      provisionConfigAndKey(
+        sampleSpec(),
+        { sharedSecret: TOKEN },
+        { configPath, keyPath },
+      ),
+    ).toThrow(`refusing to overwrite existing file: ${keyPath}`),
+  );
+  expect(fs.readFileSync(keyPath, "utf8")).toBe("appeared late\n");
+  expect(fs.existsSync(configPath)).toBe(false);
+});
+
+test("provisionConfigAndKey with reuseExistingConfig writes the records before the key", () => {
+  fs.writeFileSync(configPath, "channel: filedrop\n");
+  const keyExistedAtRefresh: boolean[] = [];
+  provisionConfigAndKey(
+    sampleSpec(),
+    { sharedSecret: TOKEN },
+    { configPath, keyPath },
+    {
+      reuseExistingConfig: true,
+      refreshReusedConfig: (kept) => {
+        expect(kept).toBe(configPath);
+        keyExistedAtRefresh.push(fs.existsSync(keyPath));
+      },
+    },
+  );
+  expect(keyExistedAtRefresh).toEqual([false]);
+  expect(loadKeyFile(keyPath)?.sharedSecret).toBe(TOKEN);
+});
+
+test("provisionConfigAndKey with reuseExistingConfig writes no key when a record write fails", () => {
+  fs.writeFileSync(configPath, "channel: filedrop\n");
+  expect(() =>
+    provisionConfigAndKey(
+      sampleSpec(),
+      { sharedSecret: TOKEN },
+      { configPath, keyPath },
+      {
+        reuseExistingConfig: true,
+        refreshReusedConfig: () => {
+          throw new Error("record write failed");
+        },
+      },
+    ),
+  ).toThrow("record write failed");
+  expect(fs.existsSync(keyPath)).toBe(false);
+});
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "a reused config in a read-only directory leaves no key, and the rerun succeeds once it is writable",
+  () => {
+    const confDir = path.join(dir, "conf");
+    fs.mkdirSync(confDir);
+    const keptConfig = path.join(confDir, "alcove.yaml");
+    saveConfig(keptConfig, sampleSpec());
+    const provision = () =>
+      provisionConfigAndKey(
+        sampleSpec(),
+        { sharedSecret: TOKEN },
+        { configPath: keptConfig, keyPath },
+        {
+          reuseExistingConfig: true,
+          refreshReusedConfig: (kept) =>
+            persistExpectedPayloadColumns(kept, ["diagnosis"]),
+        },
+      );
+    fs.chmodSync(confDir, 0o555);
+    try {
+      expect(provision).toThrow(/EACCES/);
+      expect(fs.existsSync(keyPath)).toBe(false);
+    } finally {
+      fs.chmodSync(confDir, 0o755);
+    }
+    provision();
+    expect(loadKeyFile(keyPath)?.sharedSecret).toBe(TOKEN);
+    expect(fs.readFileSync(keptConfig, "utf8")).toContain(
+      "expected_payload_columns",
+    );
+  },
+);

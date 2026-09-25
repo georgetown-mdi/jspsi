@@ -3815,6 +3815,46 @@ test("runOnlineBootstrap re-gates the config write: a config appearing after the
   }
 });
 
+test("runOnlineBootstrap refuses a config that appears after its re-gate, leaving it as it was", async () => {
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    const onAuthenticated = onAuthenticatedArg(callArgs);
+    try {
+      await onAuthenticated();
+      return {};
+    } catch (err) {
+      return { onAuthenticatedError: err };
+    }
+  }) as never);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
+  const existing = "channel: filedrop\npath: /mnt/share\n# pre-existing\n";
+  fs.writeFileSync(configPath, existing);
+  const realLstat = fs.lstatSync;
+  const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
+    target: fs.PathLike,
+    options?: fs.StatSyncOptions,
+  ) => {
+    if (target === configPath)
+      throw Object.assign(new Error("ENOENT: no such file or directory"), {
+        code: "ENOENT",
+      });
+    return realLstat(target, options);
+  }) as typeof fs.lstatSync);
+  try {
+    const { configWriteError } = await runOnlineBootstrap(
+      onlineBootstrapParams(configPath),
+    );
+    expect(configWriteError).toBeInstanceOf(UsageError);
+    expect((configWriteError as Error).message).toContain(
+      "refusing to overwrite",
+    );
+    expect(fs.readFileSync(configPath, "utf8")).toBe(existing);
+  } finally {
+    spy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- diffConnectionAgainstTarget ---------------------------------------------
 // These compare a saved config against the connection the live exchange will
 // actually use (a built RunnableConnectionConfig, as connectionFromURL would

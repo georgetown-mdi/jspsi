@@ -79,6 +79,7 @@ import {
   connectionFromEndpoint,
   runOnlineBootstrap,
 } from "../../../src/onlineBootstrap";
+import { captureProcessExit } from "../../exitCapture";
 import { captureStdio } from "../../loggingTestSupport";
 import {
   pathAsDisplayed,
@@ -3973,3 +3974,58 @@ test("handler: the server-URL accept template names the identity too", async () 
     runOnlineBootstrapMock.mockReset();
   }
 });
+
+// --- kept configuration in a read-only directory -------------------------------
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "handler: an invite from a config in a read-only directory writes no key, and the rerun succeeds",
+  async () => {
+    const root = fs.mkdtempSync(path.join(tmpdir(), "alcove-invite-ro-"));
+    const confDir = path.join(root, "conf");
+    fs.mkdirSync(confDir);
+    const configFile = path.join(confDir, "alcove.yaml");
+    const keyFile = path.join(root, ".alcove.key");
+    saveConfig(configFile, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: getDefaultLinkageTerms(
+        "Inviter Org",
+        inferMetadata(["first_name", "last_name", "dob", "ssn"], []),
+      ),
+      outboundPayloadConsent: { status: "pending" },
+    });
+    const invite = () =>
+      inviteHandler({
+        _: [],
+        $0: "alcove",
+        args: [],
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+    const exitSpy = captureProcessExit();
+    const stdio = captureStdio();
+    const printed = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      fs.chmodSync(confDir, 0o555);
+      try {
+        await expect(invite()).rejects.toThrow(/exit:/);
+      } finally {
+        fs.chmodSync(confDir, 0o755);
+      }
+      expect(fs.existsSync(keyFile)).toBe(false);
+      expect(printed).not.toHaveBeenCalled();
+      await invite();
+      expect(fs.existsSync(keyFile)).toBe(true);
+      expect(printed).toHaveBeenCalledTimes(1);
+      expect(fs.readFileSync(configFile, "utf8")).not.toContain(
+        "outbound_payload_consent",
+      );
+    } finally {
+      printed.mockRestore();
+      stdio.restore();
+      exitSpy.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

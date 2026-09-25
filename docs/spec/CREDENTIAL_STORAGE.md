@@ -49,11 +49,23 @@ refusal. The temp name is then unlinked best-effort, the destination already
 being correct, and a failure to unlink it does not undo the creation.
 Everything ahead of the final step is identical, so the mode, the exclusive
 non-following temp create, and the `fsync` ordering below hold for both steps.
-Three artifacts take create-if-absent: a signing identity being created for the
-first time, a key file provisioned from an invitation, and an `alcove init`
-config the operator asked to create rather than replace. The rename is what a
-rotating key file, a regenerated signing identity, a rewritten config, an
-exchange record, and a receipt take, each overwriting by design.
+Create-if-absent is what every file written where none should exist takes: a
+signing identity being created for the first time; a key file provisioned from
+an invitation by `exchange --invitation`, or by an offline `invite`, an offline
+`accept`, or a zero-setup `--save`; a configuration those commands and an online
+`invite` or `accept` write fresh; and an `alcove init` config the operator asked
+to create rather than replace. Each of those commands checks the paths before
+it starts, and the create-if-absent write refuses a file that appeared after
+the check the same way. The rename is what a rotating key file (including the
+one an online `invite` or `accept` saves at its first handshake), a regenerated
+signing identity, a rewritten config, an exchange record, and a receipt take,
+each overwriting by design.
+
+An offline `accept` that keeps an existing configuration, and an offline
+`invite` from one, write their records into it before the key file: the key
+file is the last write, so a record write that fails, as in a read-only
+configuration directory, leaves no key file and the same command can be run
+again.
 
 **The symlink refusal has a residual window.** What the exclusive non-following
 create closes is a redirected *write*: the content goes into the temp inode

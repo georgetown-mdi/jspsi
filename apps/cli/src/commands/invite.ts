@@ -1168,36 +1168,35 @@ export async function handler(argv: Arguments): Promise<void> {
 
       if (ready.mode === "offlineFromConfig") {
         // The config already exists and sourced the linkage terms; reuse it and
-        // write only the key file (refusing to clobber an existing one). Under
-        // reuseExistingConfig the spec is ignored and the operator-authored config
-        // content is left untouched, so the placeholder spec here is never written.
+        // write only the key file (refusing to clobber an existing one), after
+        // the records below. Under reuseExistingConfig the spec is ignored and
+        // the operator-authored config content is left untouched, so the
+        // placeholder spec here is never written.
         const { keyPath } = provisionConfigAndKey(
           specWithPlaceholderConnection({ linkageTerms: ready.linkageTerms }),
           { sharedSecret: ready.sharedSecret, expires: ready.expires },
           { configPath: ready.configPath, keyPath: options.keyFile },
-          { reuseExistingConfig: true },
+          {
+            reuseExistingConfig: true,
+            refreshReusedConfig: (keptConfigPath) => {
+              // Refresh the machine-managed send-side commitment in place
+              // (comments and operator content preserved), binding the write to
+              // this mint so it can never lag the token the acceptor commits
+              // to. A config with no metadata publishes no subset, so the field
+              // is removed rather than left stale. Before the token print, so a
+              // failure never follows disclosure.
+              writeTermsRecord(keptConfigPath, {
+                record: "disclosed_payload_columns",
+                columns: ready.disclosedPayloadColumns,
+              });
+              // This mint re-establishes the config as the inviting side, whose
+              // outbound set is the commitment itself, so an acceptor-era
+              // outbound-consent record would go stale against re-edited
+              // metadata; it is removed, a no-op where none exists.
+              persistOutboundPayloadConsent(keptConfigPath, undefined);
+            },
+          },
         );
-
-        // Refresh the machine-managed send-side commitment in place (comments and
-        // operator content preserved), binding the write to this mint so it can
-        // never lag the token the acceptor commits to: this closes the drift the
-        // partner would otherwise abort on mid-exchange, whether this is a first
-        // invite from a metadata-only config or a re-invite over edited metadata.
-        // A config with no metadata publishes no subset, so the field is removed
-        // rather than left stale. Before the token print, so a failure never
-        // follows disclosure.
-        writeTermsRecord(ready.configPath, {
-          record: "disclosed_payload_columns",
-          columns: ready.disclosedPayloadColumns,
-        });
-        // The outbound-consent record is the acceptor-role sibling of the
-        // commitment above; this mint re-establishes the config as the inviting
-        // side, whose outbound set is the commitment itself. An acceptor-era
-        // record left behind would go stale against re-edited metadata and
-        // refuse a later unattended run with remedy text about re-accepting.
-        // Removed on the same no-field-lags-this-mint rule the commitment
-        // refresh follows; a no-op where no record exists.
-        persistOutboundPayloadConsent(ready.configPath, undefined);
 
         printInvitation(ready.invitation, undefined);
         log.info(
