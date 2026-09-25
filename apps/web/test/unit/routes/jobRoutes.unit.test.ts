@@ -1288,6 +1288,34 @@ describe("POST /api/jobs rejects a concurrent filedrop job", () => {
     expect(second.status).toBe(409);
     expect(await second.json()).toEqual({ id: firstId });
   });
+
+  test("an sftp create with no connection authored is a 409 while the filedrop run holds the slot", async () => {
+    const root = tempDataRoot("routes-filedrop");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rvzRoot(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+
+    const first = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(first.status).toBe(201);
+    const { id: firstId } = (await first.json()) as { id: string };
+
+    const second = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ id: firstId });
+  });
 });
 
 describe("POST /api/jobs on a split-provisioned console", () => {
@@ -1338,6 +1366,23 @@ describe("POST /api/jobs on a split-provisioned console", () => {
     // Only the file-handling options differ from the 400 above, so that 400 was
     // the split rendezvous meeting a run that would not keep its files.
     expect(response.status).toBe(201);
+  });
+
+  test("an intent without retain mode is a 409 while another run holds the slot", async () => {
+    enableSplitRendezvous();
+    const first = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent({ options: RETAIN_OPTIONS })),
+      params: {},
+    })) as Response;
+    expect(first.status).toBe(201);
+    const { id: firstId } = (await first.json()) as { id: string };
+
+    const second = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ id: firstId });
   });
 });
 

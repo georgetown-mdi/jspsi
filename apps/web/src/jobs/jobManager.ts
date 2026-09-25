@@ -578,6 +578,13 @@ export class JobManager {
   async createJob(intent: JobCreateIntent): Promise<string> {
     const id = generateJobId();
 
+    // Claim the slot with no await between the null check and the assignment --
+    // every check in between is synchronous -- so two concurrent POSTs cannot
+    // both observe a free slot. The busy check runs first, so an occupied
+    // console answers with the occupying exchange's id, which the caller
+    // re-attaches to, whatever else this create would be refused for.
+    if (this.slot !== null) throw new ExchangeBusyError(this.slotId()!);
+
     let serverEntry: JobSftpServerEntry | undefined;
     if (intent.channel === "sftp") {
       if (this.authoredSftpServer === undefined)
@@ -601,12 +608,6 @@ export class JobManager {
         throw new JobRendezvousRetainRequiredError();
     }
 
-    // Claim the slot with no await between the null check and the assignment --
-    // the identity resolution and the signing refusal in between are both
-    // synchronous -- so two concurrent POSTs cannot both observe a free slot.
-    // The busy rejection holds the occupying exchange's id so the caller can
-    // re-attach to it.
-    if (this.slot !== null) throw new ExchangeBusyError(this.slotId()!);
     // A run of the opened configuration continues the exchange under the key
     // file beside it. Checked after the busy check, so a create posted to
     // recover a lost attachment meets the rejection that re-attaches it, and
