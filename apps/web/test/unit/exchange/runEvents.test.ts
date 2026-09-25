@@ -12,6 +12,7 @@ import type {
   JobRunStatus,
   JobStatusProbe,
 } from "@psi/jobClient/serverJobExchangeDriver";
+import type { BuiltExchangeRecord } from "@alcove/core";
 import type { RelayEvent } from "@jobs/cliDriver";
 import type { RunOutputs } from "@psi/runOutputs";
 
@@ -91,6 +92,7 @@ function seat(probe: JobStatusProbe = { kind: "gone" }) {
     jobId: undefined as string | undefined,
   };
   const raiseFailure = vi.fn();
+  const offerRunRecord = vi.fn();
   const { client, streamedIds } = reattachClient(probe);
   const events = buildRunEvents({
     signal: new AbortController().signal,
@@ -116,8 +118,9 @@ function seat(probe: JobStatusProbe = { kind: "gone" }) {
     setJobId: (id) => {
       state.jobId = id;
     },
+    offerRunRecord,
   });
-  return { state, events, raiseFailure, streamedIds };
+  return { state, events, raiseFailure, offerRunRecord, streamedIds };
 }
 
 /** The dev-gated devtools sink `onError` writes the raw error to. Held so the
@@ -211,6 +214,28 @@ describe("buildRunEvents", () => {
     // The raw error object reaches devtools, where a developer can expand its
     // cause chain; the operator's alert is composed separately at the seat.
     expect(devtoolsSink).toHaveBeenCalledWith(error);
+  });
+
+  test("a failure holding a run's record offers it beside the alert", () => {
+    const { events, raiseFailure, offerRunRecord } = seat();
+    const error = new Error("peer closed after the payload send");
+    const record = {
+      record: { outcome: "receipt-swap-terminated" },
+      keys: {},
+    } as unknown as BuiltExchangeRecord;
+
+    events.onError({ category: "exchange", error, record });
+
+    expect(offerRunRecord).toHaveBeenCalledExactlyOnceWith(record);
+    expect(raiseFailure).toHaveBeenCalledWith("exchange", error);
+  });
+
+  test("a failure holding no record offers none", () => {
+    const { events, offerRunRecord } = seat();
+
+    events.onError({ category: "exchange", error: new Error("no send yet") });
+
+    expect(offerRunRecord).not.toHaveBeenCalled();
   });
 
   test("a production build with diagnostics off puts no raw error on the console", () => {

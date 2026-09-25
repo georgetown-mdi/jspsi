@@ -16,6 +16,7 @@ import type {
   JobApiClient,
   JobRunStatus,
 } from "@psi/jobClient/serverJobExchangeDriver";
+import type { BuiltExchangeRecord } from "@alcove/core";
 import type { ConsoleJobSeat } from "@psi/jobClient/consoleJobAttachment";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
@@ -48,6 +49,10 @@ interface RunEventsConfig {
   /** Record the job id a re-attach resolved, in both the state the surface
    * renders from and the ref the deliberate-leave paths discard through. */
   setJobId: (jobId: string) => void;
+  /** Offer the exchange record a failed in-browser run holds, so the seat can
+   * download it beside the failure. A seat that conducts no in-browser run
+   * omits it. */
+  offerRunRecord?: (record: BuiltExchangeRecord) => void;
 }
 
 /**
@@ -73,6 +78,7 @@ export function buildRunEvents({
   setReattached,
   setReattaching,
   setJobId,
+  offerRunRecord,
 }: RunEventsConfig): ExchangeDriverEvents<RunOutputs> {
   const events: ExchangeDriverEvents<RunOutputs> = {
     signal,
@@ -89,13 +95,14 @@ export function buildRunEvents({
       setRun((current) => runWithMatching(current, matching)),
     onPsiProgress: (progress) =>
       setRun((current) => runWithPsiProgress(current, progress, new Date())),
-    onError: ({ category, error }) => {
+    onError: ({ category, error, record }) => {
       // Dev-gated: the raw Error object's message/cause can embed partner-/
       // server-controlled bytes, so a production console holds none of it,
       // while a developer (or a deployed client with the diagnostics toggle
       // on) keeps the full object. The user-facing alert is separately
       // sanitized where the seat composes it.
       whenDiagnostic(() => console.error(error));
+      if (record !== undefined) offerRunRecord?.(record);
       if (isExchangeBusyError(error)) {
         // Enter the reconnecting interim the instant the 409 is known, before
         // the liveness probe round trip -- this suppresses the fresh-run framing
