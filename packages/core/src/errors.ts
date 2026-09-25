@@ -742,6 +742,26 @@ export class PeerAbortError extends ConnectionError {
   }
 }
 
+/**
+ * An authentication failure: the key exchange rejected the shared secret or
+ * the peer, or the SFTP server presented a host key other than the pinned
+ * one. A retry against the same secret or the same server reaches the same
+ * refusal, so the CLI gives this class `EX_NOPERM` (77) rather than the
+ * retryable 69 (see docs/CLI.md, Exit codes).
+ *
+ * A {@link ConnectionError} of kind `"security"`, so a consumer classifying
+ * on the kind still treats it as a trust-boundary failure. Not every
+ * `security`-kind failure is one: a tampered frame on an authenticated
+ * channel, or a partner receipt that does not verify, is a plain
+ * `ConnectionError`.
+ */
+export class AuthenticationError extends ConnectionError {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, "security", options);
+    this.name = "AuthenticationError";
+  }
+}
+
 /** The property {@link markPeerWaitTimeout} sets and {@link isPeerWaitTimeout} reads. */
 const PEER_WAIT_TIMEOUT_TAG = "alcovePeerWaitTimedOut";
 

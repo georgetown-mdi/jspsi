@@ -198,6 +198,9 @@ the first. In order:
 - A finding that belongs on the board but matches a standing sweep item (a
   coverage sweep, an accounting reconciliation) is APPENDED to that item -- name the
   item and add the finding to its criteria rather than creating a sibling.
+- Weigh whether to file, and at what scope, against `.claude/product-principles.md`:
+  the owner's standing product principles and how a recommendation argues
+  from them.
 - Declining to file is a legitimate outcome. Say what the concern is worth and
   where it should live instead.
 - At most one item is filed autonomously per session. Past that, draft the rest

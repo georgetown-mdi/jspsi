@@ -823,6 +823,7 @@ export function AcceptorScreen() {
     run,
     outputs,
     failure,
+    runRecord,
     warnings: runWarnings,
     jobId,
     reattached,
@@ -1656,6 +1657,7 @@ export function AcceptorScreen() {
               run={run}
               outputs={outputs}
               failure={failure}
+              runRecord={runRecord}
               runWarnings={runWarnings}
               serverJob={acceptServerJob}
               jobId={jobId}

@@ -6,8 +6,13 @@ import {
   serializeVerificationKeys,
 } from "@alcove/core";
 
-import type { ExchangeResult, PreparedExchange } from "@alcove/core";
-import type { ExchangeOutputs } from "./exchangeLifecycle";
+import type {
+  BuiltExchangeRecord,
+  ExchangeResult,
+  PreparedExchange,
+} from "@alcove/core";
+import type { ExchangeOutputs, RecordDownloads } from "./exchangeLifecycle";
+import type { JobExchangeRecordOffer } from "./jobClient/jobExchangeRecord";
 
 /** The console run's downloadable artifacts: the lifecycle's outputs widened with
  * the matched-record count the completion header states. It counts the ROWS of a
@@ -140,16 +145,64 @@ export function buildRunOutputs(
     // Filenames are timestamped per exchange (the record's own createdAt,
     // made filesystem-safe) so repeated downloads accumulate rather than
     // collide.
-    if (result.audit !== undefined) {
-      const stamp = recordFileStamp(result.audit.record.createdAt);
-      generated.record = {
-        recordUrl: jsonUrl(serializeExchangeRecord(result.audit.record)),
-        recordFileName: `alcove-record-${stamp}.json`,
-        keysUrl: jsonUrl(serializeVerificationKeys(result.audit.keys)),
-        keysFileName: `alcove-record-${stamp}.keys.json`,
-      };
-    }
+    if (result.audit !== undefined)
+      generated.record = recordDownloadsFor(result.audit, jsonUrl);
     return generated;
+  } catch (error) {
+    for (const url of created) urls.revoke(url);
+    throw error;
+  }
+}
+
+/** The record pair's two downloads, each body created through `jsonUrl`. */
+function recordDownloadsFor(
+  audit: BuiltExchangeRecord,
+  jsonUrl: (text: string) => string,
+): RecordDownloads {
+  const stamp = recordFileStamp(audit.record.createdAt);
+  return {
+    recordUrl: jsonUrl(serializeExchangeRecord(audit.record)),
+    recordFileName: `alcove-record-${stamp}.json`,
+    keysUrl: jsonUrl(serializeVerificationKeys(audit.keys)),
+    keysFileName: `alcove-record-${stamp}.keys.json`,
+  };
+}
+
+/** A record offered for download, in the shape the exchange-record panel
+ * renders. */
+export type AvailableRecordOffer = Extract<
+  JobExchangeRecordOffer,
+  { kind: "available" }
+>;
+
+/**
+ * The exchange-record offer for an in-browser run that failed holding a record
+ * (`ExchangeFailure.record`): the same two downloads a completed run's
+ * outputs hold, with the outcome and certificate marker read off the record
+ * itself, as the console reads them off the record file it holds. The panel
+ * that renders it is the one a console run's record takes.
+ *
+ * A throw after the first URL was created revokes it before propagating, as
+ * {@link buildRunOutputs} does: the keys are private material.
+ */
+export function failedRunRecordOffer(
+  audit: BuiltExchangeRecord,
+  urls: ObjectUrls,
+): AvailableRecordOffer {
+  const created: Array<string> = [];
+  try {
+    const downloads = recordDownloadsFor(audit, (text) => {
+      const url = urls.create(new Blob([text], { type: "application/json" }));
+      created.push(url);
+      return url;
+    });
+    return {
+      kind: "available",
+      outcome: audit.record.outcome,
+      recordCertificateMismatchObserved:
+        audit.record.certificateMismatchObserved,
+      downloads,
+    };
   } catch (error) {
     for (const url of created) urls.revoke(url);
     throw error;

@@ -39,7 +39,7 @@
     "@types/ssh2": "~1.15.6",
     "@types/ssh2-sftp-client": "^9.0.5",
     "@types/yargs": "^17.0.33",
-    "rollup": "^4.63.3",
+    "rollup": "^4.63.4",
     "tsx": "^4.23.13",
     "vitest": "^5.0.0"
   }

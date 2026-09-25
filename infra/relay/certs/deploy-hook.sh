@@ -42,7 +42,14 @@ SRC_KEY="${ALCOVE_RELAY_KEY_SOURCE:-}"
 UID_IN_IMAGE="${ALCOVE_RELAY_IMAGE_UID:-}"
 [ -n "$UID_IN_IMAGE" ] || die "ALCOVE_RELAY_IMAGE_UID is unset in $ENV_FILE; install.sh reads it from the image"
 
-same_file() { [ -f "$2" ] && cmp -s "$1" "$2" && [ "$(stat -c %u "$2")" = "$UID_IN_IMAGE" ]; }
+# GNU stat on the relay host; BSD stat, which has no -c, where its test suite runs
+# on macOS.
+if stat -c %u / >/dev/null 2>&1; then
+  owner_uid() { stat -c %u "$1"; }
+else
+  owner_uid() { stat -f %u "$1"; }
+fi
+same_file() { [ -f "$2" ] && cmp -s "$1" "$2" && [ "$(owner_uid "$2")" = "$UID_IN_IMAGE" ]; }
 CHANGED=yes
 if same_file "$SRC_CRT" "$DEST/fullchain.pem" && same_file "$SRC_KEY" "$DEST/privkey.pem"; then
   CHANGED=

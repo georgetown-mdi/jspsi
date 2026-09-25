@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -402,8 +403,10 @@ describe("the check as CI runs it", () => {
     // Both discharges driven through the real script, since each is a constant
     // in the check rather than an input the fixture tree holds.
     const moved = "alcove-exchange-record/v2";
-    const scriptRoot = mkdtempSync(
-      resolve(tmpdir(), "alcove-record-version-script-"),
+    // Resolved, since the temporary directory can sit behind a symlink and the
+    // script runs its check only when started by the path it resolves to.
+    const scriptRoot = realpathSync(
+      mkdtempSync(resolve(tmpdir(), "alcove-record-version-script-")),
     );
     temporaryRoots.push(scriptRoot);
     mkdirSync(resolve(scriptRoot, "scripts/lib"), { recursive: true });

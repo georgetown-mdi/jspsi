@@ -47,10 +47,33 @@ export const TERMINATED_RECORD_KEYS_NOTICE =
   "this pair cannot do is demonstrate that by opening a commitment. Keep the " +
   "keys private all the same.";
 
+/**
+ * The terminated-record notice where this page, not a console, holds the pair:
+ * an in-browser run keeps it only as long as the page does, so what removes it is
+ * leaving the page or starting another run on it.
+ */
+export const TERMINATED_RECORD_PAGE_NOTICE =
+  "The record states what this run disclosed -- to whom, under which agreement, " +
+  "over what categories of data, and how many of your records went into it -- " +
+  "which is what a disclosure accounting is written from. Download it now: " +
+  "this page holds the only copy, and trying again, starting over, or leaving " +
+  "the page discards it, while the disclosure it records still happened.";
+
 /** The lead the seat shows over a completed run's record it is offering here --
  * the run finished, and its own results block did not hold the pair. */
 const COMPLETED_RECORD_LEAD =
   "This console holds the exchange record for this run.";
+
+/** The completed-record lead where this page holds the pair: an in-browser run
+ * whose results could not be built after the exchange completed. */
+const COMPLETED_RECORD_PAGE_LEAD =
+  "This page holds the exchange record for this run.";
+
+/** What the seat says under that lead. */
+export const COMPLETED_RECORD_PAGE_NOTICE =
+  "It states what this run disclosed and is what a disclosure accounting is " +
+  "written from. Download it before you move on: this page holds the only " +
+  "copy, and leaving the page discards it.";
 
 /** What the seat says under that lead: the same keeping instruction the results
  * block's own record rows hold, said here because this is where the download is. */
@@ -127,6 +150,10 @@ export const RECORD_UNANSWERED_NOTICE =
   "this console -- reload this page to ask again, and keep the run until you " +
   "have the file, because every way on from here removes it.";
 
+/** Where an offered record pair lives: in a console run's folder, or in this page
+ * for a failed in-browser run. */
+export type RecordHolder = "console" | "page";
+
 /** The states this panel renders: the ones an ask can end in that leave the seat
  * something to say. `none` and an ask still in flight render nothing at all. */
 type RenderedRecordOffer = Extract<
@@ -139,10 +166,16 @@ type RenderedRecordOffer = Extract<
  * set takes a third line stating that finding; the panel's other states have no
  * record reading to state it from.
  *
+ * `heldBy` says where the offered pair lives, which decides what removes it: a
+ * console run's folder, or this page for an in-browser run.
+ *
  * @internal exported for the unit test, which pins where the mismatch line
  * stands.
  */
-export function recordPanelCopy(offer: RenderedRecordOffer): {
+export function recordPanelCopy(
+  offer: RenderedRecordOffer,
+  heldBy: RecordHolder = "console",
+): {
   lead: string;
   notice: string;
   certificateMismatch?: string;
@@ -154,10 +187,21 @@ export function recordPanelCopy(offer: RenderedRecordOffer): {
       lead: UNDESCRIBABLE_RECORD_LEAD,
       notice: UNDESCRIBABLE_RECORD_NOTICE,
     };
+  const onPage = heldBy === "page";
   return {
     ...(offer.outcome === "completed"
-      ? { lead: COMPLETED_RECORD_LEAD, notice: COMPLETED_RECORD_NOTICE }
-      : { lead: TERMINATED_RECORD_LEAD, notice: TERMINATED_RECORD_NOTICE }),
+      ? {
+          lead: onPage ? COMPLETED_RECORD_PAGE_LEAD : COMPLETED_RECORD_LEAD,
+          notice: onPage
+            ? COMPLETED_RECORD_PAGE_NOTICE
+            : COMPLETED_RECORD_NOTICE,
+        }
+      : {
+          lead: TERMINATED_RECORD_LEAD,
+          notice: onPage
+            ? TERMINATED_RECORD_PAGE_NOTICE
+            : TERMINATED_RECORD_NOTICE,
+        }),
     ...(offer.recordCertificateMismatchObserved
       ? { certificateMismatch: CERTIFICATE_MISMATCH_RECORD_NOTICE }
       : {}),
@@ -168,7 +212,8 @@ export function recordPanelCopy(offer: RenderedRecordOffer): {
  * The self-attested exchange record a console server-job run produced, offered on
  * every console server-job seat (invite, accept, Direct, and strand recovery)
  * whenever the console holds one the run's own results block is not already
- * offering.
+ * offering. An in-browser run that failed holding a record offers it here too,
+ * with `heldBy` set to `page`.
  *
  * The run this exists for is the one that DISCLOSED AND THEN STOPPED. A record is
  * owed from the moment this party's payload crosses, so such a run writes one to
@@ -204,17 +249,20 @@ export function recordPanelCopy(offer: RenderedRecordOffer): {
  */
 export function RecordDownload({
   offer,
+  heldBy = "console",
 }: {
   /** Where this run's record stands. An ask still in flight renders nothing, as
    * does undefined -- a seat with nothing to ask about: the panel states where the
    * record stands, and neither of those knows yet. */
   offer: JobExchangeRecordOfferState | undefined;
+  /** Where the offered pair lives, which the copy names as what removes it. */
+  heldBy?: RecordHolder;
 }) {
   if (offer === undefined || offer.kind === "none" || offer.kind === "asking")
     return null;
   const terminated =
     offer.kind === "available" && offer.outcome !== "completed";
-  const copy = recordPanelCopy(offer);
+  const copy = recordPanelCopy(offer, heldBy);
   return (
     <section className={styles.callout} aria-labelledby="exchange-record-title">
       <h2 id="exchange-record-title">Exchange record</h2>

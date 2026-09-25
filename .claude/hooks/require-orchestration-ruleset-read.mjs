@@ -5,7 +5,7 @@
 // Why this exists: the ruleset holds the rules for CONDUCTING an orchestration --
 // the review contracts and round caps, how a fix is dispatched, the spawn and
 // SendMessage mechanics, where a decision goes. A prose pointer in CLAUDE.md and
-// five front doors load it, and nothing else confirms the session doing the
+// seven front doors load it, and nothing else confirms the session doing the
 // conducting has it: a session that starts spawning without it runs the flow
 // from whatever it remembers of an earlier one, and the rules it skips are
 // exactly the ones no later check catches -- a round dispatched wrongly is a

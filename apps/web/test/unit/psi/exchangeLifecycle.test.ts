@@ -10,6 +10,7 @@ import {
   StandardizedDataset,
   UsageError,
   describeResolvedRunShape,
+  exchangeRecordFromFailure,
   generateSharedSecret,
   getDefaultLinkageTerms,
   runExchange,
@@ -40,6 +41,7 @@ import type Peer from "peerjs";
 
 import type {
   AuthResult,
+  BuiltExchangeRecord,
   ExchangeResult,
   MessageConnection,
   PreparedExchange,
@@ -68,11 +70,21 @@ const logCapture = vi.hoisted(() => ({
   warnings: [] as Array<string>,
 }));
 
+// The records a test attaches to a run failure, standing in for the one core
+// attaches past this party's payload send: that attachment is internal to
+// runExchange, which is mocked here.
+const attachedRecords = vi.hoisted(() => new WeakMap<object, unknown>());
+
 vi.mock("@alcove/core", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {
     ...actual,
     runExchange: vi.fn(),
+    exchangeRecordFromFailure: vi.fn((error: unknown) =>
+      typeof error === "object" && error !== null
+        ? attachedRecords.get(error)
+        : undefined,
+    ),
     // The module-level `log = getLogger("exchangeLifecycle")` is created at
     // import time, so withCapturedLogs cannot reach it; replace getLogger
     // instead. This routes the lifecycle's teardown / early-disconnect ERROR
@@ -94,6 +106,13 @@ vi.mock("@alcove/core", async (importOriginal) => {
 const mockedOpen = vi.mocked(openPeerMessageConnection);
 const mockedAuthenticate = vi.mocked(authenticateExchange);
 const mockedRunExchange = vi.mocked(runExchange);
+const mockedRecordFromFailure = vi.mocked(exchangeRecordFromFailure);
+
+/** A record pair the lifecycle forwards without reading. */
+const STUB_RECORD = {
+  record: { outcome: "completed" },
+  keys: {},
+} as unknown as BuiltExchangeRecord;
 
 /** A placeholder invitation secret; the handshake is mocked, so its value is
  * never validated -- only that it is threaded through to authenticateExchange. */
@@ -587,6 +606,73 @@ describe("runExchangeLifecycle", () => {
     expect(s.onResult).not.toHaveBeenCalled();
   });
 
+  test("a run failure past the payload send reports the record core attached", async () => {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const failure = new ConnectionError("peer closed the channel", "closed");
+    attachedRecords.set(failure, STUB_RECORD);
+    mockedRunExchange.mockRejectedValue(failure);
+    const { acquired } = makeResources();
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire: () => Promise.resolve(acquired),
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledExactlyOnceWith({
+      category: "exchange",
+      error: failure,
+      record: STUB_RECORD,
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+  });
+
+  test("a run failure with no record attached reports none", async () => {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    mockedRunExchange.mockRejectedValue(new Error("failed before the send"));
+    const { acquired } = makeResources();
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire: () => Promise.resolve(acquired),
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledTimes(1);
+    expect(s.onError.mock.calls[0][0]).not.toHaveProperty("record");
+  });
+
+  test("a throwing record lookup keeps the run's own failure", async () => {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const failure = new Error("data channel closed");
+    mockedRunExchange.mockRejectedValue(failure);
+    mockedRecordFromFailure.mockImplementationOnce(() => {
+      throw new Error("the cause chain refused to be read");
+    });
+    const { acquired } = makeResources();
+    const s = seams();
+
+    await runExchangeLifecycle({
+      acquire: () => Promise.resolve(acquired),
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledExactlyOnceWith({
+      category: "exchange",
+      error: failure,
+    });
+    expect(logCapture.errors.join("\n")).toContain("exchange record");
+  });
+
   test("a mid-run StandardizationTermsError is NOT classified 'config' (phase-scoped)", async () => {
     // The config category is scoped to the prepare phase. Even the config-typed
     // StandardizationTermsError, were it to show up from the run half (none does
@@ -720,6 +806,35 @@ describe("runExchangeLifecycle", () => {
     expect(s.onError).toHaveBeenCalledWith({
       category: "output",
       error: expect.any(Error),
+    });
+    expect(s.onResult).not.toHaveBeenCalled();
+  });
+
+  test("a generateOutput failure reports the completed run's own record", async () => {
+    const { mc } = makeFakeMc();
+    mockedOpen.mockResolvedValue(mc);
+    mockedRunExchange.mockResolvedValue({
+      ...STUB_EXCHANGE_RESULT,
+      audit: STUB_RECORD,
+    });
+    const { acquired } = makeResources();
+    const s = seams();
+    const buildFailure = new Error("partner payload is missing rows");
+    s.generateOutput.mockImplementation(() => {
+      throw buildFailure;
+    });
+
+    await runExchangeLifecycle({
+      acquire: () => Promise.resolve(acquired),
+      exchangeRole: "initiator",
+      signal: new AbortController().signal,
+      ...s,
+    });
+
+    expect(s.onError).toHaveBeenCalledExactlyOnceWith({
+      category: "output",
+      error: buildFailure,
+      record: STUB_RECORD,
     });
     expect(s.onResult).not.toHaveBeenCalled();
   });
