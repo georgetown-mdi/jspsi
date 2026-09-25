@@ -65,6 +65,9 @@ import {
   withRetainModeImplications,
 } from "@alcove/core";
 
+import { isMap, isScalar } from "yaml";
+import type { Document } from "yaml";
+
 import { writeFileOwnerOnly } from "./fileUtils";
 import { parseSensitiveYaml, editSensitiveYamlDocument } from "./sensitiveFile";
 import type { SensitiveFileLabel } from "./sensitiveFile";
@@ -1391,8 +1394,12 @@ export function reconcileConflictError(params: {
  * Does not guard against overwriting an existing file; callers provision
  * through `provisionConfigAndKey`, which runs the conflict gate first.
  */
-export function saveConfig(configPath: string, spec: ExchangeSpec): void {
-  writeFileOwnerOnly(configPath, serializeExchangeDocument(spec));
+export function saveConfig(
+  configPath: string,
+  spec: ExchangeSpec,
+  options: { exclusive?: boolean } = {},
+): void {
+  writeFileOwnerOnly(configPath, serializeExchangeDocument(spec), options);
 }
 
 /**
@@ -1416,6 +1423,58 @@ function configFileLabel(configPath: string): SensitiveFileLabel {
 function configFileRefusal(configPath: string, rest: string): UsageError {
   const message = messageWithOperatorText`config file ${operatorSuppliedText(configPath)} ${rest}`;
   return keepOperatorSuppliedText(new UsageError(message.text), message);
+}
+
+/**
+ * Rewrite, along `keyPath`, every mapping key the exchange schema reads as the
+ * path's snake_case segment -- a camelCase or mixed spelling -- to that
+ * segment, so a following `setIn`/`deleteIn` on the snake_case path edits the
+ * key the file holds instead of missing it or writing a second spelling the
+ * next load refuses. Where the file already holds the snake_case spelling, the
+ * other spellings are dropped; where it holds two others and no snake_case
+ * one, it is refused, since renaming both would write one key twice. Stops at
+ * the first segment that is not a mapping.
+ */
+function normalizeKeyPathSpelling(
+  configPath: string,
+  doc: Document,
+  keyPath: readonly string[],
+): void {
+  let node: unknown = doc.contents;
+  for (const [depth, segment] of keyPath.entries()) {
+    if (!isMap(node)) return;
+    const spellingOf = (key: unknown): string | undefined => {
+      const text = isScalar(key) ? key.value : key;
+      return typeof text === "string" && snakeizeKey(text) === segment
+        ? text
+        : undefined;
+    };
+    const spellings = node.items.flatMap((pair) => {
+      const spelling = spellingOf(pair.key);
+      return spelling === undefined ? [] : [spelling];
+    });
+    const holdsSnakeCase = spellings.includes(segment);
+    if (!holdsSnakeCase && spellings.length > 1) {
+      const quoted = spellings.map((key) => `"${key}"`);
+      const block =
+        depth === 0 ? "" : ` under ${keyPath.slice(0, depth).join(".")}`;
+      throw configFileRefusal(
+        configPath,
+        `has keys ${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}${block}, ` +
+          "which are read as one setting, so only one of them is kept. " +
+          "Write the setting once.",
+      );
+    }
+    node.items = node.items.filter((pair) => {
+      const spelling = spellingOf(pair.key);
+      if (spelling === undefined || spelling === segment) return true;
+      if (holdsSnakeCase) return false;
+      if (isScalar(pair.key)) pair.key.value = segment;
+      else pair.key = doc.createNode(segment);
+      return true;
+    });
+    node = node.get(segment, true);
+  }
 }
 
 /**
@@ -1447,6 +1506,12 @@ export function persistHostKeyFingerprint(
     fs.readFileSync(configPath, "utf8"),
     configFileLabel(configPath),
     (doc) => {
+      normalizeKeyPathSpelling(configPath, doc, ["connection", "channel"]);
+      normalizeKeyPathSpelling(configPath, doc, [
+        "connection",
+        "server",
+        "host_key_fingerprint",
+      ]);
       // Read the channel discriminant off the parsed document (not a
       // schema-loaded spec) and reject anything but sftp before the write.
       // getIn does not resolve aliases, so an alias-spelled channel is
@@ -1616,6 +1681,11 @@ function partnerFingerprintRecorded(
     fs.readFileSync(configPath, "utf8"),
     configFileLabel(configPath),
     (doc) => {
+      normalizeKeyPathSpelling(configPath, doc, ["signing", "mode"]);
+      normalizeKeyPathSpelling(configPath, doc, [
+        "signing",
+        "partner_fingerprint",
+      ]);
       // Read the mode off the parsed document (not a schema-loaded spec) and
       // reject anything but certificate before the write. getIn does not
       // resolve aliases, so an alias-spelled mode is treated as a non-string
@@ -1692,6 +1762,7 @@ export function persistDisclosedPayloadColumns(
     fs.readFileSync(configPath, "utf8"),
     configFileLabel(configPath),
     (doc) => {
+      normalizeKeyPathSpelling(configPath, doc, ["disclosed_payload_columns"]);
       if (columns === undefined) {
         // No commitment on record for this mint: remove any stale field rather
         // than leave a value the current metadata no longer backs.
@@ -1738,6 +1809,7 @@ export function persistExpectedPayloadColumns(
     fs.readFileSync(configPath, "utf8"),
     configFileLabel(configPath),
     (doc) => {
+      normalizeKeyPathSpelling(configPath, doc, ["expected_payload_columns"]);
       if (columns === undefined) {
         // No consented subset on record for this acceptance: remove any stale
         // field rather than leave a value the latest consent no longer backs.
@@ -1784,6 +1856,7 @@ export function persistOutboundPayloadConsent(
     fs.readFileSync(configPath, "utf8"),
     configFileLabel(configPath),
     (doc) => {
+      normalizeKeyPathSpelling(configPath, doc, ["outbound_payload_consent"]);
       if (consent === undefined) {
         doc.deleteIn(["outbound_payload_consent"]);
         return;
@@ -1828,6 +1901,9 @@ export function persistExpectedPartnerDeduplicate(
     fs.readFileSync(configPath, "utf8"),
     configFileLabel(configPath),
     (doc) => {
+      normalizeKeyPathSpelling(configPath, doc, [
+        "expected_partner_deduplicate",
+      ]);
       doc.setIn(["expected_partner_deduplicate"], declared);
     },
   );
@@ -1873,6 +1949,14 @@ export function persistTermsUpdate(
     fs.readFileSync(configPath, "utf8"),
     configFileLabel(configPath),
     (doc) => {
+      for (const record of [
+        "linkage_terms",
+        "expected_payload_columns",
+        "expected_partner_deduplicate",
+        "outbound_payload_consent",
+        "disclosed_payload_columns",
+      ])
+        normalizeKeyPathSpelling(configPath, doc, [record]);
       doc.setIn(
         ["linkage_terms"],
         doc.createNode(snakeizeKeys(write.linkageTerms)),
@@ -1950,8 +2034,10 @@ export function persistInvitationRelay(
     fs.readFileSync(configPath, "utf8"),
     configFileLabel(configPath),
     (doc) => {
+      normalizeKeyPathSpelling(configPath, doc, ["connection", "channel"]);
       if (doc.getIn(["connection", "channel"]) !== "webrtc") return;
       const field = ["connection", "invitation_relay"];
+      normalizeKeyPathSpelling(configPath, doc, field);
       if (relay === undefined) {
         outcome = doc.hasIn(field) ? "removed" : "absent";
         doc.deleteIn(field);

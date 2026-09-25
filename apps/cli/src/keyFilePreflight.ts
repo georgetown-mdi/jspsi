@@ -2,7 +2,70 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { getLogger } from "@alcove/core";
+import {
+  getLogger,
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
+} from "@alcove/core";
+
+import { ownerOnlyTempPath } from "./fileUtils";
+
+/** The consequence every pre-flight rejection states. */
+const FAILS_AFTER_KEY_EXCHANGE =
+  "otherwise saving the rotated key would fail after the key exchange and " +
+  "both parties would need to re-invite";
+
+/** Refuse a key path whose own name, or temp sibling `name`, is too long. */
+function nameTooLongError(keyFilePath: string, name: string): Error {
+  const which =
+    name === keyFilePath
+      ? messageWithOperatorText`its file name`
+      : messageWithOperatorText`the temporary file written beside it (${operatorSuppliedText(name)})`;
+  const message = messageWithOperatorText`key file path ${operatorSuppliedText(
+    keyFilePath,
+  )} is too long: ${which} exceeds the filesystem's name limit (ENAMETOOLONG). Choose a shorter key file name before running the exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`;
+  return keepOperatorSuppliedText(new Error(message.text), message);
+}
+
+/**
+ * The mount points `/proc/self/mountinfo` lists: the fifth field of each line,
+ * with the octal escapes the kernel writes for a space, tab, newline, or
+ * backslash decoded.
+ */
+function mountPointsOf(mountinfo: string): Set<string> {
+  const points = new Set<string>();
+  for (const line of mountinfo.split("\n")) {
+    const field = line.split(" ")[4];
+    if (field !== undefined && field !== "")
+      points.add(
+        field.replace(/\\([0-7]{3})/g, (_, octal: string) =>
+          String.fromCharCode(parseInt(octal, 8)),
+        ),
+      );
+  }
+  return points;
+}
+
+/**
+ * Whether the directory entry at `keyFilePath` is itself a mount point, as a
+ * key file bind-mounted on its own into a container is. Read from
+ * `/proc/self/mountinfo`, so it answers only on Linux; elsewhere, or where that
+ * file cannot be read, it answers false.
+ */
+function keyFileIsMountPoint(keyFilePath: string): boolean {
+  let mountinfo: string;
+  try {
+    mountinfo = fs.readFileSync("/proc/self/mountinfo", "utf8");
+  } catch {
+    return false;
+  }
+  const entry = path.join(
+    fs.realpathSync(path.dirname(keyFilePath)),
+    path.basename(keyFilePath),
+  );
+  return mountPointsOf(mountinfo).has(entry);
+}
 
 /**
  * Pre-flight validation for an authenticated exchange's key-file path, run
@@ -20,8 +83,10 @@ import { getLogger } from "@alcove/core";
  *
  * - `keyFilePath` is missing or whitespace-only;
  * - the path already exists but is a directory or other non-regular node;
+ * - the path, or the temp name the write creates beside it, is too long;
  * - the parent exists but is not a directory, or cannot be created, written,
- *   or (on POSIX) read.
+ *   or (on POSIX) read;
+ * - on Linux, the key file is a mount point of its own.
  *
  * Side effect: creates the parent directory (recursively) when it does not yet
  * exist, mirroring {@link saveKeyFile}; the creation is logged and left in place
@@ -38,7 +103,10 @@ export function preflightKeyFilePath(
   // named " " in the current directory instead of failing clearly; trimming
   // matches what the caller must hand to saveKeyFile (see the JSDoc above).
   if (typeof keyFilePath !== "string" || keyFilePath.trim().length === 0)
-    throw new Error("authentication must include a non-empty keyFilePath");
+    throw new Error(
+      "the key file path is empty. Name the key file with --key-file " +
+        `before running the exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`,
+    );
   const kfp = keyFilePath.trim();
   // Accepted as-is if it is a regular file or a symlink (to anything,
   // including a directory): saveKeyFile writes a temp file and renames it
@@ -59,6 +127,7 @@ export function preflightKeyFilePath(
     // (above all ENAMETOOLONG, which those checks do not reproduce) is
     // rethrown, so pre-flight does not wrongly pass and leave saveKeyFile to
     // fail post-handshake, after the secret has rotated.
+    if (code === "ENAMETOOLONG") throw nameTooLongError(kfp, kfp);
     if (
       code !== "ENOENT" &&
       code !== "ENOTDIR" &&
@@ -74,13 +143,13 @@ export function preflightKeyFilePath(
   // concerns.
   if (targetStat && !targetStat.isFile() && !targetStat.isSymbolicLink())
     throw new Error(
-      `keyFilePath ${kfp} exists but is not a regular file (` +
+      `key file path ${kfp} exists but is not a regular file (` +
         `${
           targetStat.isDirectory()
             ? "directory"
             : "non-regular filesystem entry"
-        }); saveKeyFile would fail after a successful key exchange. ` +
-        "Remove or rename it before running the exchange.",
+        }). Remove or rename it before running the exchange; ` +
+        `${FAILS_AFTER_KEY_EXCHANGE}.`,
     );
   // Pre-validate the parent: create it if missing (mirroring saveKeyFile's
   // `mkdirSync({ recursive: true })`) and confirm it is a directory, so
@@ -97,16 +166,18 @@ export function preflightKeyFilePath(
     // misconfiguration and is reported with a clearer message.
     if ((err as NodeJS.ErrnoException).code !== "ENOENT")
       throw new Error(
-        `keyFilePath parent directory ${parent} is not accessible: ` +
-          (err instanceof Error ? err.message : String(err)),
+        `key file parent directory ${parent} is not accessible: ` +
+          (err instanceof Error ? err.message : String(err)) +
+          ". Make the directory reachable, or choose a key file path " +
+          `elsewhere, before running the exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`,
       );
     try {
       fs.mkdirSync(parent, { recursive: true });
       // Logged so a directory that appeared is explained even if the run
       // fails afterwards (see the JSDoc above).
       log.info(
-        `created keyFilePath parent directory ${parent} (mirrors ` +
-          "saveKeyFile's recursive mkdir; left in place on failure)",
+        `created key file parent directory ${parent} (left in place if the ` +
+          "exchange fails)",
       );
       parentStat = fs.statSync(parent);
     } catch (createErr) {
@@ -120,16 +191,32 @@ export function preflightKeyFilePath(
         /* lstat failure: parent truly absent; default message applies. */
       }
       throw new Error(
-        `keyFilePath parent directory ${parent} cannot be created${hint}: ` +
-          (createErr instanceof Error ? createErr.message : String(createErr)),
+        `key file parent directory ${parent} cannot be created${hint}: ` +
+          (createErr instanceof Error ? createErr.message : String(createErr)) +
+          ". Create the directory, or choose a key file path in an existing " +
+          `writable directory, before running the exchange; ` +
+          `${FAILS_AFTER_KEY_EXCHANGE}.`,
       );
     }
   }
   if (!parentStat.isDirectory())
     throw new Error(
-      `keyFilePath parent ${parent} exists but is not a directory; ` +
-        "saveKeyFile would fail after a successful key exchange",
+      `key file parent ${parent} exists but is not a directory. Choose a key ` +
+        "file path inside a directory before running the exchange; " +
+        `${FAILS_AFTER_KEY_EXCHANGE}.`,
     );
+  // Only once the parent exists: under a missing directory lstat fails ENOENT
+  // before it measures the final component. The write's first act is on
+  // `<name>.tmp.<pid>`, longer than the key's own name, so a name within a
+  // few bytes of the limit fits and its temp sibling does not.
+  for (const name of [kfp, ownerOnlyTempPath(kfp)]) {
+    try {
+      fs.lstatSync(name);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENAMETOOLONG")
+        throw nameTooLongError(kfp, name);
+    }
+  }
   // Best-effort writability check for the common case of a read-only parent
   // before the secret rotates: fs.accessSync(W_OK) is unreliable here
   // (Windows checks only the read-only attribute; Linux can misreport under
@@ -173,13 +260,12 @@ export function preflightKeyFilePath(
     );
   } catch (err) {
     throw new Error(
-      `keyFilePath parent directory ${parent} is not writable: ` +
+      `key file parent directory ${parent} is not writable: ` +
         (err instanceof Error ? err.message : String(err)) +
         ". Restore write access -- the directory's owner as well as its " +
         "permissions, since in a container Alcove runs as its own account " +
         "and a mounted directory keeps the owner it has outside -- before " +
-        "running the exchange, otherwise saveKeyFile would fail after a " +
-        "successful key exchange and both parties would need to re-invite.",
+        `running the exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`,
     );
   } finally {
     if (probeFd !== undefined) {
@@ -209,11 +295,10 @@ export function preflightKeyFilePath(
       parentReadFd = fs.openSync(parent, "r");
     } catch (err) {
       throw new Error(
-        `keyFilePath parent directory ${parent} is not readable: ` +
+        `key file parent directory ${parent} is not readable: ` +
           (err instanceof Error ? err.message : String(err)) +
-          ". Restore read permission before running the exchange, otherwise " +
-          "saveKeyFile's post-write directory fsync would fail after a " +
-          "successful key exchange and both parties would need to re-invite.",
+          ". Restore read permission on the directory before running the " +
+          `exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`,
       );
     } finally {
       if (parentReadFd !== undefined) {
@@ -225,5 +310,15 @@ export function preflightKeyFilePath(
       }
     }
   }
+  // A bind mount of the key file alone passes every check above, but the
+  // rename that saves the rotated key fails EBUSY on a mount point.
+  if (targetStat !== undefined && keyFileIsMountPoint(kfp))
+    throw new Error(
+      `key file ${kfp} is a mount point of its own, and saving the rotated ` +
+        "key renames a new file over it, which a mount point refuses. Mount " +
+        "the directory that holds the key file instead, and name the file " +
+        "inside it with --key-file, before running the exchange; " +
+        `${FAILS_AFTER_KEY_EXCHANGE}.`,
+    );
   return kfp;
 }

@@ -30,6 +30,7 @@ import {
   loadSigningIdentity,
   saveSigningIdentity,
 } from "../../../src/signingIdentityFile";
+import { preflightKeyFilePath } from "../../../src/keyFilePreflight";
 import { runProtocol } from "../../../src/protocol";
 import { PERSISTENCE_LOSS_EXIT_CODE } from "../../../src/eventStream";
 import { establishHostKeyTrust } from "../../../src/hostKeyTrust";
@@ -273,6 +274,66 @@ test("parseArgs passes a literal passphrase through unchanged", () => {
   } as unknown as Arguments;
   const args = parseArgs(argv);
   expect(args.serverPrivateKeyPassphrase).toBe("inline-pass");
+});
+
+test.each([
+  ["a trailing space", " "],
+  ["a trailing CR", "\r"],
+])(
+  "a --key-file with %s reads and writes the rotated key at one path",
+  (_label, padding) => {
+    fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+    saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+    const args = parseArgs({
+      _: [],
+      $0: "alcove",
+      input: "data.csv",
+      "key-file": `${keyFile}${padding}`,
+    } as unknown as Arguments);
+    expect(args.keyFile).toBe(keyFile);
+    const result = loadConfig({ configFile, keyFile: args.keyFile });
+    expect(result.authentication.sharedSecret).toBe(TOKEN_A);
+    expect(
+      preflightKeyFilePath(
+        result.authentication.keyFilePath,
+        getLogger("test"),
+      ),
+    ).toBe(keyFile);
+  },
+);
+
+test("parseArgs refuses a --key-file that is only whitespace", () => {
+  expect(() =>
+    parseArgs({
+      _: [],
+      $0: "alcove",
+      input: "data.csv",
+      "key-file": " \r",
+    } as unknown as Arguments),
+  ).toThrow(UsageError);
+});
+
+const placeholderUsernameConfig = {
+  ...minimalSFTPConfig,
+  connection: {
+    channel: "sftp",
+    server: { host: "sftp.example.org", username: "REPLACE_WITH_SSH_USERNAME" },
+  },
+};
+
+test("loadConfig refuses the placeholder SSH username before reading the key", () => {
+  fs.writeFileSync(configFile, YAML.stringify(placeholderUsernameConfig));
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  expect(() => loadConfig(baseOptions())).toThrow(
+    "still has the placeholder REPLACE_WITH_SSH_USERNAME as connection.server.username",
+  );
+});
+
+test("loadConfig runs a placeholder username that --server-username replaces", () => {
+  fs.writeFileSync(configFile, YAML.stringify(placeholderUsernameConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const result = loadConfig({ ...baseOptions(), serverUsername: "alice" });
+  expect(result.connection.channel).toBe("sftp");
 });
 
 // --- happy path --------------------------------------------------------------

@@ -436,7 +436,7 @@ Two folders on one share take **one** network-share volume, over the folder that
 
 **What a mis-owned mount looks like.** The failure names `EACCES` and the path it could not write. Those paths are relative -- the key file and config default to `./.alcove.key` and `./alcove.yaml`, resolved against the container's working directory -- and where the failure lands depends on the command:
 
-- `alcove exchange` stops up front, at the key-file preflight, with `keyFilePath parent directory . is not writable: EACCES: permission denied, open '.alcove-write-probe-<pid>-<hex>'. Restore write access ...`. It stops there by design, before any key exchange, so nothing is half-done.
+- `alcove exchange` stops up front, at the key-file preflight, with `key file parent directory . is not writable: EACCES: permission denied, open '.alcove-write-probe-<pid>-<hex>'. Restore write access ...`. It stops there by design, before any key exchange, so nothing is half-done.
 - `alcove accept` has no such preflight: the terms are displayed and confirmed, and the write that follows fails with `EACCES: permission denied, open './alcove.yaml.tmp.<pid>'` and exit 69. Nothing is spent -- the invitation is still good -- but the ownership has to be fixed and `accept` run again.
 - An existing `alcove.yaml` that the container cannot read fails earlier still, at config load: `config file ./alcove.yaml could not be read: EACCES: permission denied, open './alcove.yaml'`. A file owned by root rather than uid 1000 is what produces this, and the recursive `chown` above is what clears it.
 
@@ -584,7 +584,7 @@ Owner-only and the container's identity are one question here, not two: a `0600`
 
 **Inject via a secrets manager, not the image.** Never copy `.alcove.key` into a container image layer; image layers are readable by anyone with pull access to the registry. Instead, mount the file at runtime:
 
-- **Docker**: mount the key file as a named secret or a host-path bind mount with `--mount type=bind,src=/host/path/.alcove.key,dst=/work/.alcove.key`. Do not mount it read-only; the CLI must be able to write the rotated token after each successful exchange. Set the file to mode `0600` and owner uid 1000 on the host before the container starts.
+- **Docker**: bind-mount the directory that holds the key file, read-write, and name the file inside it with `--key-file`: `--mount type=bind,src=/host/path/secrets,dst=/run/secrets` with `--key-file /run/secrets/.alcove.key`. Do not mount the key file on its own: the CLI saves the rotated token after each successful exchange by writing a new file beside the old one and renaming it into place, and a rename onto a file that is itself a mount point fails (`EBUSY`). On Linux the key-file pre-flight refuses such a mount before the key exchange; elsewhere the save fails after it, and both parties must re-invite. For the same reason do not use a read-only mount or a Docker secret, which is mounted read-only. Set the directory's owner to uid 1000 and the file to mode `0600` and owner uid 1000 on the host before the container starts.
 - **Kubernetes**: use a `Secret` volume with `defaultMode: 0600`. Do not use a `ConfigMap` for the key file. Set the pod's `securityContext` so the projected file belongs to the identity the container runs as; a `0600` file the container's uid does not own is unreadable to it.
 - **CI runners**: write the token to a temporary file with `install -m 0600 /dev/stdin .alcove.key <<< "$TOKEN"` (bash) or `printf '%s' "$TOKEN" | install -m 0600 /dev/stdin .alcove.key` (POSIX sh) rather than `echo "$TOKEN" > .alcove.key`, which may leave a world-readable file depending on the runner's umask.
 
@@ -656,6 +656,8 @@ docker run --rm \
 ```
 
 Then mount it read-only for every exchange thereafter, beside the read-write mount the key file needs, with `signing.identity_file: /run/signing/alcove-signing-identity.json` and `signing.receipt_output: /run/secrets/alcove-receipt.json` in the mounted `alcove.yaml`. Point the exchange record there too: the image's `WORKDIR` is `/work`, which this example mounts read-only, and a signed run's receipt and record both default to a path under the working directory -- a write that fails there is non-fatal and only warns, so leaving either at its default here would complete the exchange while landing neither.
+
+**A fixed path keeps only the latest run.** `--record-file` and `signing.receipt_output` each name one file, and every run replaces it, the record's verification-keys file included, so the example below holds only the most recent exchange's record and receipt. Where the history matters -- an accounting of disclosures, for one -- copy both out after each run, or give the record a per-run name from the scheduler, for example `--record-file "/run/secrets/alcove-record-$(date -u +%Y%m%dT%H%M%SZ).json"`. `signing.receipt_output` is read from the configuration and has no per-run form, so the receipt has to be copied out.
 
 ```sh
 docker run \

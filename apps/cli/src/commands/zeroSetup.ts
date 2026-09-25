@@ -26,7 +26,11 @@ import {
 } from "../config";
 import { openEventStream, reportPersistenceLoss } from "../eventStream";
 import { displayZeroSetupDisclosure } from "../exchangeDisclosure";
-import { detectFileConflicts, expandTilde } from "../fileUtils";
+import {
+  detectFileConflicts,
+  expandTilde,
+  FileExistsError,
+} from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { optionalIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
@@ -415,6 +419,12 @@ export function finalizeBootstrap(params: {
         "opt to save; refusing to silently discard it",
     );
 
+  const configAppearedLateRefusal = (paths: string): string =>
+    `refusing to overwrite ${paths}, which appeared after the pre-flight ` +
+    "check; the exchange itself completed, so move or remove that file (or " +
+    "pass --config-file) and run 'alcove invite' to set up the recurring " +
+    "exchange rather than re-running this one";
+
   if (save) {
     if (bootstrap.sharedSecret !== undefined) {
       // Both parties saved: the initiator generated the secret and the responder
@@ -445,13 +455,14 @@ export function finalizeBootstrap(params: {
     // writes a key file, so gating keyFile here would reject a safe write.
     const conflicts = detectFileConflicts([configFile]);
     if (conflicts.length > 0)
-      throw new UsageError(
-        `refusing to overwrite ${conflicts.join(", ")}, which appeared after ` +
-          "the pre-flight check; the exchange itself completed, so move or " +
-          "remove that file (or pass --config-file) and run 'alcove invite' " +
-          "to set up the recurring exchange rather than re-running this one",
-      );
-    saveConfig(configFile, spec);
+      throw new UsageError(configAppearedLateRefusal(conflicts.join(", ")));
+    try {
+      saveConfig(configFile, spec, { exclusive: true });
+    } catch (err) {
+      if (err instanceof FileExistsError)
+        throw new UsageError(configAppearedLateRefusal(configFile));
+      throw err;
+    }
     log.info(
       `your partner did not also choose to save, so no shared secret was ` +
         `established. Wrote config to ${redactAndRenderOperatorSuppliedText(

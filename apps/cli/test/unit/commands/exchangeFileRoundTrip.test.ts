@@ -39,7 +39,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("a core-minted sftp YAML loads through the CLI config path with the placeholder username intact", () => {
+test("a core-minted sftp YAML reaches the CLI config path with the placeholder username intact", () => {
   // The mint layer produces the config; the CLI loads it verbatim -- no hand
   // edits between mint and load, the board's core requirement.
   const yaml = mintExchangeFile({
@@ -54,16 +54,19 @@ test("a core-minted sftp YAML loads through the CLI config path with the placeho
   fs.writeFileSync(configFile, yaml);
   saveKeyFile(keyFile, { sharedSecret: TOKEN });
 
-  const result = loadConfig({ configFile, keyFile });
+  // The placeholder survives the mint -> serialize -> load round-trip
+  // unchanged, and the load refuses it by name until the operator fills it in.
+  expect(() => loadConfig({ configFile, keyFile })).toThrow(
+    `still has the placeholder ${PLACEHOLDER_SSH_USERNAME} as connection.server.username`,
+  );
+  const result = loadConfig({ configFile, keyFile, serverUsername: "alice" });
   expect(result.connection.channel).toBe("sftp");
   if (result.connection.channel !== "sftp")
     throw new Error("expected sftp connection");
   expect(result.connection.server.host).toBe("sftp.example.org");
   expect(result.connection.server.port).toBe(2222);
   expect(result.connection.server.path).toBe("/exchanges/drop");
-  // The placeholder username survives the mint -> serialize -> load round-trip
-  // unchanged, so the operator sees the field they must fill in.
-  expect(result.connection.server.username).toBe(PLACEHOLDER_SSH_USERNAME);
+  expect(result.connection.server.username).toBe("alice");
   // The secret rides only the key file, injected at load -- never the config.
   expect(result.authentication.sharedSecret).toBe(TOKEN);
 });

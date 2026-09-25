@@ -531,6 +531,15 @@ function fsyncParentDir(filePath: string): void {
 }
 
 /**
+ * The sibling temp path {@link writeFileOwnerOnly} creates for `destPath` in
+ * this process before renaming or linking it into place. The key-file
+ * pre-flight checks this name too, since it is longer than `destPath`'s own.
+ */
+export function ownerOnlyTempPath(destPath: string): string {
+  return `${destPath}.tmp.${process.pid}`;
+}
+
+/**
  * Atomically write `content` to `destPath` with owner-only permissions: `0600`
  * on Unix, a restricted ACL (current user, inheritance stripped) on Windows.
  * Writes to a sibling temp file and renames so the destination is never
@@ -544,8 +553,8 @@ function fsyncParentDir(filePath: string): void {
  * file before the record (see `recordFile.ts`), and what protects a freshly
  * rotated shared-secret token (`saveKeyFile`). On macOS the extended (NFSv4)
  * ACL is cleared alongside the mode before any content is written. Byte-level
- * construction, the crash-ordering guarantee's platform scope, and the
- * `exclusive`-path directory-flush-after-create ordering are specified in
+ * construction, the crash-ordering guarantee's platform scope, and the removal
+ * of an `exclusive` create whose directory flush fails are specified in
  * docs/spec/CREDENTIAL_STORAGE.md.
  *
  * Shared by every owner-only writer (the key file, the config writer,
@@ -561,7 +570,7 @@ export function writeFileOwnerOnly(
   // cross-filesystem rename (EXDEV) is not attempted. The PID-qualified
   // suffix keeps concurrent invocations from clobbering each other's temp
   // file.
-  const tmp = `${destPath}.tmp.${process.pid}`;
+  const tmp = ownerOnlyTempPath(destPath);
   // Remove any stale temp file left by a previous crashed run so the subsequent
   // create always produces a fresh file rather than reusing one whose
   // permissions may not match what we are about to set.
@@ -697,15 +706,24 @@ export function writeFileOwnerOnly(
       } catch {
         /* best-effort: destination is already correctly created */
       }
+      // A create-if-absent write either creates the file or fails, so a
+      // directory flush that fails removes the entry this call just linked
+      // before the failure propagates; the removal is best-effort.
+      try {
+        fsyncParentDir(destPath);
+      } catch (flushErr) {
+        try {
+          fs.unlinkSync(destPath);
+        } catch {
+          /* best-effort: the flush failure below is the one reported */
+        }
+        throw flushErr;
+      }
     } else {
       fs.renameSync(tmp, destPath);
+      // Flush the parent directory so the rename's new entry is durable too.
+      fsyncParentDir(destPath);
     }
-    // Flush the parent directory so the rename/link's new entry is durable
-    // too. On the exclusive path this runs after the create-if-absent has
-    // already succeeded, so a flush failure here throws (not a
-    // FileExistsError) though destPath was created -- see the JSDoc contract
-    // note. The temp cleanup below is otherwise a no-op on both paths.
-    fsyncParentDir(destPath);
   } catch (err) {
     // Remove the temp file on any failure -- not just the icacls case -- so a
     // partial write never leaves a `.tmp.<pid>` orphan beside the destination.

@@ -906,6 +906,42 @@ test("persistHostKeyFingerprint replaces an existing stored pin (the one-shot re
   expect(parsed.connection.server.host_key_fingerprint).toBe(FP_B);
 });
 
+/** A config document holding `fields` beside loadable linkage terms. */
+function configWithLinkageTerms(fields: Record<string, unknown>): string {
+  return YAML.stringify({
+    ...fields,
+    linkage_terms: snakeizeKeys(getDefaultLinkageTerms("Agency A")),
+  });
+}
+
+test("persistHostKeyFingerprint replaces a camelCase pin under one snake_case spelling", () => {
+  const configPath = path.join(dir, "alcove.yaml");
+  fs.writeFileSync(
+    configPath,
+    configWithLinkageTerms({
+      connection: {
+        channel: "sftp",
+        server: {
+          host: "sftp.example.org",
+          username: "alice",
+          hostKeyFingerprint: FP_A,
+        },
+      },
+    }),
+  );
+  persistHostKeyFingerprint(configPath, FP_B);
+  const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    connection: { server: Record<string, unknown> };
+  };
+  expect(raw.connection.server).toEqual({
+    host: "sftp.example.org",
+    username: "alice",
+    host_key_fingerprint: FP_B,
+  });
+  const connection = parseExchangeSpec(raw).connection as SFTPConnectionConfig;
+  expect(connection.server.hostKeyFingerprint).toBe(FP_B);
+});
+
 test.skipIf(process.platform === "win32")(
   "persistHostKeyFingerprint writes the config owner-read-only (0600)",
   () => {
@@ -1246,6 +1282,58 @@ test("persistPartnerFingerprint never overwrites a pin already on file", () => {
     UsageError,
   );
   expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+});
+
+const SFTP_CONNECTION_FIELDS = {
+  channel: "sftp",
+  server: { host: "sftp.example.org", username: "alice" },
+};
+
+test("persistPartnerFingerprint fills an empty camelCase pin under one snake_case spelling", () => {
+  const configPath = path.join(dir, "alcove.yaml");
+  fs.writeFileSync(
+    configPath,
+    configWithLinkageTerms({
+      connection: SFTP_CONNECTION_FIELDS,
+      signing: {
+        mode: "certificate",
+        identity_file: "/run/signing/alcove-signing-identity.json",
+        partnerFingerprint: null,
+      },
+    }),
+  );
+  persistPartnerFingerprint(configPath, PARTNER_FP_A);
+  const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    signing: Record<string, unknown>;
+  };
+  expect(raw.signing).toEqual({
+    mode: "certificate",
+    identity_file: "/run/signing/alcove-signing-identity.json",
+    partner_fingerprint: PARTNER_FP_A,
+  });
+  expect(parseExchangeSpec(raw).signing).toMatchObject({
+    partnerFingerprint: PARTNER_FP_A,
+  });
+});
+
+test("persistPartnerFingerprint refuses beside a camelCase pin already on file", () => {
+  const configPath = path.join(dir, "alcove.yaml");
+  const original = configWithLinkageTerms({
+    connection: SFTP_CONNECTION_FIELDS,
+    signing: {
+      mode: "certificate",
+      identity_file: "/run/signing/alcove-signing-identity.json",
+      partnerFingerprint: PARTNER_FP_B,
+    },
+  });
+  fs.writeFileSync(configPath, original);
+  expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
+    UsageError,
+  );
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  expect(parseExchangeSpec(YAML.parse(original)).signing).toMatchObject({
+    partnerFingerprint: PARTNER_FP_B,
+  });
 });
 
 test("persistPartnerFingerprint refuses a document that is not in certificate mode", () => {
@@ -1667,6 +1755,22 @@ test("persistExpectedPayloadColumns throws (not silently) on a malformed config"
   expect(fs.readFileSync(configPath, "utf8")).toBe(original);
 });
 
+test("persistExpectedPayloadColumns refuses two non-snake_case spellings, naming both", () => {
+  const configPath = path.join(dir, "alcove.yaml");
+  const original = configWithLinkageTerms({
+    connection: SFTP_CONNECTION_FIELDS,
+    expectedPayloadColumns: ["diagnosis"],
+    expected_payloadColumns: ["zip"],
+  });
+  fs.writeFileSync(configPath, original);
+  expect(() =>
+    persistExpectedPayloadColumns(configPath, ["diagnosis"]),
+  ).toThrow(
+    /has keys "expectedPayloadColumns" and "expected_payloadColumns", which are read as one setting/,
+  );
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+});
+
 // --- persistInvitationRelay ---------------------------------------------------
 
 test("persistInvitationRelay sets the relay and keeps the rest of the connection block", () => {
@@ -1714,6 +1818,53 @@ test("persistInvitationRelay leaves a connection that is not webrtc as it is", (
     }),
   ).toBe("notWebrtc");
   expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+});
+
+function webrtcConfigWithCamelCaseRelay(): string {
+  return configWithLinkageTerms({
+    connection: {
+      channel: "webrtc",
+      server: { host: "peer.example.org" },
+      invitationRelay: { turn: ["turns:old.example.org:443"] },
+    },
+  });
+}
+
+test("persistInvitationRelay replaces a camelCase relay under one snake_case spelling", () => {
+  const configPath = path.join(dir, "alcove.yaml");
+  fs.writeFileSync(configPath, webrtcConfigWithCamelCaseRelay());
+  expect(
+    persistInvitationRelay(configPath, {
+      turn: ["turns:relay.example.org:443"],
+    }),
+  ).toBe("set");
+  const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    connection: Record<string, unknown>;
+  };
+  expect(raw.connection).toEqual({
+    channel: "webrtc",
+    server: { host: "peer.example.org" },
+    invitation_relay: { turn: ["turns:relay.example.org:443"] },
+  });
+  expect(parseExchangeSpec(raw).connection).toMatchObject({
+    invitationRelay: { turn: ["turns:relay.example.org:443"] },
+  });
+});
+
+test("persistInvitationRelay removes a camelCase relay the invitation no longer names", () => {
+  const configPath = path.join(dir, "alcove.yaml");
+  fs.writeFileSync(configPath, webrtcConfigWithCamelCaseRelay());
+  expect(persistInvitationRelay(configPath, undefined)).toBe("removed");
+  const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+    connection: Record<string, unknown>;
+  };
+  expect(raw.connection).toEqual({
+    channel: "webrtc",
+    server: { host: "peer.example.org" },
+  });
+  expect(parseExchangeSpec(raw).connection).not.toHaveProperty(
+    "invitationRelay",
+  );
 });
 
 // --- persistExpectedPartnerDeduplicate ---------------------------------------

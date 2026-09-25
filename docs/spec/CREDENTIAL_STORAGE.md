@@ -46,14 +46,30 @@ the write either creates the file or fails, and the failure is its own refusal
 naming the path rather than an overwrite; an `EPERM` from a filesystem that does
 not support the call, where the destination exists, is read as that same
 refusal. The temp name is then unlinked best-effort, the destination already
-being correct, and a failure to unlink it does not undo the creation.
+being correct, and a failure to unlink it does not undo the creation. The
+parent-directory flush that follows is part of the write: if it fails, the
+destination just linked is removed before the failure is raised, so the caller
+never sees a failure beside a file it created. That removal is best-effort, and
+a removal that also fails leaves the file in place.
 Everything ahead of the final step is identical, so the mode, the exclusive
 non-following temp create, and the `fsync` ordering below hold for both steps.
-Three artifacts take create-if-absent: a signing identity being created for the
-first time, a key file provisioned from an invitation, and an `alcove init`
-config the operator asked to create rather than replace. The rename is what a
-rotating key file, a regenerated signing identity, a rewritten config, an
-exchange record, and a receipt take, each overwriting by design.
+Create-if-absent is what every file written where none should exist takes: a
+signing identity being created for the first time; a key file provisioned from
+an invitation by `exchange --invitation`, or by an offline `invite`, an offline
+`accept`, or a zero-setup `--save`; a configuration those commands and an online
+`invite` or `accept` write fresh; and an `alcove init` config the operator asked
+to create rather than replace. Each of those commands checks the paths before
+it starts, and the create-if-absent write refuses a file that appeared after
+the check the same way. The rename is what a rotating key file (including the
+one an online `invite` or `accept` saves at its first handshake), a regenerated
+signing identity, a rewritten config, an exchange record, and a receipt take,
+each overwriting by design.
+
+An offline `accept` that keeps an existing configuration, and an offline
+`invite` from one, write their records into it before the key file: the key
+file is the last write, so a record write that fails, as in a read-only
+configuration directory, leaves no key file and the same command can be run
+again.
 
 **The symlink refusal has a residual window.** What the exclusive non-following
 create closes is a redirected *write*: the content goes into the temp inode
@@ -215,8 +231,10 @@ strip is attempted on the host's real platform" leg. Both facts come from the
 inheritance first -- a control directory and a control file created under the
 same root do have the ACE -- and then finds no ACE on the stripped work
 directory, on the credentials file, or on a file created beside it afterwards.
-No CI runner executes those macOS-gated legs, so they run on demand rather than
-continuously, and a regression in them would be caught at the next such run.
+The nightly platform workflow (`.github/workflows/nightly_platform.yaml`) runs
+the CLI unit suite on a macOS runner and on a Windows runner, so those
+macOS-gated legs, and the Windows-gated ones, run nightly; the pull-request gate
+runs on Linux only, where they skip.
 
 The `--log-file` descriptor is stripped at its own open instead, between that
 open and the installation of the sink that writes the first line -- the same
@@ -301,8 +319,10 @@ writability check would still fail the durability flush after rotation. The
 pre-flight therefore rejects a writable-but-not-readable parent up front.
 
 The parent's permissions are the last of what it establishes, and not all of it.
-In order, over the trimmed path (the trimmed form is what the caller must then
-write with):
+Every command trims surrounding whitespace from `--key-file` where it reads the
+flag, so the path the key is loaded from is the path the rotated key is saved
+to. The pre-flight trims again and returns the trimmed path, which the caller
+writes with. In order:
 
 1. **A path that is not a non-empty string** is rejected.
 2. **The key path itself is examined without following a link.** A path that
@@ -320,15 +340,28 @@ write with):
    unwind: the creation is logged and stays even where the handshake or the
    exchange then fails.
 5. **A parent that exists and is not a directory** is rejected.
-6. **Writability is established by creating and removing a probe file**, not by
+6. **The key's name and the temp name the write creates first,
+   `<name>.tmp.<pid>`, are examined for `ENAMETOOLONG`**, once the parent
+   exists: under a missing directory the lookup fails `ENOENT` before it
+   measures the final component, so step 3 alone passes an over-long name
+   there. The temp name's final component is longer than the key's own, so a
+   name within a few bytes of the limit fits and would fail at the write.
+7. **Writability is established by creating and removing a probe file**, not by
    an access check: `access()` reports only the read-only attribute on Windows
    and can misreport under Linux capabilities such as `CAP_DAC_OVERRIDE`. The
    probe is named `.alcove-write-probe-<pid>-<8 hex>`, created exclusively, and
    removed in a `finally`; a stale probe left by an earlier run is swept first,
    and every failure of that sweep is ignored as cosmetic.
-7. **Readability is established by opening the parent for reading**, on POSIX
+8. **Readability is established by opening the parent for reading**, on POSIX
    only -- on Windows opening a directory fails outright and the parent flush is
    skipped, so there is no read requirement to verify there.
+9. **A key file that is a mount point of its own is rejected**, as a key file
+   bind-mounted alone into a container is: the write's rename cannot replace a
+   mount point and fails `EBUSY`. The key path's directory entry, its parent
+   resolved, is looked up among the mount points `/proc/self/mountinfo` lists,
+   so this is checked on Linux only; where that file cannot be read the step
+   passes. The device number is not a substitute: a bind mount can share it with
+   the directory it is mounted into.
 
 Each rejection states the remedy and that the write would otherwise fail after a
 successful key exchange, which is what the pre-flight exists to prevent.

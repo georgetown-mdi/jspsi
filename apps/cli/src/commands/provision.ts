@@ -10,7 +10,7 @@ import {
 import type { ExchangeSpec } from "@alcove/core";
 
 import { DEFAULT_CONFIG_PATH, saveConfig } from "../config";
-import { detectFileConflicts } from "../fileUtils";
+import { detectFileConflicts, FileExistsError } from "../fileUtils";
 import { DEFAULT_KEY_PATH, saveKeyFile, type KeyFile } from "../keyFile";
 
 /**
@@ -62,13 +62,28 @@ function throwIfConflicts(
   if (check.includes("config")) paths.push(configPath);
   if (check.includes("key")) paths.push(keyPath);
   const conflicts = detectFileConflicts(paths);
-  if (conflicts.length > 0) {
-    const noun = conflicts.length === 1 ? "file" : "files";
-    throw new UsageError(
-      `refusing to overwrite existing ${noun}: ${conflicts.join(", ")}; ` +
-        "move or remove it, or pass --config-file / --key-file to write " +
-        "elsewhere",
-    );
+  if (conflicts.length > 0) throw conflictError(conflicts);
+}
+
+function conflictError(conflicts: string[]): UsageError {
+  const noun = conflicts.length === 1 ? "file" : "files";
+  return new UsageError(
+    `refusing to overwrite existing ${noun}: ${conflicts.join(", ")}; ` +
+      "move or remove it, or pass --config-file / --key-file to write " +
+      "elsewhere",
+  );
+}
+
+/**
+ * Run `write`, a create-if-absent write of `target`, reporting a file that
+ * appeared at `target` after the conflict gate as that gate's own refusal.
+ */
+function createIfAbsent(target: string, write: () => void): void {
+  try {
+    write();
+  } catch (err) {
+    if (err instanceof FileExistsError) throw conflictError([target]);
+    throw err;
   }
 }
 
@@ -78,9 +93,9 @@ function throwIfConflicts(
  * can call this before any network activity to abort a bootstrap that would
  * otherwise clobber an existing configuration.
  *
- * A check, not a lock: a file created between this check and the subsequent
- * write is still overwritten. It catches a pre-existing config; it does not
- * serialize concurrent provisioners.
+ * A check, not a lock: it reports a pre-existing file early, and the
+ * create-if-absent writes of {@link provisionConfigAndKey} refuse one created
+ * after it.
  */
 export function assertNoProvisionConflicts(
   targets: ProvisionTargets = {},
@@ -101,6 +116,13 @@ export interface ProvisionOptions {
    * config is never touched. Default `false`: write both files, gating both.
    */
   reuseExistingConfig?: boolean;
+  /**
+   * With {@link reuseExistingConfig}, the caller's in-place record writes to
+   * the kept config, run after the gate and before the key is written. The key
+   * is the last write, so a record write that fails (a read-only configuration
+   * directory) leaves no key behind and the same command can be run again.
+   */
+  refreshReusedConfig?: (configPath: string) => void;
 }
 
 /**
@@ -133,22 +155,25 @@ const REUSED_CONFIG_REMOVED_REMEDY =
  * Provision a config and key pair, refusing to clobber existing files.
  * Re-runs the conflict gate (safe to call even if the caller skipped
  * {@link assertNoProvisionConflicts}) and writes nothing if a gated target
- * exists. `keyData.expires` is written when set and omitted otherwise.
+ * exists. Each file is then written create-if-absent, so one that appears
+ * after the gate is refused the same way rather than replaced.
+ * `keyData.expires` is written when set and omitted otherwise.
  *
  * With `options.reuseExistingConfig` (see {@link ProvisionOptions}), the
  * config write is skipped and only the key is written and gated. Before
  * writing the key, the config's presence is re-checked: if it was removed
  * since the caller reconciled it, this throws rather than orphaning a key
- * with no matching config.
+ * with no matching config. `options.refreshReusedConfig` then runs, and the
+ * key is written only once it returns.
  *
- * Both writers are atomic (temp file + rename; see
- * docs/spec/CREDENTIAL_STORAGE.md#posix-write-discipline) and clean up their
- * own temp file on failure. The config is written first, so a key-write
- * failure leaves it behind; this removes it before the error propagates,
- * except when reusing an existing config, which is the user's file. A failed
- * removal leaves the config on disk and marks the propagating error
- * ({@link provisionLeftConfigOnDisk}). The key path itself is never deleted
- * on failure, since saveKeyFile writes nothing there to remove. Parent
+ * Both writers link a temp file onto the target, which refuses an existing
+ * one (see docs/spec/CREDENTIAL_STORAGE.md#posix-write-discipline), and
+ * clean up their own temp file on failure. The config is written first, so a
+ * key-write failure leaves it behind; this removes it before the error
+ * propagates, except when reusing an existing config, which is the user's
+ * file. A failed removal leaves the config on disk and marks the propagating
+ * error ({@link provisionLeftConfigOnDisk}). The key path itself is never
+ * deleted on failure, since saveKeyFile writes nothing there to remove. Parent
  * directories created for a nested target path are left in place.
  *
  * @returns the resolved paths (the key always written; the config only when
@@ -184,11 +209,16 @@ export function provisionConfigAndKey(
       )}${REUSED_CONFIG_REMOVED_REMEDY}`;
       throw keepOperatorSuppliedText(new UsageError(message.text), message);
     }
+    options.refreshReusedConfig?.(resolved.configPath);
   } else {
-    saveConfig(resolved.configPath, spec);
+    createIfAbsent(resolved.configPath, () =>
+      saveConfig(resolved.configPath, spec, { exclusive: true }),
+    );
   }
   try {
-    saveKeyFile(resolved.keyPath, keyData);
+    createIfAbsent(resolved.keyPath, () =>
+      saveKeyFile(resolved.keyPath, keyData, { exclusive: true }),
+    );
   } catch (err) {
     // Roll back only a config THIS call wrote; the key write left nothing, and a
     // reused config is the user's pre-existing file and must never be deleted.

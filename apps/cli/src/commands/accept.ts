@@ -1299,37 +1299,52 @@ export async function handler(argv: Arguments): Promise<void> {
           ? { outboundPayloadConsent }
           : {}),
       };
+      const invitationRelay = ready.accepted.invitationRelay;
+      // Widened by the assertion: the refresh callback assigns it, which
+      // control-flow narrowing does not follow.
+      let relayRefresh = undefined as InvitationRelayRefresh | undefined;
       // When reusing a pre-existing config, provisionConfigAndKey ignores `spec`
-      // and writes only the key file, leaving the user's config untouched.
+      // and writes only the key file, after the records below, leaving the rest
+      // of the user's config untouched.
       const { configPath, keyPath } = provisionConfigAndKey(
         spec,
         // The acceptor's key file holds the invitation token without an expiry; the
         // inviter's copy has the expiry. The token rotates on first exchange.
         { sharedSecret: ready.token.sharedSecret },
         { configPath: options.configFile, keyPath: options.keyFile },
-        { reuseExistingConfig: ready.reuseExistingConfig },
+        {
+          reuseExistingConfig: ready.reuseExistingConfig,
+          refreshReusedConfig: (keptConfigPath) => {
+            // The operator has just re-consented to THIS invitation's terms (the
+            // prompt above, or --consent-to-terms, gates every write here), so
+            // the machine-managed consent records are rewritten while the
+            // connection and linkage blocks are kept: a prior value would
+            // false-abort the next recurring exchange or bind it to terms nobody
+            // consented to. The outbound record follows the KEPT config's own
+            // output terms.
+            refreshAcceptanceRecords(keptConfigPath, {
+              expectedPayloadColumns: ready.accepted.expectedPayloadColumns,
+              expectedPartnerDeduplicate:
+                ready.accepted.expectedPartnerDeduplicate,
+              outboundPayloadConsent: reuseOutboundPayloadConsent,
+            });
+            // The relay the terms review just showed is the one the kept
+            // configuration's runs use: `invitation_relay` is refreshed from
+            // this invitation, and the operator's own `turn`/`stun` are left
+            // alone.
+            relayRefresh = persistInvitationRelay(
+              keptConfigPath,
+              invitationRelay,
+            );
+          },
+        },
       );
 
       if (ready.reuseExistingConfig) {
-        // The operator has just re-consented to THIS invitation's terms (the
-        // prompt above, or --consent-to-terms, gates every write here), so the
-        // machine-managed consent records are rewritten while the connection and
-        // linkage blocks are kept: a prior value would false-abort the next
-        // recurring exchange or bind it to terms nobody consented to. The
-        // outbound record follows the KEPT config's own output terms.
-        refreshAcceptanceRecords(configPath, {
-          expectedPayloadColumns: ready.accepted.expectedPayloadColumns,
-          expectedPartnerDeduplicate: ready.accepted.expectedPartnerDeduplicate,
-          outboundPayloadConsent: reuseOutboundPayloadConsent,
-        });
-        // The relay the terms review just showed is the one the kept
-        // configuration's runs use: `invitation_relay` is refreshed from this
-        // invitation, and the operator's own `turn`/`stun` are left alone.
-        const invitationRelay = ready.accepted.invitationRelay;
-        const relayRefresh = persistInvitationRelay(
-          configPath,
-          invitationRelay,
-        );
+        if (relayRefresh === undefined)
+          throw new Error(
+            "internal error: the kept configuration's records were not refreshed",
+          );
         log.info(
           `reused the existing configuration at ${redactAndRenderOperatorSuppliedText(
             operatorSuppliedText(configPath),

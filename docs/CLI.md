@@ -26,7 +26,7 @@ The "safe to commit" property protects the author of a configuration, not whoeve
 
 The threat model behind the rule -- what a substituted configuration can do with a reference and why it is not cheaply detected -- is in the [security design](SECURITY_DESIGN.md#configuration-file-trust-boundary).
 
-The `--config-file` and `--key-file` arguments are expected to be available for all relevant commands below, and are thus not explicitly listed.
+The `--config-file` and `--key-file` arguments are expected to be available for all relevant commands below, and are thus not explicitly listed. Every command removes surrounding whitespace from the `--key-file` value, including the carriage return a path read from a Windows-style text file ends in, so the key is read from and saved to the same file; a value that is only whitespace is refused.
 
 `--identity IDENTITY` supplies this party's label in the linkage terms -- what your partner sees as your name there, in the invitation, and in the exchange record.
 
@@ -791,7 +791,7 @@ Everything else the run reads or writes by a relative path resolves the same way
 
 That directory has to be writable by the scheduling account, not merely readable: each successful run rewrites `.alcove.key` with the rotated secret, and an SFTP run may edit `alcove.yaml` to record a host-key pin. The run verifies up front that the key file can be written, before any key exchange, so a mis-owned directory stops the run rather than desynchronizing the two parties' tokens.
 
-Give the results an `OUTPUT_FILE` path rather than redirecting `stdout`: Alcove creates that file owner-only, while a shell `>` redirect leaves it at the scheduling account's umask (see [Key file security](SECURITY_DESIGN.md#key-file-security)). A fixed output path is overwritten by each run. The exchange record and its verification keys default to a per-run timestamped name and so accumulate in the working directory, as does a receipt when the configuration names no `signing.receipt_output`; rotating and archiving what accumulates is an operator responsibility.
+Give the results an `OUTPUT_FILE` path rather than redirecting `stdout`: Alcove creates that file owner-only, while a shell `>` redirect leaves it at the scheduling account's umask (see [Key file security](SECURITY_DESIGN.md#key-file-security)). A fixed output path is overwritten by each run. The exchange record and its verification keys default to a per-run timestamped name and so accumulate in the working directory, as does a receipt when the configuration names no `signing.receipt_output`; rotating and archiving what accumulates is an operator responsibility. A fixed `--record-file` or `signing.receipt_output` is overwritten by each run, like `OUTPUT_FILE`, so it holds only the latest exchange's record or receipt: copy it out after each run where the history matters (see [DEPLOYMENT.md](DEPLOYMENT.md#mounting-the-signing-identity)).
 
 ### The key file on the scheduling machine
 
@@ -933,7 +933,7 @@ The warning is not confined to the invocation that binds the identity: a later o
 
 Re-keying is the only way out of an identity bound to a label the linkage terms refuse -- one holding a control or text-direction character, private key material, or longer than 1024 characters. Editing `linkage_terms.identity` to the bound label is not a way out there, because the terms refuse that label too, and an exchange under such a certificate is refused before it runs. Bind a label the terms admit with `--force --identity`, then have every partner re-pin the new fingerprint.
 
-`--export-certificate PATH` additionally writes this party's public certificate -- the certificate alone, never the private key -- to `PATH` for sending to a partner. Naming the signing identity file itself is refused rather than allowed to overwrite the private key with the certificate.
+`--export-certificate PATH` additionally writes this party's public certificate -- the certificate alone, never the private key -- to `PATH` for sending to a partner. Naming the signing identity file itself is refused rather than allowed to overwrite the private key with the certificate, including by a name in another letter case on a case-insensitive filesystem, through a symbolically linked directory, or, when `--identity-file` is a symbolic link, by the file it points to.
 
 ## Verifying a receipt
 

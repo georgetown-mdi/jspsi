@@ -42,7 +42,7 @@ import type {
 } from "@alcove/core";
 
 import { applyConnectionOverrides, saveConfig } from "./config";
-import { detectFileConflicts } from "./fileUtils";
+import { detectFileConflicts, FileExistsError } from "./fileUtils";
 import { openEventStream, reportPersistenceLoss } from "./eventStream";
 import { writeAcceptanceRecordReportingLoss } from "./acceptedTermsRecords";
 import {
@@ -1096,13 +1096,18 @@ export async function runOnlineBootstrap(params: {
         // handshake has already succeeded and the rotated key is saved, so this
         // throw becomes a non-fatal configWriteError (caught by runProtocol's
         // hook handling) rather than aborting the completed exchange.
-        if (detectFileConflicts([params.configPath]).length > 0) {
+        const configAppearedLate = (): UsageError => {
           const message = messageWithOperatorText`refusing to overwrite ${operatorSuppliedText(
             params.configPath,
           )}${CONFIG_APPEARED_LATE_REMEDY}`;
-          throw keepOperatorSuppliedText(new UsageError(message.text), message);
-        }
-        saveConfig(params.configPath, {
+          return keepOperatorSuppliedText(
+            new UsageError(message.text),
+            message,
+          );
+        };
+        if (detectFileConflicts([params.configPath]).length > 0)
+          throw configAppearedLate();
+        const firstConfig: ExchangeSpec = {
           connection: params.connection,
           ...params.dataSpec,
           // The online ACCEPTOR's up-front token commitment rides this first
@@ -1131,7 +1136,13 @@ export async function runOnlineBootstrap(params: {
           ...(params.expectedPartnerDeduplicate !== undefined
             ? { expectedPartnerDeduplicate: params.expectedPartnerDeduplicate }
             : {}),
-        });
+        };
+        try {
+          saveConfig(params.configPath, firstConfig, { exclusive: true });
+        } catch (err) {
+          if (err instanceof FileExistsError) throw configAppearedLate();
+          throw err;
+        }
         configWritten = true;
       },
       // The online invite/accept run no file-sync entry-sweep (the sweep flags

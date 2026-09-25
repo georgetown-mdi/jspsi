@@ -78,6 +78,30 @@ function writeKeptConfig(terms: LinkageTerms = sampleTerms("Acceptor Org")) {
   });
 }
 
+// A kept configuration whose records are written in the camelCase spelling
+// the loader also accepts.
+function writeCamelCaseKeptConfig(): void {
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: sampleTerms("Acceptor Org"),
+      expectedPayloadColumns: ["old_column"],
+      expectedPartnerDeduplicate: true,
+      outboundPayloadConsent: { status: "confirmed", columns: ["dob"] },
+      disclosedPayloadColumns: ["stale_column"],
+    }),
+  );
+}
+
+const CAMEL_CASE_RECORD_KEYS = [
+  "linkageTerms",
+  "expectedPayloadColumns",
+  "expectedPartnerDeduplicate",
+  "outboundPayloadConsent",
+  "disclosedPayloadColumns",
+];
+
 function readKeptConfig(): Record<string, unknown> {
   return YAML.parse(fs.readFileSync(configPath, "utf8")) as Record<
     string,
@@ -314,6 +338,39 @@ test("refreshAcceptanceRecords writes all three records a config parses back", (
   expect(spec.outboundPayloadConsent).toBeUndefined();
 });
 
+test("refreshAcceptanceRecords removes a camelCase record the invitation no longer states", () => {
+  writeCamelCaseKeptConfig();
+  refreshAcceptanceRecords(configPath, {
+    expectedPayloadColumns: undefined,
+    expectedPartnerDeduplicate: false,
+    outboundPayloadConsent: { status: "pending" },
+  });
+  expect(fs.readFileSync(configPath, "utf8")).not.toContain("old_column");
+  const raw = readKeptConfig();
+  for (const key of [
+    "expectedPayloadColumns",
+    "expectedPartnerDeduplicate",
+    "outboundPayloadConsent",
+  ])
+    expect(raw).not.toHaveProperty(key);
+  const spec = parseExchangeSpec(raw);
+  expect(spec.expectedPayloadColumns).toBeUndefined();
+  expect(spec.expectedPartnerDeduplicate).toBe(false);
+  expect(spec.outboundPayloadConsent).toEqual({ status: "pending" });
+});
+
+test("writeTermsRecord sets a camelCase record under one spelling", () => {
+  writeCamelCaseKeptConfig();
+  writeTermsRecord(configPath, {
+    record: "disclosed_payload_columns",
+    columns: ["zip"],
+  });
+  const raw = readKeptConfig();
+  expect(raw).not.toHaveProperty("disclosedPayloadColumns");
+  expect(raw["disclosed_payload_columns"]).toEqual(["zip"]);
+  expect(parseExchangeSpec(raw).disclosedPayloadColumns).toEqual(["zip"]);
+});
+
 test("refreshAcceptanceRecords throws where the configuration cannot be read", () => {
   expect(() =>
     refreshAcceptanceRecords(configPath, {
@@ -458,6 +515,32 @@ test("persistTermsUpdate writes the terms and every record, keeping the rest of 
   expect(after["outbound_payload_consent"]).toEqual({ status: "pending" });
   expect(after["disclosed_payload_columns"]).toEqual(["program"]);
   expect(parseExchangeSpec(after).linkageTerms).toEqual(terms);
+});
+
+test("persistTermsUpdate replaces camelCase records instead of keeping them beside the update", () => {
+  writeCamelCaseKeptConfig();
+  const terms: LinkageTerms = {
+    ...sampleTerms("Acceptor Org"),
+    algorithm: "psi",
+  };
+  persistTermsUpdate(configPath, {
+    linkageTerms: terms,
+    expectedPayloadColumns: undefined,
+    expectedPartnerDeduplicate: false,
+    outboundPayloadConsent: undefined,
+    disclosedPayloadColumns: { columns: undefined },
+  });
+  const text = fs.readFileSync(configPath, "utf8");
+  expect(text).not.toContain("old_column");
+  expect(text).not.toContain("stale_column");
+  const raw = readKeptConfig();
+  for (const key of CAMEL_CASE_RECORD_KEYS) expect(raw).not.toHaveProperty(key);
+  const spec = parseExchangeSpec(raw);
+  expect(spec.linkageTerms).toEqual(terms);
+  expect(spec.expectedPayloadColumns).toBeUndefined();
+  expect(spec.expectedPartnerDeduplicate).toBe(false);
+  expect(spec.outboundPayloadConsent).toBeUndefined();
+  expect(spec.disclosedPayloadColumns).toBeUndefined();
 });
 
 test("persistTermsUpdate refuses a document that would not load and leaves the file unchanged", () => {

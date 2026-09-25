@@ -118,6 +118,7 @@ import { saveConfig } from "../../../src/config";
 import { webRtcDialFrom } from "../../../src/protocol";
 import { exitCodeForError } from "../../../src/util/exit";
 import { promptConfirm, promptFreeText } from "../../../src/util/prompt";
+import { captureProcessExit } from "../../exitCapture";
 import { captureStdio } from "../../loggingTestSupport";
 import { ttyStream } from "../../stdinStream";
 import {
@@ -7871,3 +7872,59 @@ describe("handler: the acceptance records consent to its OWN outbound set", () =
     }
   });
 });
+
+// --- kept configuration in a read-only directory -------------------------------
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "handler: an accept keeping a config in a read-only directory writes no key, and the rerun succeeds",
+  async () => {
+    const root = fs.mkdtempSync(path.join(tmpdir(), "alcove-accept-ro-"));
+    const confDir = path.join(root, "conf");
+    fs.mkdirSync(confDir);
+    const configFile = path.join(confDir, "alcove.yaml");
+    const keyFile = path.join(root, ".alcove.key");
+    const input = path.join(root, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n",
+    );
+    writeExistingConfig(configFile);
+    const encoded = await encodeInvitation({
+      ...sampleToken(new Date(Date.now() + 3_600_000).toISOString()),
+      disclosedPayloadColumns: ["diagnosis"],
+    });
+    const accept = () =>
+      acceptHandler({
+        _: [],
+        $0: "alcove",
+        args: [encoded, input],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+    const exitSpy = captureProcessExit();
+    const stdio = captureStdio();
+    try {
+      fs.chmodSync(confDir, 0o555);
+      try {
+        await expect(accept()).rejects.toThrow(/exit:/);
+      } finally {
+        fs.chmodSync(confDir, 0o755);
+      }
+      expect(fs.existsSync(keyFile)).toBe(false);
+      await accept();
+      expect(exitSpy).not.toHaveBeenCalledWith(64);
+      expect(fs.existsSync(keyFile)).toBe(true);
+      expect(
+        parseExchangeSpec(YAML.parse(fs.readFileSync(configFile, "utf8")))
+          .expectedPayloadColumns,
+      ).toEqual(["diagnosis"]);
+    } finally {
+      stdio.restore();
+      exitSpy.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

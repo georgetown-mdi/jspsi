@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import YAML from "yaml";
 import { getDefaultLinkageTerms, UsageError } from "@alcove/core";
 import type { ExchangeSpec, PreparedExchange } from "@alcove/core";
@@ -252,6 +252,44 @@ test("we-saved-partner-did-not: aborts without clobbering a config that appeared
     }),
   ).toThrow(UsageError);
   expect(fs.readFileSync(configFile, "utf8")).toContain("preexisting");
+});
+
+/** Report `hidden` absent to every lstat while `fn` runs. */
+function hideFromLstat<T>(hidden: string, fn: () => T): T {
+  const realLstat = fs.lstatSync;
+  const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
+    target: fs.PathLike,
+    options?: fs.StatSyncOptions,
+  ) => {
+    if (target === hidden)
+      throw Object.assign(new Error("ENOENT: no such file or directory"), {
+        code: "ENOENT",
+      });
+    return realLstat(target, options);
+  }) as typeof fs.lstatSync);
+  try {
+    return fn();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+test("we-saved-partner-did-not: refuses a config that appears after the re-check too", () => {
+  const { log } = capture();
+  fs.writeFileSync(configFile, "preexisting: true\n");
+  hideFromLstat(configFile, () =>
+    expect(() =>
+      finalizeBootstrap({
+        save: true,
+        bootstrap: { partnerSaveIntent: false },
+        spec: sampleSpec(),
+        configFile,
+        keyFile,
+        log,
+      }),
+    ).toThrow("refusing to overwrite"),
+  );
+  expect(fs.readFileSync(configFile, "utf8")).toBe("preexisting: true\n");
 });
 
 // --- invariant guard ---------------------------------------------------------
