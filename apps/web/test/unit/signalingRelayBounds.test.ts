@@ -381,6 +381,13 @@ describe("relay send-buffer bound", () => {
   }, 30_000);
 });
 
+/** Every EXPIRE a peer has been sent, by the destination it names. */
+function expiredDestinations(peer: PeerSocket): Array<unknown> {
+  return peer.frames
+    .filter((received) => received.type === "EXPIRE")
+    .map((received) => received.src);
+}
+
 /** How many connections the broker's HTTP server still holds open. */
 function openConnections(server: http.Server): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -457,14 +464,80 @@ describe("leaving the realm", () => {
         .map((received) => received.payload),
     ).toEqual(["fresh"]);
   });
-});
 
-/** Every EXPIRE a peer has been sent, by the destination it names. */
-function expiredDestinations(peer: PeerSocket): Array<unknown> {
-  return peer.frames
-    .filter((received) => received.type === "EXPIRE")
-    .map((received) => received.src);
-}
+  test("a client that leaves has the frames it held for an absent peer dropped", async () => {
+    const broker = await startShippedBroker();
+    const leaver = await connectCollecting(broker.port, SENDER_ID);
+    leaver.ws.send(
+      JSON.stringify({ type: "OFFER", dst: RECIPIENT_ID, payload: "held" }),
+    );
+    await waitFor(
+      () => broker.realm.getMessageQueueById(RECIPIENT_ID)?.size() === 1,
+    );
+
+    leaver.ws.send(JSON.stringify({ type: "LEAVE" }));
+    await waitFor(() => leaver.ws.readyState === WebSocket.CLOSED);
+    expect(broker.realm.getMessageQueueById(RECIPIENT_ID)).toBeUndefined();
+
+    // A frame relayed behind anything a drain would have delivered on the
+    // same socket marks the point by which a held frame would have arrived.
+    const recipient = await connectCollecting(broker.port, RECIPIENT_ID);
+    const marker = await connectCollecting(broker.port, "peer-marker");
+    marker.ws.send(
+      JSON.stringify({ type: "OFFER", dst: RECIPIENT_ID, payload: "marker" }),
+    );
+    await waitFor(() =>
+      recipient.frames.some((received) => received.payload === "marker"),
+    );
+    expect(
+      recipient.frames.filter((received) => received.src === SENDER_ID),
+    ).toEqual([]);
+  });
+
+  test("a client registering a departed client's id starts with its full destination budget", async () => {
+    const broker = await startShippedBroker();
+    const leaver = await connectCollecting(broker.port, SENDER_ID);
+    for (
+      let index = 0;
+      index < MAX_QUEUED_DESTINATIONS_PER_SENDER;
+      index += 1
+    ) {
+      leaver.ws.send(
+        JSON.stringify({
+          type: "OFFER",
+          dst: `peer-absent-${index}`,
+          payload: "x",
+        }),
+      );
+    }
+    await waitFor(
+      () =>
+        broker.realm.getClientsIdsWithQueue().length ===
+        MAX_QUEUED_DESTINATIONS_PER_SENDER,
+    );
+    leaver.ws.send(JSON.stringify({ type: "LEAVE" }));
+    await waitFor(() => leaver.ws.readyState === WebSocket.CLOSED);
+    expect(broker.realm.getClientsIdsWithQueue()).toEqual([]);
+
+    const successor = await connectCollecting(
+      broker.port,
+      SENDER_ID,
+      "another-token",
+    );
+    const absentIds = Array.from(
+      { length: MAX_QUEUED_DESTINATIONS_PER_SENDER + 1 },
+      (_, index) => `peer-other-${index}`,
+    );
+    for (const absentId of absentIds) {
+      successor.ws.send(
+        JSON.stringify({ type: "OFFER", dst: absentId, payload: "x" }),
+      );
+    }
+    const refusedId = absentIds[absentIds.length - 1];
+    await waitFor(() => expiredDestinations(successor).includes(refusedId));
+    expect(expiredDestinations(successor)).toEqual([refusedId]);
+  });
+});
 
 describe("relay queue refusals", () => {
   // Well inside the expiry sweep's own window (`expire_timeout`, 5 seconds by

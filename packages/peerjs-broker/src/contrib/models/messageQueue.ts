@@ -155,6 +155,9 @@ export interface IMessageQueue {
 
   readMessage(): IMessage | undefined;
 
+  /** Drop every held frame whose `src` is `src`, releasing its bytes. */
+  removeMessagesFrom(src: string): void;
+
   getMessages(): SerializedFrame[];
 }
 
@@ -202,6 +205,15 @@ export class MessageQueue implements IMessageQueue {
     this.bytes -= frame.byteSize;
 
     return reconstituteFrame(frame);
+  }
+
+  public removeMessagesFrom(src: string): void {
+    let kept = 0;
+    for (const frame of this.frames) {
+      if (frame.message.src === src) this.bytes -= frame.byteSize;
+      else this.frames[kept++] = frame;
+    }
+    this.frames.length = kept;
   }
 
   public getMessages(): SerializedFrame[] {

@@ -164,6 +164,39 @@ describe("two-tier liveness reaper", () => {
       reaper.stop();
     }
   });
+
+  test("a reaped client's held frames and destination budget are dropped", () => {
+    const realm = new Realm();
+    realm.setClient(new Client({ id: "reaped", token: "t" }), "reaped");
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`dst-${i}`, {
+          type: MessageType.OFFER,
+          src: "reaped",
+          dst: `dst-${i}`,
+        }),
+      ).toBe(true);
+    }
+    const reaper = startReaper(realm);
+    try {
+      vi.advanceTimersByTime(UNCONFIRMED_TIMEOUT_MS + 1_000);
+      expect(realm.getClientById("reaped")).toBeUndefined();
+      expect(realm.getClientsIdsWithQueue()).toEqual([]);
+    } finally {
+      reaper.stop();
+    }
+
+    realm.setClient(new Client({ id: "reaped", token: "u" }), "reaped");
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`next-${i}`, {
+          type: MessageType.OFFER,
+          src: "reaped",
+          dst: `next-${i}`,
+        }),
+      ).toBe(true);
+    }
+  });
 });
 
 describe("relay message-queue bounds", () => {
@@ -244,6 +277,53 @@ describe("relay message-queue bounds", () => {
     expect(realm.addMessageToQueue("dst-newer", offerTo("dst-newer"))).toBe(
       false,
     );
+  });
+
+  test("removing a client drops its held frames and leaves other senders' in place", () => {
+    const realm = new Realm();
+    const leaver = new Client({ id: "leaver", token: "t" });
+    realm.setClient(leaver, "leaver");
+    realm.addMessageToQueue("shared", offerTo("shared", "leaver"));
+    realm.addMessageToQueue("shared", offerTo("shared", "other"));
+    realm.addMessageToQueue("shared", offerTo("shared", "leaver"));
+    realm.addMessageToQueue("alone", offerTo("alone", "leaver"));
+
+    expect(realm.removeClient(leaver)).toBe(true);
+
+    expect(realm.getMessageQueueById("alone")).toBeUndefined();
+    const shared = realm.getMessageQueueById("shared")!;
+    expect(shared.getMessages().map(({ message }) => message.src)).toEqual([
+      "other",
+    ]);
+    expect(shared.byteSize()).toBe(accountedBytes(offerTo("shared", "other")));
+
+    // The departed id holds no budget, and the remaining sender still holds
+    // its slot in the shared queue until that queue is cleared.
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`, "leaver")),
+      ).toBe(true);
+    }
+    for (let i = 1; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`o-${i}`, offerTo(`o-${i}`, "other")),
+      ).toBe(true);
+    }
+    expect(realm.addMessageToQueue("o-last", offerTo("o-last", "other"))).toBe(
+      false,
+    );
+  });
+
+  test("a stale removal leaves the current client's held frames in place", () => {
+    const realm = new Realm();
+    const stale = new Client({ id: "peer", token: "t" });
+    const current = new Client({ id: "peer", token: "u" });
+    realm.setClient(stale, "peer");
+    realm.setClient(current, "peer");
+    realm.addMessageToQueue("dst", offerTo("dst", "peer"));
+
+    expect(realm.removeClient(stale)).toBe(false);
+    expect(realm.getMessageQueueById("dst")?.size()).toBe(1);
   });
 
   test("caps the depth of a single queue", () => {

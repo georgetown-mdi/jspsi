@@ -15,7 +15,9 @@ export interface IRealm {
 
   /** Remove `client`'s registration only if the realm still maps its id to
    * that same client, so a stale holder of an id never removes the client that
-   * registered it since. */
+   * registered it since. Removing it also drops every frame it holds in a queue
+   * and its per-sender destination budget, so nothing is relayed under its id
+   * and a later client on that id starts with no budget spent. */
   removeClient(client: IClient): boolean;
 
   getMessageQueueById(id: string): IMessageQueue | undefined;
@@ -63,17 +65,18 @@ export const MAX_QUEUE_BYTES = 512 * 1024;
 // The number of distinct destinations one sender may hold frames for at once,
 // so no one sender takes more than this share of MAX_OUTSTANDING_QUEUES. A
 // rendezvous addresses the one partner it is waiting for. A destination
-// stops counting against its senders when its queue is drained or expires.
+// stops counting against its senders when its queue is drained or expires,
+// and against one sender when that sender is removed from the realm.
 // See docs/spec/CHANNEL_SECURITY.md.
 export const MAX_QUEUED_DESTINATIONS_PER_SENDER = 8;
 
 export class Realm implements IRealm {
   private readonly clients = new Map<string, IClient>();
   private readonly messageQueues = new Map<string, IMessageQueue>();
-  // The senders holding frames in each queue, and the number of queues each
-  // sender holds frames in, released together when a queue is cleared.
+  // The senders holding frames in each queue, and the queues each sender
+  // holds frames in: two views of one relation, updated together.
   private readonly queueSenders = new Map<string, Set<string>>();
-  private readonly queuedDestinationCounts = new Map<string, number>();
+  private readonly queuedDestinationsBySender = new Map<string, Set<string>>();
 
   public getClientsIds(): string[] {
     return [...this.clients.keys()];
@@ -92,9 +95,12 @@ export class Realm implements IRealm {
   }
 
   public removeClient(client: IClient): boolean {
-    if (this.clients.get(client.getId()) !== client) return false;
+    const id = client.getId();
+    if (this.clients.get(id) !== client) return false;
 
-    return this.clients.delete(client.getId());
+    this.clients.delete(id);
+    this.dropFramesFromSender(id);
+    return true;
   }
 
   public getMessageQueueById(id: string): IMessageQueue | undefined {
@@ -113,11 +119,11 @@ export class Realm implements IRealm {
     const queue = this.getMessageQueueById(id);
     const senders = this.queueSenders.get(id);
     const senderIsNew = senders?.has(sender) !== true;
+    const senderDestinations = this.queuedDestinationsBySender.get(sender);
 
     if (
       senderIsNew &&
-      (this.queuedDestinationCounts.get(sender) ?? 0) >=
-        MAX_QUEUED_DESTINATIONS_PER_SENDER
+      (senderDestinations?.size ?? 0) >= MAX_QUEUED_DESTINATIONS_PER_SENDER
     ) {
       return false;
     }
@@ -139,10 +145,8 @@ export class Realm implements IRealm {
     if (senderIsNew) {
       if (senders) senders.add(sender);
       else this.queueSenders.set(id, new Set([sender]));
-      this.queuedDestinationCounts.set(
-        sender,
-        (this.queuedDestinationCounts.get(sender) ?? 0) + 1,
-      );
+      if (senderDestinations) senderDestinations.add(id);
+      else this.queuedDestinationsBySender.set(sender, new Set([id]));
     }
 
     return true;
@@ -150,12 +154,26 @@ export class Realm implements IRealm {
 
   public clearMessageQueue(id: string): void {
     for (const sender of this.queueSenders.get(id) ?? []) {
-      const remaining = (this.queuedDestinationCounts.get(sender) ?? 1) - 1;
-      if (remaining > 0) this.queuedDestinationCounts.set(sender, remaining);
-      else this.queuedDestinationCounts.delete(sender);
+      const destinations = this.queuedDestinationsBySender.get(sender);
+      destinations?.delete(id);
+      if (destinations?.size === 0)
+        this.queuedDestinationsBySender.delete(sender);
     }
     this.queueSenders.delete(id);
     this.messageQueues.delete(id);
+  }
+
+  private dropFramesFromSender(sender: string): void {
+    for (const id of [...(this.queuedDestinationsBySender.get(sender) ?? [])]) {
+      const queue = this.messageQueues.get(id);
+      queue?.removeMessagesFrom(sender);
+      if (!queue || queue.size() === 0) {
+        this.clearMessageQueue(id);
+      } else {
+        this.queueSenders.get(id)?.delete(sender);
+      }
+    }
+    this.queuedDestinationsBySender.delete(sender);
   }
 
   public generateClientId(generateClientId?: () => string): string {
