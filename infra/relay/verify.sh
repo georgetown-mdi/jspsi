@@ -44,6 +44,15 @@ IMAGE="${ALCOVE_RELAY_IMAGE:-localhost/alcove-relay:installed}"
 
 die() { printf 'ABORTING: %s\n' "$*" >&2; exit 1; }
 
+# coreutils timeout on the relay host. Where there is none -- macOS, where this
+# script's test suite also runs -- perl's alarm, which the command it execs
+# inherits and dies of.
+if command -v timeout >/dev/null 2>&1; then
+  bounded() { timeout "$@"; }
+else
+  bounded() { perl -e 'alarm shift; exec { $ARGV[0] } @ARGV or die "$ARGV[0]: $!\n"' "$@"; }
+fi
+
 [ -f "$ENV_FILE" ] || die "no $ENV_FILE; this host has not been installed as a relay"
 # shellcheck disable=SC1090
 . "$ENV_FILE"
@@ -115,7 +124,7 @@ printf '\n'
 # second, before running the first probe -- an install-time run should not
 # fail a relay that is merely still starting.
 waited=0
-until timeout 1 bash -c "exec 3<>\"/dev/tcp/$CONNECT/443\"" 2>/dev/null; do
+until bounded 1 bash -c "exec 3<>\"/dev/tcp/$CONNECT/443\"" 2>/dev/null; do
   waited=$((waited + 1))
   if [ "$waited" -ge "$WAIT" ]; then
     report fail "no TCP listener at $CONNECT:443 after ${WAIT}s" "ALCOVE_RELAY_VERIFY_WAIT to allow longer"
@@ -153,14 +162,14 @@ certificate_report() {
   fi
 }
 
-if ! HS="$(echo | timeout 20 openssl s_client -connect "$CONNECT:443" -servername "$REALM" \
+if ! HS="$(echo | bounded 20 openssl s_client -connect "$CONNECT:443" -servername "$REALM" \
   -verify_return_error 2>&1)"; then
   # -verify_return_error ends the handshake on an unverifiable chain before
   # s_client prints the certificate, so an untrusted or self-signed one -- the
   # case the diagnostics below exist for -- is exactly the case they would have
   # nothing to read. Ask a second time without it, for the diagnosis only: the
   # handshake that decides this probe is the verifying one above.
-  UNVERIFIED="$(echo | timeout 20 openssl s_client -connect "$CONNECT:443" -servername "$REALM" 2>&1)" || true
+  UNVERIFIED="$(echo | bounded 20 openssl s_client -connect "$CONNECT:443" -servername "$REALM" 2>&1)" || true
   certificate_report "$UNVERIFIED"
   report fail "TLS handshake on $REALM:443" "$(printf '%s' "$HS" | tr '\n' ' ' | cut -c1-160)"
 else
@@ -251,7 +260,7 @@ uclient() {
   # carries the realm it authenticates against (turnserver.conf's REALM), so
   # swapping this address does not change what realm the exchange below
   # authenticates under.
-  timeout 60 "$RUNTIME" run --rm --network host --entrypoint turnutils_uclient "$IMAGE" \
+  bounded 60 "$RUNTIME" run --rm --network host --entrypoint turnutils_uclient "$IMAGE" \
     -t -S -p 443 -u "$user" -w "$cred" -e "$peer" -n 2 -c -v "$CONNECT" 2>&1
 }
 
@@ -363,7 +372,7 @@ registrar_status() {
       printf 'header = "Content-Type: application/json"\n'
       printf 'data = "%s"\n' "${body//\"/\\\"}"
     fi
-  } | timeout 150 curl -sS -K - --connect-to "$REALM:$REGISTRAR_PORT:$CONNECT:$REGISTRAR_PORT" \
+  } | bounded 150 curl -sS -K - --connect-to "$REALM:$REGISTRAR_PORT:$CONNECT:$REGISTRAR_PORT" \
     -o /dev/null -w '%{http_code}' 2>/dev/null
 }
 # 0 when the mapping points the id at this run's key and the table lists it, 3

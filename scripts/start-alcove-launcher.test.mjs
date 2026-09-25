@@ -556,6 +556,13 @@ describe("the account the container runs as", () => {
     // Root is more than the string `0`: an engine reads `00` as uid 0 just as
     // readily, and the group is its own case, a container given group 0 writing
     // to that group whatever account it ran as.
+    //
+    // One workspace serves every case: macOS takes about 200ms over the first
+    // run of a newly written executable, so fresh stubs per case run the test
+    // past its timeout there.
+    const workspace = makeWorkspace();
+    stubUname(workspace, "Linux");
+    stubId(workspace, 0, 0);
     for (const environment of [
       {},
       { SUDO_UID: "", SUDO_GID: "" },
@@ -570,10 +577,6 @@ describe("the account the container runs as", () => {
       { SUDO_UID: "1000", SUDO_GID: "0" },
       { SUDO_UID: "1000", SUDO_GID: "00" },
     ]) {
-      const workspace = makeWorkspace();
-      stubUname(workspace, "Linux");
-      stubId(workspace, 0, 0);
-
       const args = consoleArguments(
         workspace,
         { ALCOVE_DATA_ROOT: "/home/dana/alcove-work" },
