@@ -259,6 +259,11 @@ export async function decodeTermsUpdate(
   const parts = encoded.split(".");
   if (parts.length !== 2)
     throw refusedFormat("it does not have the form BODY.MAC");
+  if (encoded.includes("="))
+    throw refusedFormat(
+      'it holds "=" padding, which a terms update never has; paste the ' +
+        "update exactly as your partner sent it",
+    );
   let body: Uint8Array<ArrayBuffer>;
   let mac: Uint8Array<ArrayBuffer>;
   try {
