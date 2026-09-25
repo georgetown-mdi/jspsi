@@ -145,6 +145,8 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
       return `Last run stopped before connecting (${at}); settle the terms or use a covering file`;
     case "consent":
       return `Last run stopped before sending (${at}); settle what it sends`;
+    case "too-large":
+      return `Last run stopped: a file is too large for a browser exchange (${at}); split the input`;
     case "handed-off":
       // The row already names the hand-off and its date beside this line, so the
       // status says what the run did rather than repeating the state.

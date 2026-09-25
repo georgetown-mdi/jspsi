@@ -125,9 +125,9 @@ export function storageFailureRun(at: number): ManagedExchangeLastRun {
 /** Record a non-succeeded run with the given outcome and failure kind. Used for
  * the failure paths the runner classifies (an `auth`/`security` handshake
  * failure, a `transport` drop, a benign `input` problem, a `terms-shortfall`
- * refusal, a `consent` refusal, a `cancelled` run); the critical section itself
- * decides `succeededRun`, `storageFailureRun`, and the `handed-off` and
- * `custody-unreadable` stamps `refuseHandedOffCopy` writes
+ * refusal, a `consent` refusal, a `too-large` refusal, a `cancelled` run); the
+ * critical section itself decides `succeededRun`, `storageFailureRun`, and the
+ * `handed-off` and `custody-unreadable` stamps `refuseHandedOffCopy` writes
  * ({@link ./managedExchangeRun.ts}). */
 export function failedRun(
   at: number,

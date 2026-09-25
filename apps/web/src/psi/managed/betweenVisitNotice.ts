@@ -2,7 +2,7 @@
  * What the installed app runtime tells the operator between visits, derived from
  * the run bookkeeping the next visit's surfaces read: the window's disposition,
  * the record's `lastRun` and `consecutiveMisses`, the local backup marker, and the
- * failure tier those resolve to. Six moments earn a notification and everything
+ * failure tier those resolve to. Seven moments earn a notification and everything
  * else stays quiet (docs/MANAGED_EXCHANGE.md, "The between-visit notification").
  *
  * Pure, and a reader only: it writes nothing, keeps no status of its own, and can
@@ -13,9 +13,9 @@
  * fires. A tag naming one occurrence -- a run that just finished, a window that
  * just passed -- differs at every occurrence, so each fires once; a tag naming a
  * STANDING state -- repeated misses, an input the runs cannot use, a refused
- * disclosure, an unverified partner, an answer that holds the schedule -- is the
- * same string while that state stands, so the second window that meets it says
- * nothing further
+ * disclosure, a set too large to send, an unverified partner, an answer that
+ * holds the schedule -- is the same string while that state stands, so the
+ * second window that meets it says nothing further
  * ({@link ./managedScheduleRuntime.ts} holds the comparison).
  */
 
@@ -31,7 +31,10 @@ import {
   REPEATED_MISS_TITLE,
   SINGLE_COLUMN_DELIMITER_REMEDY,
   TERMS_SHORTFALL_FAILURE_TITLE,
+  TOO_LARGE_FAILURE_TITLE,
+  TOO_LARGE_REMEDY,
   UNEXPLAINED_FAILURE_TITLE,
+  WEBRTC_MESSAGE_BOUND_LABEL,
   repeatedMissCoordination,
 } from "./managedFailureCopy";
 
@@ -49,6 +52,7 @@ export type BetweenVisitNoticeKind =
   | "input"
   | "terms-shortfall"
   | "consent"
+  | "too-large"
   | "unexplained";
 
 /** One OS notification: what happened, what to do about it, and the tag that
@@ -84,7 +88,7 @@ export interface BetweenVisitNoticeInput {
   now: number;
 }
 
-/** The title over each moment. The four failure titles are the same constants
+/** The title over each moment. The five failure titles are the same constants
  * the next visit's own alert holds its title to
  * ({@link ../../recurring/managedRunLaunchModel.ts}), which
  * betweenVisitNotice.test.ts holds this surface's titles equal to; the
@@ -100,6 +104,7 @@ const NOTICE_TITLES: Record<
   input: INPUT_FAILURE_TITLE,
   "terms-shortfall": TERMS_SHORTFALL_FAILURE_TITLE,
   consent: CONSENT_FAILURE_TITLE,
+  "too-large": TOO_LARGE_FAILURE_TITLE,
   unexplained: UNEXPLAINED_FAILURE_TITLE,
 };
 
@@ -109,6 +114,7 @@ const NOTIFIED_FAILURE_TIERS: ReadonlySet<ManagedFailureTier> = new Set([
   "input",
   "terms-shortfall",
   "consent",
+  "too-large",
   "unexplained",
 ]);
 
@@ -238,6 +244,16 @@ function failureNotice(
         `columns match what was agreed, or set the exchange up again with your ` +
         `partner.`,
       tag: noticeTag(record.id, "consent"),
+    };
+  if (tier === "too-large")
+    return {
+      kind: "too-large",
+      title: NOTICE_TITLES["too-large"],
+      body:
+        `${name} stopped because a set of values it had to send was over the ` +
+        `${WEBRTC_MESSAGE_BOUND_LABEL} one WebRTC message can hold, and every ` +
+        `later window stops the same way. ${TOO_LARGE_REMEDY}`,
+      tag: noticeTag(record.id, "too-large"),
     };
   return {
     kind: "unexplained",

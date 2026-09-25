@@ -225,7 +225,9 @@ export type ManagedExchangeRunOutcome =
  * `"custody-unreadable"` refusal (the sibling entry recording whether the copy
  * was handed off did not read, so the run does not rotate on custody it could
  * not establish) -- are detected before any connection and never routed through
- * desync/attack framing. */
+ * desync/attack framing. A `"too-large"` refusal (a set this run had to send
+ * was over the bound one WebRTC message holds) is benign the same way, but a
+ * round past the first can meet it after data has moved. */
 export type ManagedExchangeFailureKind =
   | "auth"
   | "transport"
@@ -235,6 +237,7 @@ export type ManagedExchangeFailureKind =
   | "terms-shortfall"
   | "consent"
   | "handed-off"
+  | "too-large"
   | "cancelled";
 
 /** Run bookkeeping the backup state and the desync UX read. Every field is a
@@ -450,6 +453,7 @@ export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
       "terms-shortfall",
       "consent",
       "handed-off",
+      "too-large",
       "cancelled",
     ])
     .optional(),

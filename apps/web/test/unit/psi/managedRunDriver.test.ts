@@ -4,6 +4,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   ConnectionError,
+  WebRtcFrameLimitError,
+  assertFirstRoundFitsWebRtcFrame,
   describeResolvedRunShape,
   exchangeRecordFromFailure,
   exchangeRecordOwedButUnbuilt,
@@ -32,6 +34,10 @@ import {
   PartnerNoShowError,
   waitForIncomingConnection,
 } from "../../../src/psi/transport/waitForConnection.js";
+import {
+  classifyManagedRunFailure,
+  managedRunRetryable,
+} from "../../../src/recurring/managedRunLaunchModel.js";
 import { appendDisclosureRecordToStore } from "../../../src/psi/disclosureAccountingStore.js";
 import { authenticateExchange } from "../../../src/psi/authenticateExchange.js";
 import { beginManagedRendezvous } from "../../../src/psi/managed/managedRendezvous.js";
@@ -79,7 +85,10 @@ const OUTPUTS: RunOutputs = vi.hoisted(() => ({
   resultsUrl: "blob:results",
 }));
 
-vi.mock("../../../src/psi/managed/managedRun.js", () => ({
+// The rest of the module stays real: the launch surface's classification reads
+// its benign-outcome check.
+vi.mock("../../../src/psi/managed/managedRun.js", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   runManagedRerun: vi.fn(
     async (
       _record: unknown,
@@ -148,6 +157,9 @@ vi.mock("@alcove/core", async (importOriginal) => {
   );
   return {
     ...actual,
+    assertFirstRoundFitsWebRtcFrame: vi.fn(
+      actual.assertFirstRoundFitsWebRtcFrame,
+    ),
     loadPsiBackend: vi.fn(() =>
       Promise.resolve({
         library: {} as PSILibrary,
@@ -693,6 +705,86 @@ describe("runManagedExchangeInBrowser", () => {
       expect(onWarning).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("a set too large for one WebRTC message", () => {
+  // A scheduled run meets this refusal with nobody watching, so it reaches the
+  // classifier as the same error, and the state it lands on names splitting
+  // the input rather than a retry that sends the same set again.
+  const FIRST_ROUND_REFUSAL = new WebRtcFrameLimitError(
+    "This input is too large for a WebRTC exchange: the first linkage key " +
+      "gives this party at least 9000000 values to send. Nothing was sent.",
+    "local",
+  );
+  const ROUND_REFUSAL = new WebRtcFrameLimitError(
+    "The reply to your partner's set for this linkage key is 300.1 MiB, " +
+      "over the 256 MiB one WebRTC message can hold. Ask your partner to " +
+      "split their input.",
+    "partner",
+  );
+
+  /** The state the run surface shows for `rejection`, classified the way the
+   * launch surface does against a record this run stamped. */
+  function shownFor(rejection: unknown, dataExchangeStarted: boolean) {
+    const stamped = {
+      ...RECORD,
+      lastRun: {
+        at: "2026-07-14T09:00:00.000Z",
+        outcome: "failed" as const,
+        failureKind: "too-large" as const,
+      },
+    };
+    return classifyManagedRunFailure(
+      rejection,
+      { atLaunch: RECORD, afterRun: stamped },
+      undefined,
+      Date.parse("2026-07-14T12:00:00.000Z"),
+      dataExchangeStarted,
+    );
+  }
+
+  test("the first-round refusal stops the run before any connection", async () => {
+    vi.mocked(assertFirstRoundFitsWebRtcFrame).mockImplementationOnce(() => {
+      throw FIRST_ROUND_REFUSAL;
+    });
+    acquireResources();
+
+    const rejection = await runDriver(new AbortController().signal).catch(
+      (error: unknown) => error,
+    );
+
+    expect(rejection).toBe(FIRST_ROUND_REFUSAL);
+    expect(mockedRendezvous).not.toHaveBeenCalled();
+    const shown = shownFor(rejection, false);
+    if (shown.kind === "handed-off") throw new Error("expected an alert");
+    expect([shown.kind, shown.title, shown.message]).toEqual([
+      "too-large",
+      "Your file is too large for a browser exchange",
+      FIRST_ROUND_REFUSAL.message,
+    ]);
+    expect(managedRunRetryable(shown)).toBe(false);
+  });
+
+  test("a round's refusal reaches the classifier unchanged", async () => {
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockRejectedValueOnce(ROUND_REFUSAL);
+
+    const rejection = await runDriver(new AbortController().signal).catch(
+      (error: unknown) => error,
+    );
+
+    expect(rejection).toBe(ROUND_REFUSAL);
+    const shown = shownFor(rejection, true);
+    if (shown.kind === "handed-off") throw new Error("expected an alert");
+    expect([shown.kind, shown.title, shown.message]).toEqual([
+      "too-large",
+      "Your partner's file is too large for a browser exchange",
+      ROUND_REFUSAL.message,
+    ]);
+    expect(managedRunRetryable(shown)).toBe(false);
+  });
 });
 
 describe("the peer-wait bound", () => {

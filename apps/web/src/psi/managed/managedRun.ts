@@ -22,6 +22,7 @@ import {
   InternalConsistencyError,
   LinkageTermsUnsatisfiableError,
   OutboundDisclosureRefusalError,
+  WebRtcFrameLimitError,
 } from "@alcove/core";
 
 import { PartnerNoShowError } from "../transport/waitForConnection";
@@ -246,7 +247,8 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
  * cap safety check also raises it mid-data-exchange, coinciding with a bound
  * lapsing during a long run as readily as with a real expiry, and re-mapping it
  * would report a defect in Alcove as a benign expiry that a fresh invitation
- * cannot fix.
+ * cannot fix. {@link WebRtcFrameLimitError} is excluded the same way: it holds
+ * the tag too, and a fresh invitation leaves the set it refused as large.
  */
 export function remapLapsedRunFailure(
   error: unknown,
@@ -254,6 +256,7 @@ export function remapLapsedRunFailure(
   now: number,
 ): ManagedExchangeExpiredError | undefined {
   if (error instanceof InternalConsistencyError) return undefined;
+  if (error instanceof WebRtcFrameLimitError) return undefined;
   if (!hasRecoveryHint(error)) return undefined;
   if (!managedExchangeLapsed(record, now)) return undefined;
   // expires is defined here: managedExchangeLapsed returns true only when it is
@@ -281,7 +284,10 @@ export function remapLapsedRunFailure(
  * since both are deterministic local states an abort cannot produce:
  * {@link OutboundDisclosureRefusalError} before the data exchange began
  * records `consent`; {@link PartnerNoShowError} before the data exchange began
- * records the benign `missed` outcome ({@link missedRun}). `aborted` then
+ * records the benign `missed` outcome ({@link missedRun}). A
+ * {@link WebRtcFrameLimitError} records `too-large` on either side of the data
+ * exchange boundary: a round past the first refuses after data has moved, and
+ * the same files refuse identically at every window. `aborted` then
  * records `cancelled`. A `security`-kind {@link ConnectionError} before the
  * data exchange began records `auth`. Everything else -- including any of
  * these once the data exchange began -- records `transport`.
@@ -312,6 +318,8 @@ export function rerunFailureLastRun(
     return failedRun(at, "failed", "consent");
   if (error instanceof PartnerNoShowError && !dataExchangeStarted)
     return missedRun(at);
+  if (error instanceof WebRtcFrameLimitError)
+    return failedRun(at, "failed", "too-large");
   if (aborted) return failedRun(at, "failed", "cancelled");
   if (
     error instanceof ConnectionError &&
@@ -324,7 +332,8 @@ export function rerunFailureLastRun(
 
 /** The benign outcomes a surface classifies without attack framing. The first
  * six are read before any connection is attempted; `"missed"` is read after a
- * connection attempt found no partner. */
+ * connection attempt found no partner, and `"too-large"` before connecting or
+ * at any round. */
 type BenignRerunOutcome =
   | "expired"
   | "handed-off"
@@ -332,7 +341,8 @@ type BenignRerunOutcome =
   | "input"
   | "terms-shortfall"
   | "already-running"
-  | "missed";
+  | "missed"
+  | "too-large";
 
 /** Classify a launch failure into the benign outcome it holds, or `undefined`
  * for a failure that is not one of these states (a handshake failure, a storage
@@ -368,7 +378,8 @@ type BenignRerunOutcome =
  * `"custody-unreadable"` are guarded here alone, since the critical section
  * always writes their stamp before any connection. A failure delivered past the
  * boundary is not a benign outcome here and falls through to the caller's
- * generic transport path.
+ * generic transport path. `"too-large"` is ungated: its copy states no
+ * non-disclosure, and the refusal's own message says what was sent.
  *
  * This guard classifies off THIS run's live error. A surface classifying off
  * the record's stored bookkeeping instead ({@link ./managedFailureTiers.ts})
@@ -395,6 +406,7 @@ export function benignRerunOutcome(
     return "already-running";
   if (error instanceof PartnerNoShowError && !dataExchangeStarted)
     return "missed";
+  if (error instanceof WebRtcFrameLimitError) return "too-large";
   return undefined;
 }
 
