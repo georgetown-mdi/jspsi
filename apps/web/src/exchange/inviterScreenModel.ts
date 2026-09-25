@@ -471,18 +471,21 @@ export function inviterScreenReducer(
   return withColumnsReadByCurrentDelimiter(applyAction(state, action));
 }
 
-/** Whether the console holds a committed file whose columns were profiled by a
- * delimiter other than the one the current choice resolves to. A refused choice
- * resolves to none, and the file step's own gate is closed on it meanwhile. */
-function consoleColumnsStale(state: InviterScreenState): boolean {
-  if (state.consoleSource === undefined) return false;
+/** Why a committed console file's columns no longer apply, or undefined while
+ * they do: they apply only while the current delimiter choice resolves and
+ * equals the delimiter the file was read by. */
+function consoleColumnsStaleAlert(
+  state: InviterScreenState,
+): AlertContent | undefined {
+  if (state.consoleSource === undefined) return undefined;
   const resolution = resolveCsvDelimiter(state.delimiterChoice);
-  return resolution.ok && resolution.delimiter !== state.consoleSourceDelimiter;
-}
-
-/** What the file step states after the columns it read were dropped: the
- * delimiter changed while the operator was past that step. */
-function staleColumnsAlert(): AlertContent {
+  if (!resolution.ok)
+    return {
+      title: "Set a valid field delimiter",
+      message:
+        "The field delimiter setting is not valid, so your file's columns cannot be read by it. Fix the delimiter, then choose the file again.",
+    };
+  if (resolution.delimiter === state.consoleSourceDelimiter) return undefined;
   return {
     title: "Choose your file again",
     message:
@@ -491,15 +494,17 @@ function staleColumnsAlert(): AlertContent {
 }
 
 // On the file step the server file picker re-profiles the file on screen when
-// the delimiter moves and voids the commit itself. Past it no picker is
-// mounted, so columns read by another delimiter are dropped here and the
-// operator is returned to that step. A sealed draft is an invitation already
-// minted over its columns, which the seal's own guards keep in step.
+// the delimiter moves, voids the commit itself, and holds its gate closed on a
+// delimiter that does not resolve. Past it no picker is mounted, so columns
+// that no longer apply are dropped here and the operator is returned to that
+// step. A sealed draft is an invitation already minted over its columns, which
+// the seal's own guards keep in step.
 function withColumnsReadByCurrentDelimiter(
   state: InviterScreenState,
 ): InviterScreenState {
   if (state.section === "file" || state.editor?.sealed === true) return state;
-  if (!consoleColumnsStale(state)) return state;
+  const alert = consoleColumnsStaleAlert(state);
+  if (alert === undefined) return state;
   return {
     ...state,
     ...NO_FILE,
@@ -507,7 +512,7 @@ function withColumnsReadByCurrentDelimiter(
     lastSpineStep: "file",
     sanitizedNotice: undefined,
     savedExchange: undefined,
-    intakeAlert: staleColumnsAlert(),
+    intakeAlert: alert,
   };
 }
 
@@ -849,7 +854,12 @@ function applyAction(
           maxAgeEnabled: RECEIPTS_DEFAULT.maxAgeEnabled,
           maxAgeDays: RECEIPTS_DEFAULT.maxAgeDays,
         },
-        delimiterChoice: INITIAL_CSV_DELIMITER_CHOICE,
+        // A committed file was read by the operator's own delimiter, not the
+        // configuration's, so closing the configuration keeps it.
+        delimiterChoice:
+          state.consoleSource === undefined
+            ? INITIAL_CSV_DELIMITER_CHOICE
+            : state.delimiterChoice,
         ...(action.editor !== undefined ? { editor: action.editor } : {}),
         editorAnnouncement:
           "Closed the configuration. These terms come from your own file's columns.",

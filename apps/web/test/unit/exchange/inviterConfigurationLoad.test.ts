@@ -1350,11 +1350,55 @@ describe("a delimiter a late read lands under a committed file", () => {
     expect(landed.acquired?.columns).toEqual(COLUMNS);
   });
 
+  test("a delimiter that does not resolve drops the columns with its own alert", () => {
+    const landed = loadedInto(
+      advancedWhileReading("columns"),
+      sftpDocument({ csvDelimiter: "ab" }),
+    );
+    expect(resolveCsvDelimiter(landed.delimiterChoice).ok).toBe(false);
+    expect(landed.section).toBe("file");
+    expect(landed.consoleSource).toBeUndefined();
+    expect(landed.acquired).toBeUndefined();
+    expect(landed.intakeAlert?.title).toBe("Set a valid field delimiter");
+  });
+
   test("on the file step the commit is left to the file picker", () => {
     const committed = withFileCommitted(INVITER_SCREEN_INITIAL, acquired());
     const landed = loadedInto(committed, sftpDocument({ csvDelimiter: "|" }));
     expect(landed.section).toBe("file");
     expect(landed.consoleSource).toBe(committed.consoleSource);
+  });
+});
+
+// A file the operator committed was read by their own delimiter choice, which
+// closing the configuration it came from does not take back.
+describe("closing the configuration under a committed file", () => {
+  test("keeps the file, its step and the delimiter it was read by", () => {
+    const opened = loadedInto(
+      INVITER_SCREEN_INITIAL,
+      sftpDocument({ csvDelimiter: "|" }),
+    );
+    const advanced = inviterScreenReducer(withFileRead(opened), {
+      type: "section-shown",
+      section: "columns",
+    });
+    const closed = inviterScreenReducer(advanced, {
+      type: "loaded-configuration-discarded",
+    });
+    expect(closed.section).toBe("columns");
+    expect(closed.consoleSource).toBe(advanced.consoleSource);
+    expect(closed.acquired?.columns).toEqual(COLUMNS);
+    expect(closed.intakeAlert).toBeUndefined();
+    const resolved = resolveCsvDelimiter(closed.delimiterChoice);
+    expect(resolved.ok && resolved.delimiter).toBe("|");
+  });
+
+  test("with no file committed returns the delimiter to the default", () => {
+    const closed = inviterScreenReducer(
+      loadedInto(INVITER_SCREEN_INITIAL, sftpDocument({ csvDelimiter: "|" })),
+      { type: "loaded-configuration-discarded" },
+    );
+    expect(closed.delimiterChoice).toEqual(INITIAL_CSV_DELIMITER_CHOICE);
   });
 });
 
