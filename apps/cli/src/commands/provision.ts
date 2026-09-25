@@ -166,14 +166,14 @@ const REUSED_CONFIG_REMOVED_REMEDY =
  * with no matching config. `options.refreshReusedConfig` then runs, and the
  * key is written only once it returns.
  *
- * Both writers are atomic (temp file + rename; see
- * docs/spec/CREDENTIAL_STORAGE.md#posix-write-discipline) and clean up their
- * own temp file on failure. The config is written first, so a key-write
- * failure leaves it behind; this removes it before the error propagates,
- * except when reusing an existing config, which is the user's file. A failed
- * removal leaves the config on disk and marks the propagating error
- * ({@link provisionLeftConfigOnDisk}). The key path itself is never deleted
- * on failure, since saveKeyFile writes nothing there to remove. Parent
+ * Both writers link a temp file onto the target, which refuses an existing
+ * one (see docs/spec/CREDENTIAL_STORAGE.md#posix-write-discipline), and
+ * clean up their own temp file on failure. The config is written first, so a
+ * key-write failure leaves it behind; this removes it before the error
+ * propagates, except when reusing an existing config, which is the user's
+ * file. A failed removal leaves the config on disk and marks the propagating
+ * error ({@link provisionLeftConfigOnDisk}). The key path itself is never
+ * deleted on failure, since saveKeyFile writes nothing there to remove. Parent
  * directories created for a nested target path are left in place.
  *
  * @returns the resolved paths (the key always written; the config only when
