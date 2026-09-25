@@ -1447,6 +1447,16 @@ describe("taking a command-line hand-off back", () => {
     return record;
   }
 
+  /** What the command-line pair of `record` reads as once its key file holds
+   * `key`: the same terms and side, and the key file's secret. */
+  function pairHolding(
+    record: RunnableManagedExchangeRecord,
+    key: { sharedSecret: string; expires?: string },
+  ): RunnableManagedExchangeRecord {
+    const { expires: _expires, ...rest } = record;
+    return { ...rest, ...key };
+  }
+
   test("a re-take with no key file makes the record live, leaving the secret alone", async () => {
     // The operator attests that no command-line run has happened, so nothing is read
     // in and the backup taken before the hand-off still holds the stored secret.
@@ -1476,7 +1486,7 @@ describe("taking a command-line hand-off back", () => {
     const outcome = await retakeHandedOffManagedExchange(
       record.id,
       retakenAt,
-      key,
+      pairHolding(record, key),
     );
 
     const stored = await getManagedExchange(record.id);
@@ -1571,6 +1581,39 @@ describe("taking a command-line hand-off back", () => {
     expect(await getManagedLocalState(record.id)).toBeUndefined();
   });
 
+  test("a pair on other terms or the other side is refused, writing nothing", async () => {
+    // The key file names no exchange, so the alcove.yaml beside it is what the
+    // store step checks against the handed-off record before any write.
+    const record = await handedOff();
+    const localBefore = await getManagedLocalState(record.id);
+    const rotated = pairHolding(record, {
+      sharedSecret: generateSharedSecret(),
+    });
+
+    for (const [pair, on] of [
+      [{ ...rotated, side: "acceptor" }, "side"],
+      [
+        {
+          ...rotated,
+          exchangeFile: composeManagedExchangeFile({
+            connection: webrtcLocator,
+            linkageTerms: {
+              ...linkageTerms,
+              linkageKeys: linkageTerms.linkageKeys.slice(1),
+            },
+          }),
+        },
+        "terms",
+      ],
+    ] as const) {
+      expect(
+        await retakeHandedOffManagedExchange(record.id, retakenAt, pair),
+      ).toEqual({ kind: "mismatch", on });
+      expect(await getManagedExchange(record.id)).toEqual(record);
+      expect(await getManagedLocalState(record.id)).toEqual(localBefore);
+    }
+  });
+
   test("the refusal a run recorded against the hand-off is dropped", async () => {
     // A run that came due while the copy was handed off refused and recorded it.
     // The take-back ends the state that entry describes, so leaving it stored
@@ -1614,9 +1657,11 @@ describe("taking a command-line hand-off back", () => {
     // imported tier's re-invite rather than the attack checklist.
     const record = await handedOff();
 
-    await retakeHandedOffManagedExchange(record.id, retakenAt, {
-      sharedSecret: generateSharedSecret(),
-    });
+    await retakeHandedOffManagedExchange(
+      record.id,
+      retakenAt,
+      pairHolding(record, { sharedSecret: generateSharedSecret() }),
+    );
     await recordManagedExchangeLastRun(
       record.id,
       failedRun(Date.now(), "failed", "auth"),
@@ -1662,9 +1707,11 @@ describe("taking a command-line hand-off back", () => {
     const record = await handedOff();
 
     await expect(
-      retakeHandedOffManagedExchange(record.id, retakenAt, {
-        sharedSecret: "not-a-shared-secret",
-      }),
+      retakeHandedOffManagedExchange(
+        record.id,
+        retakenAt,
+        pairHolding(record, { sharedSecret: "not-a-shared-secret" }),
+      ),
     ).rejects.toThrow();
 
     expect(await getManagedExchange(record.id)).toEqual(record);

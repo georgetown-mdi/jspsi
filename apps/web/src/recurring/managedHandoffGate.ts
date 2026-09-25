@@ -190,7 +190,7 @@ const HANDED_OFF_PAIR_IMPORT_REASON: Record<
     `${named} is still here, handed off to the command line, and these are ` +
     "the files it runs from there, so nothing was imported. To run it in " +
     'this browser again, open it from the list, choose "Take this exchange ' +
-    'back", and choose this .alcove.key there.',
+    'back", and choose this alcove.yaml and .alcove.key there.',
 };
 
 /** {@link handedOffImportReason} for a command-line pair's import. */

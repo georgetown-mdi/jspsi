@@ -15,7 +15,8 @@
  * - A command-line `alcove.yaml` WITH the `.alcove.key` beside it installs a
  *   runnable record ({@link importManagedCommandLinePair}), reconciled against
  *   the store on the backup leg's own rule: the same secret is the same
- *   exchange.
+ *   exchange. Where no secret matches, a stored record with its agreed terms
+ *   and side is offered to take the pair instead.
  *
  * What follows is the backup leg: a take-over that installs the artifact as the
  * one owner on this device (see docs/MANAGED_EXCHANGE.md, "Eviction recovery is the
@@ -95,19 +96,27 @@ import {
 import {
   createManagedExchange,
   reconcileManagedCommandLinePair,
+  retakeHandedOffManagedExchange,
   reviveSpentManagedExchange,
 } from "./managedExchangeStore";
 import {
   markManagedExchangeImported,
   markManagedExchangeKeyImported,
 } from "./managedLocalState";
+import { raisedStandingCondition } from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeRecord,
+  NewManagedExchange,
   RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import type {
+  ManagedPairImportOptions,
+  ManagedStoredCopy,
+} from "./managedPairRecognition";
+import type {
   ManagedPairReconcileOutcome,
+  ManagedRetakeOutcome,
   ManagedReviveOptions,
   ManagedReviveOutcome,
 } from "./managedExchangeStore";
@@ -234,23 +243,37 @@ export interface ManagedImportDeps {
   now: () => Date;
 }
 
+/**
+ * The fields a fresh install creates its record from: everything `record`
+ * holds but its `id`, which the install assigns anew, and the platform
+ * grants, which a file cannot bring. The run bookkeeping and a raised
+ * standing condition are kept, so an install on a new profile clears neither.
+ */
+export function managedInstallFields(
+  record: ManagedExchangeRecord,
+): NewManagedExchange {
+  const standingCondition = raisedStandingCondition(record);
+  return {
+    label: record.label,
+    exchangeFile: record.exchangeFile,
+    side: record.side,
+    sharedSecret: record.sharedSecret,
+    ...(record.expires !== undefined ? { expires: record.expires } : {}),
+    ...(record.tokenMaxAgeDays !== undefined
+      ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
+      : {}),
+    ...(record.schedule !== undefined ? { schedule: record.schedule } : {}),
+    ...(record.lastRun !== undefined ? { lastRun: record.lastRun } : {}),
+    ...(standingCondition !== undefined ? { standingCondition } : {}),
+  };
+}
+
 /** The default boundaries: revive or install through the store, mark through the sibling
  * store, and read the wall clock. */
 const defaultDeps: ManagedImportDeps = {
   reviveSpent: reviveSpentManagedExchange,
   install: async (record) =>
-    createManagedExchange({
-      label: record.label,
-      exchangeFile: record.exchangeFile,
-      side: record.side,
-      sharedSecret: record.sharedSecret,
-      ...(record.expires !== undefined ? { expires: record.expires } : {}),
-      ...(record.tokenMaxAgeDays !== undefined
-        ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
-        : {}),
-      ...(record.schedule !== undefined ? { schedule: record.schedule } : {}),
-      ...(record.lastRun !== undefined ? { lastRun: record.lastRun } : {}),
-    }),
+    createManagedExchange(managedInstallFields(record)),
   markImported: markManagedExchangeImported,
   now: () => new Date(),
 };
@@ -489,15 +512,84 @@ async function installConfiguration(
   return { record, missingGrants: [] };
 }
 
+/**
+ * Raised when a pair import stops to ask: no stored record holds the key
+ * file's secret, but one or more that a pair can land in -- handed off to the
+ * command line, moved to another device, or holding a configuration only --
+ * have its agreed terms and side, so one may be its exchange. Nothing is
+ * written. The operator's answer comes back as `into` (take the pair into
+ * one of `copies`) or `besideIds` (install it as a new record beside them).
+ */
+export class ManagedImportStoredCopyError extends Error {
+  /** The stored records the pair may belong to, each with its label (empty
+   * when the operator named nothing) and why it can take the pair. */
+  readonly copies: ReadonlyArray<ManagedStoredCopy>;
+
+  constructor(copies: ReadonlyArray<ManagedStoredCopy>) {
+    super(
+      "a stored managed exchange with these files' terms and side may be theirs, so the import waits for confirmation",
+    );
+    this.name = "ManagedImportStoredCopyError";
+    this.copies = copies;
+  }
+}
+
+/**
+ * Raised when a pair import is refused because the record spent by the device
+ * migration that holds the key file's secret is the other side of it: the
+ * partner's files hold the same secret with the other side. Nothing is
+ * written. Holds that record's label (which may be empty).
+ */
+export class ManagedImportSideMismatchError extends Error {
+  /** The stored record's operator label; empty when the operator named nothing. */
+  readonly label: string;
+
+  constructor(label: string) {
+    super(
+      "these files hold a stored managed exchange's secret for the other side, so importing them is refused",
+    );
+    this.name = "ManagedImportSideMismatchError";
+    this.label = label;
+  }
+}
+
+/**
+ * Raised when the stored record the operator chose to take a pair into can no
+ * longer take it: it runs right now (`reason: "run-in-flight"`), or it was
+ * deleted, taken back, or changed since they chose (`reason: "changed"`).
+ * Nothing is written.
+ */
+export class ManagedImportChosenCopyError extends Error {
+  readonly reason: "run-in-flight" | "changed";
+
+  constructor(reason: "run-in-flight" | "changed") {
+    super(
+      reason === "run-in-flight"
+        ? "the chosen managed exchange is running, so the files were not taken into it"
+        : "the chosen managed exchange changed since it was chosen, so the files were not taken into it",
+    );
+    this.name = "ManagedImportChosenCopyError";
+    this.reason = reason;
+  }
+}
+
 /** The platform boundaries a command-line pair import drives, injected so the
  * flow is testable. */
 export interface ManagedPairImportDeps {
-  /** Reconcile the pair's record against the store on the backup import's
-   * rule ({@link reconcileManagedCommandLinePair}). */
+  /** Reconcile the pair's record against the store
+   * ({@link reconcileManagedCommandLinePair}). */
   reconcile: (
     imported: RunnableManagedExchangeRecord,
     at: string,
+    options?: ManagedPairImportOptions,
   ) => Promise<ManagedPairReconcileOutcome>;
+  /** Take the pair into a command-line hand-off the operator chose
+   * ({@link retakeHandedOffManagedExchange}). */
+  retake: (
+    id: string,
+    at: string,
+    taken?: RunnableManagedExchangeRecord,
+  ) => Promise<ManagedRetakeOutcome>;
   /** Install the pair's record as a new managed exchange. */
   install: (record: ManagedExchangeRecord) => Promise<ManagedExchangeRecord>;
   /** Stamp the installed record's import marker as of `at`, and no backup
@@ -511,6 +603,7 @@ export interface ManagedPairImportDeps {
  * through the sibling store, and read the wall clock. */
 const defaultPairDeps: ManagedPairImportDeps = {
   reconcile: reconcileManagedCommandLinePair,
+  retake: retakeHandedOffManagedExchange,
   install: defaultDeps.install,
   markImported: markManagedExchangeKeyImported,
   now: () => new Date(),
@@ -524,10 +617,18 @@ const defaultPairDeps: ManagedPairImportDeps = {
  * stored record holding the same secret is the same exchange -- and:
  *
  * - a migration-spent match is revived in place, the pair's fields laid over
- *   it and its import marker stamped, in the reconciliation's transaction;
+ *   it and its import marker stamped, in the reconciliation's transaction; one
+ *   on the other side refuses ({@link ManagedImportSideMismatchError});
  * - a match handed off from this browser, or whose sibling state cannot be
  *   read, refuses with the backup import's own errors;
  * - a live match refuses ({@link ManagedImportAlreadyHeldError});
+ * - with no match, stored records a pair can land in that have its agreed
+ *   terms and side, other than those `options.besideIds` names, stop the
+ *   import to ask ({@link ManagedImportStoredCopyError}). `options.into` takes
+ *   the pair into the one the operator chose: a migration-spent record is
+ *   revived and a configuration-only one completed in place, and a
+ *   command-line hand-off is taken back through its re-take, which checks the
+ *   pair again under the run+rotate lock;
  * - otherwise the record installs fresh and its import marker is stamped,
  *   best-effort after the durable install as on the backup leg. No backup
  *   marker is stamped: the pair is not the app's backup file.
@@ -542,22 +643,41 @@ const defaultPairDeps: ManagedPairImportDeps = {
  * @throws {ManagedConfigurationRefusedError} if the configuration is refused.
  * @throws {ManagedKeyFileRefusedError} if the key file is refused.
  * @throws {ManagedImportHandedOffError},
- *   {@link ManagedImportCustodyUnreadableError}, or
- *   {@link ManagedImportAlreadyHeldError} on a refusing match.
+ *   {@link ManagedImportCustodyUnreadableError},
+ *   {@link ManagedImportAlreadyHeldError}, or
+ *   {@link ManagedImportSideMismatchError} on a refusing match.
+ * @throws {ManagedImportStoredCopyError} if the import stops to ask.
+ * @throws {ManagedImportChosenCopyError} if the record `options.into` names
+ *   can no longer take the pair.
  * @throws {ZodError} if the record, the revive, or the install is invalid.
  */
 export async function importManagedCommandLinePair(
   configurationSource: string,
   keySource: string,
   deps: ManagedPairImportDeps = defaultPairDeps,
+  options: ManagedPairImportOptions = {},
 ): Promise<ManagedImportResult> {
   if (probeImportFile(configurationSource) === "backup")
     throw new ManagedImportBackupNotConfigurationError();
   const imported = readManagedCommandLinePair(configurationSource, keySource);
   const at = deps.now().toISOString();
-  const reconciled = await deps.reconcile(imported, at);
-  if (reconciled.kind === "revived")
+  const reconciled = await deps.reconcile(imported, at, options);
+  if (reconciled.kind === "revived" || reconciled.kind === "completed")
     return { record: reconciled.record, missingGrants: [] };
+  if (reconciled.kind === "retake") {
+    const retaken = await deps.retake(reconciled.id, at, imported);
+    if (retaken.kind === "retaken")
+      return { record: retaken.record, missingGrants: [] };
+    throw new ManagedImportChosenCopyError(
+      retaken.kind === "run-in-flight" ? "run-in-flight" : "changed",
+    );
+  }
+  if (reconciled.kind === "side-mismatch")
+    throw new ManagedImportSideMismatchError(reconciled.label);
+  if (reconciled.kind === "stored-copy")
+    throw new ManagedImportStoredCopyError(reconciled.copies);
+  if (reconciled.kind === "chosen-copy-changed")
+    throw new ManagedImportChosenCopyError("changed");
   if (reconciled.kind === "handed-off")
     throw new ManagedImportHandedOffError(reconciled.handoff, reconciled.label);
   if (reconciled.kind === "custody-unreadable")

@@ -106,13 +106,18 @@ vi.mock("@psi/managed/managedExchangeImport", async (importOriginal) => {
   const realPair = actual.importManagedCommandLinePair as (
     source: string,
     keySource: string,
+    ...rest: Array<unknown>
   ) => Promise<unknown>;
   return {
     ...actual,
     importManagedExchangeFile: (source: string, ...rest: Array<unknown>) =>
       importOverride ? importOverride() : realFile(source, ...rest),
-    importManagedCommandLinePair: (source: string, keySource: string) =>
-      importOverride ? importOverride() : realPair(source, keySource),
+    importManagedCommandLinePair: (
+      source: string,
+      keySource: string,
+      ...rest: Array<unknown>
+    ) =>
+      importOverride ? importOverride() : realPair(source, keySource, ...rest),
   };
 });
 

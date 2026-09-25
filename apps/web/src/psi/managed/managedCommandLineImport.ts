@@ -33,8 +33,10 @@
  *   read for that one policy and dropped.
  *
  * A configuration on any channel imports, and so does one stating a part this
- * app cannot run -- a `signing` block, held unchanged for the file Alcove
- * runs, every `@` in it as the text the file wrote. This app runs webrtc
+ * app cannot run -- a `signing` block asking for a receipt, held unchanged for
+ * the file Alcove runs, every `@` in it as the text the file wrote. A block
+ * whose mode is `none` asks for none and is held the same way on a record
+ * that runs here. This app runs webrtc
  * exchanges without receipt signing, and that limit is met where a run would
  * start rather than here: such a record is a configuration only, which the
  * record's own shape keeps from every run (docs/spec/MANAGED_EXCHANGE_RECORD.md,
@@ -81,7 +83,6 @@ import {
   literalCredentialFields,
   serverFieldsNotHeld,
 } from "./managedCommandLineDocument";
-import { MAX_KEY_FILE_IMPORT_BYTES } from "./managedRetake";
 
 import type { ConnectionConfig, ExchangeSpec } from "@alcove/core";
 import type {
@@ -96,6 +97,11 @@ import type {
  * before the bounded parse. The same cap the backup artifact takes: both are
  * small operator-held documents, and one control reads either. */
 export const MAX_CONFIGURATION_IMPORT_BYTES = 1_000_000;
+
+/** Upper bound, in bytes, on a key file this app will read, applied before the
+ * sensitive parse's own structural bound. The file holds one secret and one
+ * instant, so anything larger is not the file the operator meant to choose. */
+export const MAX_KEY_FILE_IMPORT_BYTES = 10_000;
 
 /** The label a file-name-free import starts the record at. The operator names
  * the exchange in the settings editor; an empty label is what every surface

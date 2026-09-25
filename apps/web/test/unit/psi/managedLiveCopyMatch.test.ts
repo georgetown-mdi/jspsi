@@ -7,7 +7,7 @@ import {
   composeManagedExchangeFile,
 } from "@psi/managed/managedExchangeRecord";
 import {
-  findLiveCopiesByTermsAndSide,
+  findRecordsByTermsAndSide,
   sameAgreedTermsAndSide,
 } from "@psi/managed/managedLiveCopyMatch";
 
@@ -84,20 +84,20 @@ describe("sameAgreedTermsAndSide", () => {
   });
 });
 
-describe("findLiveCopiesByTermsAndSide", () => {
+describe("findRecordsByTermsAndSide", () => {
   test("names every live record the rule matches, in store order", () => {
     const first = record();
     const other = record({ side: "acceptor" });
     const second = record();
 
-    expect(
-      findLiveCopiesByTermsAndSide([first, other, second], record()),
-    ).toEqual([first, second]);
+    expect(findRecordsByTermsAndSide([first, other, second], record())).toEqual(
+      [first, second],
+    );
   });
 
   test("names nothing where the rule matches nothing", () => {
     expect(
-      findLiveCopiesByTermsAndSide([record({ side: "acceptor" })], record()),
+      findRecordsByTermsAndSide([record({ side: "acceptor" })], record()),
     ).toEqual([]);
   });
 
@@ -106,7 +106,7 @@ describe("findLiveCopiesByTermsAndSide", () => {
     const second = record();
 
     expect(
-      findLiveCopiesByTermsAndSide([first, second], record(), [
+      findRecordsByTermsAndSide([first, second], record(), [
         first.id,
         second.id,
       ]),
@@ -118,9 +118,7 @@ describe("findLiveCopiesByTermsAndSide", () => {
     const second = record();
 
     expect(
-      findLiveCopiesByTermsAndSide([confirmed, second], record(), [
-        confirmed.id,
-      ]),
+      findRecordsByTermsAndSide([confirmed, second], record(), [confirmed.id]),
     ).toEqual([second]);
   });
 });

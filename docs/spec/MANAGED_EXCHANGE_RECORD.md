@@ -135,25 +135,34 @@ limit is met where a run would start, not at the import. The surfaces read the
 channel off the document to say which reason applies -- the channel, where it is
 one this app does not run, and the key file otherwise.
 
-**A record whose document states a `signing` block is one.** This app does not
-sign exchange receipts, so a run here would complete without the receipt the
-block asks for. The record schema refuses a `sharedSecret` beside the block on
-the same terms as beside another channel, so the one narrowing withholds the
-run, and an artifact holding both is refused whole rather than installed, under
-the generic newer-version reason, since no artifact this app exports holds
-both; a record such an artifact installed before this rule fails the list read
-and is discarded from the recovery surface. The command-line import holds the
-block unchanged -- every field, an `@` in any of
-its values kept as text and never resolved in the browser -- no editor changes
-it, and the export writes it back as read. The configuration page names the
-block, as the file spells it, as the part this app cannot run, in place of the
-key-file reason on `webrtc` and beside the channel reason on `sftp` and
-`filedrop`, and the list row names it in place of the key-file reason; the
-page's list of settings held without an editor leaves it out, since that reason
-already names it. The parts this app cannot
-run are one list (`DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN`,
+**A record whose document states a `signing` block asking for a receipt is
+one.** This app does not sign exchange receipts, so a run here would complete
+without the receipt a `certificate` or `session-derived` block asks for. The
+record schema refuses a `sharedSecret` beside such a block on the same terms as
+beside another channel, so the one narrowing withholds the run, and an artifact
+holding both is refused whole rather than installed, under the generic
+newer-version reason, since no artifact this app exports holds both; a record
+such an artifact installed before this rule fails the list read and is
+discarded from the recovery surface. The command-line import holds the block
+unchanged -- every field, an `@` in any of its values kept as text and never
+resolved in the browser -- no editor changes it, and the export writes it back
+as read. The configuration page names the block, as the file spells it, as the
+part this app cannot run, in place of the key-file reason on `webrtc` and
+beside the channel reason on `sftp` and `filedrop`, and the list row names it
+in place of the key-file reason on `webrtc` and beside the channel on `sftp`
+and `filedrop`; the page's list of settings held without an editor leaves it
+out, since that reason already names it. The parts this app cannot run are one
+list (`DOCUMENT_PARTS_THIS_APP_DOES_NOT_RUN`, read through
+`documentPartsThisAppDoesNotRun`,
 `apps/web/src/psi/managed/managedExchangeRecord.ts`), which the record schema,
 the import and export allowlist, and the surfaces all read.
+
+**A `signing` block whose mode is `none` is not one.** It asks for no receipt,
+which this app meets by signing nothing, so it takes no part in the narrowing:
+a pair stating it imports runnable, the record holds it beside a secret, and
+both exports -- the command-line configuration and the backup artifact --
+write it back unchanged. It is held as any other setting without an editor,
+and named among them.
 
 **The withheld run is the record's shape, not a flag.** Every path that runs,
 rotates, re-invites, hands off, or backs up an exchange takes the narrowed record
@@ -231,7 +240,7 @@ under the re-take's size cap, applied before the file is read.
   The refusal names each problem in fixed words and states no byte of the file:
   no field value, no field name it did not expect, no parser message.
 - A configuration this app does not run -- on `sftp` or `filedrop`, or stating
-  a `signing` block -- with its key file. The record schema holds a secret only
+  a `signing` block whose mode is not `none` -- with its key file. The record schema holds a secret only
   where this app runs the exchange, and the operator chose the key file to run
   it here, so the pair is refused, naming the reason and the configuration-only
   import as the way to edit it here, rather than installed without the key.
@@ -263,24 +272,43 @@ memory:
   naming the record: those files are what the hand-off saved, and the route
   that brings them back is the [re-take](#taking-a-command-line-hand-off-back)
   on that record's own surface, whose confirmation asks the operator to stop the
-  command-line run first. The refusal says to choose this key file there. **A
+  command-line run first. The refusal says to choose these two files there. **A
   match whose sibling entry cannot be read refuses** on the backup's terms too.
 - **A migration-spent match is revived in place**: the pair's document, `side`,
   max-age policy, and key pair are laid over the stored record, an absent
   `expires` or policy clearing the stored one, and the `id`, label, schedule,
   `lastRun`, standing condition, and platform grants -- none of which the pair
   has a field for -- are kept (`applyManagedExchangeCommandLinePair`). The spent
-  state is cleared and the import marker stamped.
+  state is cleared and the import marker stamped. **A migration-spent match on
+  the other `side` refuses**, naming the record: the partner's files hold the
+  same secret with the other side, so these are not this party's files.
 - **A live match refuses**, naming the record, as it does for a backup: the
   pair holds nothing the live record lacks, so a second live copy of one secret
   is all installing it could add. It decides ahead of a migration-spent match
   for the same reason.
-- **No match installs fresh**, with a new `id`.
+- **No match asks, then installs fresh**, with a new `id`, as the next
+  paragraph states.
 
-A secret the command line has rotated past the stored one matches nothing, so a
-pair from a hand-off that has run since installs fresh beside the spent husk;
-the re-take, given the same key file, is the route that keeps one record. A
-configuration-only record holds no secret and matches nothing either.
+**A pair no stored secret matches is recognized by its terms and side.** A
+command-line run rotates the secret, so a pair from a hand-off that has run
+since, or from an exchange moved to another device and run there, matches no
+stored secret; a configuration-only record holds none to match. The import
+names every stored record the [no-secret-match
+rule](#recognizing-a-stored-exchange-without-a-secret-match) finds among those
+handed off to the command line, migration-spent, or configuration-only, and
+installs nothing until the operator answers (`decideCommandLinePairTarget`,
+`apps/web/src/psi/managed/managedPairRecognition.ts`). The answers:
+
+- **Take the pair into one of them.** A handed-off record is taken back through
+  its [re-take](#taking-a-command-line-hand-off-back), which checks the pair
+  again under its lock; the question states the re-take's own condition, that
+  the command-line run is stopped first. A migration-spent record is revived and
+  a configuration-only record completed in place, both as a migration-spent
+  secret match is revived, less the backup marker where the pair's secret
+  differs from the one it attests. A chosen record that no longer qualifies --
+  deleted, taken back, running, or changed -- refuses, and nothing is written.
+- **Install as a new record**, beside every record named.
+- **Cancel**, writing nothing.
 
 **The markers.** Every pair import that writes stamps the [import
 marker](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
@@ -1470,9 +1498,9 @@ record, in a separate origin-local store keyed by the record `id`, and are
   and marks it imported and backed-up, rather than installing a duplicate). The
   command-line export downloads the CLI's `alcove.yaml` and `.alcove.key`, which
   the command line runs from and rewrites; the import refuses that pair against the
-  record the hand-off spent ([Importing the key file beside a
-  configuration](#importing-the-key-file-beside-a-configuration)), and the route
-  that takes it back is the [re-take](#taking-a-command-line-hand-off-back), behind
+  record the hand-off spent while it holds that record's secret ([Importing the key
+  file beside a configuration](#importing-the-key-file-beside-a-configuration)),
+  and the route that takes it back is the [re-take](#taking-a-command-line-hand-off-back), behind
   the operator's word that the command-line run has stopped. That is why the surfaces reading the spent state branch on the
   discriminator rather than naming one recovery for both -- a spent copy is told
   the recovery its hand-off actually has.
@@ -1632,31 +1660,42 @@ and before a revive or a fresh install. A scoped restore does not ask (below).
 No refusal sends the operator to delete other exchanges: each names the one
 record it is about and what to do with that record.
 
-#### Recognizing a live copy without a secret match
+#### Recognizing a stored exchange without a secret match
 
-A live copy's secret rotates at every run, so a backup taken before a run holds
-a secret its own live record has moved past, and the secret alone no longer
-finds it. The rule that recognizes it, stated once here for every import that
-installs a runnable record to call; the list's backup import asks on it, a
-scoped restore reports it after reviving (below), and the command-line pair
-import matches on the secret alone:
+A secret rotates at every run, so a file taken before a run -- a backup of a
+live record, or the command line's files after a run there -- holds a secret
+its own stored record does not, and the secret alone no longer finds it. The
+rule that recognizes it, stated once here for every import that installs a
+runnable record to call:
 
-**Every live record whose agreed terms and `side` equal the imported record's
-is named, and the import installs nothing unless the operator confirms
-installing beside them.** A live record is one no hand-off and no migration has
-spent. The agreed terms are the part of the linkage terms a partner refuses an
-exchange over when its copy differs -- every field but this party's own
-`identity` and the terms' `date` (`partnerBoundTerms`, `@alcove/core`) --
-compared in canonical form. A record with no `side` matches nothing. The code:
-`findLiveCopiesByTermsAndSide` (`apps/web/src/psi/managed/managedLiveCopyMatch.ts`).
+**Every stored record whose agreed terms and `side` equal the imported
+record's is named, and the import installs nothing into or beside them until
+the operator answers.** The agreed terms are the part of the linkage terms a
+partner refuses an exchange over when its copy differs -- every field but this
+party's own `identity` and the terms' `date` (`partnerBoundTerms`,
+`@alcove/core`) -- compared in canonical form. A record with no `side` matches
+nothing. The code: `findRecordsByTermsAndSide`
+(`apps/web/src/psi/managed/managedLiveCopyMatch.ts`).
+
+Which stored records each import asks about is what it can do with them:
+
+- **The list's backup import asks about live records**, those no hand-off and
+  no migration has spent, and offers to open one or install beside them. A
+  scoped restore reports one after reviving (below).
+- **The command-line pair import asks about records handed off to the command
+  line, migration-spent, or configuration-only**, and offers to take the pair
+  into one or install it beside them ([Importing the key file beside a
+  configuration](#importing-the-key-file-beside-a-configuration)). It asks
+  about no live record: a live record runs here, and its secret match is the
+  one the pair would have.
 
 Equal terms and side is a heuristic: two separate exchanges with one partner
-can share both. So the match is a question, never a refusal. The operator is
-shown every matching record's name in one question and chooses to open one of
-them, to cancel (nothing is written), or to install the backup beside them. The
-matches are named together and acknowledged by one confirm: a confirmed import
-names every record it goes beside, and only a match that confirm did not name
--- one added since the question -- is asked about again.
+can share both. So the match is a question, never a refusal, and never a
+write on its own. The operator is shown every matching record's name in one
+question and chooses among the import's answers or cancels (nothing is
+written). The matches are named together and acknowledged by one confirm: a
+confirmed install names every record it goes beside, and only a match that
+confirm did not name -- one added since the question -- is asked about again.
 
 #### Restoring a migration-spent record from its backup
 
@@ -1677,11 +1716,12 @@ confirm step and writes nothing to the other record.
 ### Taking a command-line hand-off back
 
 A copy spent under `handoff: "command-line"` comes back to this browser through an
-explicit **re-take** on that record's own surface. It is the only route from that
-spent state to a running one: the import refuses the artifact (above) and a
-command-line pair holding the record's secret alike, and installs a pair whose
-secret has moved on as a separate record ([Importing the key file beside a
-configuration](#importing-the-key-file-beside-a-configuration)), and the
+explicit **re-take**, offered on that record's own surface and by the pair import
+when the operator takes a pair with the record's terms and side into it
+([Importing the key file beside a
+configuration](#importing-the-key-file-beside-a-configuration)). It is the only
+route from that spent state to a running one: the import refuses the artifact
+(above) and a command-line pair holding the record's secret alike, and the
 surface showing the spent state is where the operator already is.
 
 **The operator attests; the browser checks what it can.** Two facts decide a
@@ -1698,28 +1738,36 @@ wrote this exchange's own secret into `.alcove.key` with no re-invite, so the
 take-back needs none either. Each command-line run rotates the secret and writes
 the rotated one back to that file, which decides what a re-take needs:
 
-- **Runs have happened there.** The operator chooses that `.alcove.key`, and the
-  re-take reads its `sharedSecret` and `expires` into the record.
+- **Runs have happened there.** The operator chooses that `.alcove.key` with the
+  `alcove.yaml` beside it, in one pick, and the re-take reads the key file's
+  `sharedSecret` and `expires` into the record.
 - **None has.** The stored secret is still the partnership's, and no file is needed.
 - **The file cannot be produced.** The exchange is taken back without it, and the
   [fast re-invite](../MANAGED_EXCHANGE.md#recovery-fast-re-invite) is the recovery
   -- the one any secret this browser cannot match already has.
 
-The file is untrusted structured input: it is capped before it is read, then parsed
-through the sensitive-JSON chokepoint and the strict key-pair schema, and only a
-validated pair reaches the store. A file that is not a key file leaves the record
-spent and the store untouched.
+A `.alcove.key` holds the secret and its bound and nothing naming the exchange it
+belongs to, which is why the `alcove.yaml` is chosen with it: a key file chosen
+alone is refused before either is read. Both files are untrusted structured input,
+read by the pair import's own reader (`readManagedCommandLinePair`) under its caps,
+and only a validated pair reaches the store. Files that are not such a pair leave
+the record spent and the store untouched.
 
-**What the check cannot cover.** A `.alcove.key` holds the secret and its bound
-and nothing naming the exchange it belongs to, so no check here tells this
-exchange's key file from another exchange's or from a stale copy of the same one --
-every exchange's file has that one name. Any schema-valid file whose secret differs
+**What the re-take checks.** Inside its transaction, before installing anything,
+the re-take compares the pair's agreed terms and `side` with the stored record's,
+on the [no-secret-match rule](#recognizing-a-stored-exchange-without-a-secret-match)'s
+comparison (`decideRetake`, `managedPairRecognition.ts`): a pair on other terms,
+or on the other side -- the partner's files -- is refused, naming which, and
+nothing is written.
+
+**What the check cannot cover.** Equal terms and side do not name one exchange,
+and nothing tells this exchange's current key file from a stale copy of it. A
+stale pair, or another exchange's on the same terms and side, whose secret differs
 from the stored one is therefore installed over it, and the record then holds a
 secret the partner does not share, recoverable only by a fresh invitation. The
-confirmation states that cost and where the right file is (the folder holding this
-exchange's `alcove.yaml` on the machine it was handed to); the operator's reading
-of it is the only check there is, and the re-take refuses no file the schema
-accepts.
+confirmation states that cost and where the right files are (the folder the
+exchange was handed off to on the machine running it); the operator's reading of
+it is the only check there is beyond terms and side.
 
 **The write rules.**
 

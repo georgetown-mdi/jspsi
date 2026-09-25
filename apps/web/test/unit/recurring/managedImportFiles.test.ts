@@ -45,6 +45,7 @@ describe("sorting the chosen files", () => {
     (name) => {
       expect(managedImportFileChoice([named(name)])).toEqual({
         kind: "refused",
+        cause: "key-file-alone",
         reason: KEY_FILE_ALONE_REASON,
       });
     },
@@ -63,6 +64,7 @@ describe("sorting the chosen files", () => {
     (names) => {
       expect(managedImportFileChoice(names.map(named))).toEqual({
         kind: "refused",
+        cause: "not-a-pair",
         reason: NOT_A_PAIR_REASON,
       });
     },
@@ -73,7 +75,11 @@ describe("sorting the chosen files", () => {
       managedImportFileChoice(
         ["alcove.yaml", ".alcove.key", "backup.json"].map(named),
       ),
-    ).toEqual({ kind: "refused", reason: TOO_MANY_FILES_REASON });
+    ).toEqual({
+      kind: "refused",
+      cause: "too-many-files",
+      reason: TOO_MANY_FILES_REASON,
+    });
   });
 });
 

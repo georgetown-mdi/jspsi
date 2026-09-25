@@ -13,10 +13,13 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   MAX_IMPORT_FILE_BYTES,
   ManagedImportAlreadyHeldError,
+  ManagedImportChosenCopyError,
   ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
   ManagedImportLiveCopyError,
   ManagedImportOtherExchangeError,
+  ManagedImportSideMismatchError,
+  ManagedImportStoredCopyError,
   importManagedCommandLinePair,
   importManagedExchangeFile,
   restoreManagedExchangeFromBackup,
@@ -28,7 +31,7 @@ import {
   openManagedExchangeDatabase,
   requestPersistentStorage,
 } from "@psi/managed/managedExchangeStore";
-import { MAX_KEY_FILE_IMPORT_BYTES } from "@psi/managed/managedRetake";
+import { MAX_KEY_FILE_IMPORT_BYTES } from "@psi/managed/managedCommandLineImport";
 import { listManagedLocalState } from "@psi/managed/managedLocalState";
 
 import { Lobby } from "@exchange/Lobby";
@@ -38,19 +41,27 @@ import styles from "@styles/app.module.css";
 
 import {
   ALREADY_HELD_IMPORT_TITLE,
+  CHOSEN_COPY_IMPORT_TITLE,
   IMPORT_FAILURE_TITLE,
   LIVE_COPY_IMPORT_CONFIRM,
   LIVE_COPY_IMPORT_TITLE,
   OTHER_EXCHANGE_RESTORE_TITLE,
   OVERSIZE_KEY_FILE_REASON,
+  SIDE_MISMATCH_IMPORT_TITLE,
+  STORED_COPY_IMPORT_CONFIRM,
+  STORED_COPY_IMPORT_TITLE,
   UNREADABLE_IMPORT_REASON,
   alreadyHeldBackupImportReason,
   alreadyHeldImportReason,
+  chosenCopyImportReason,
   importFailureReason,
   liveCopyImportReason,
   liveCopyOpenLabel,
   otherExchangeRestoreReason,
   pairImportFailureReason,
+  sideMismatchImportReason,
+  storedCopyImportReason,
+  storedCopyTakeLabel,
 } from "./managedImportFailure";
 import {
   CUSTODY_UNREADABLE_IMPORT_TITLE,
@@ -72,6 +83,10 @@ import { BetweenVisitNotifications } from "./BetweenVisitNotifications";
 import { loadSavedExchanges } from "./savedExchangesLoad";
 import { recoveryRows } from "./savedExchangesRecovery";
 
+import type {
+  ManagedPairImportOptions,
+  ManagedStoredCopy,
+} from "@psi/managed/managedPairRecognition";
 import type { ManagedImportGrantNotice } from "./managedImportGrantNotice";
 import type { ManagedImportResult } from "@psi/managed/managedExchangeImport";
 import type { ManagedSpentHandoff } from "@psi/managed/managedLocalState";
@@ -679,10 +694,22 @@ function importFailureAlert(error: unknown): ImportFailureAlert {
 }
 
 /** Which alert an alcove.yaml imported with its `.alcove.key` is refused with.
- * The store's three refusals name an exchange this browser holds, each under its
+ * The store's refusals name an exchange this browser holds, each under its
  * own heading, in words that speak of the two files rather than a backup;
  * everything else is the files' own failure ({@link pairImportFailureReason}). */
 function pairImportFailureAlert(error: unknown): ImportFailureAlert {
+  if (error instanceof ManagedImportSideMismatchError)
+    return {
+      color: "yellow",
+      title: SIDE_MISMATCH_IMPORT_TITLE,
+      reason: sideMismatchImportReason(error.label),
+    };
+  if (error instanceof ManagedImportChosenCopyError)
+    return {
+      color: "yellow",
+      title: CHOSEN_COPY_IMPORT_TITLE,
+      reason: chosenCopyImportReason(error),
+    };
   if (error instanceof ManagedImportHandedOffError)
     return {
       color: "yellow",
@@ -730,7 +757,11 @@ const KEY_FILE_CHOOSER_NOTE =
  * the one exchange it holds, not against the list: one already running here
  * refuses, and those that may be it -- the same agreed terms and side -- are
  * named together, the backup added beside them all only on the operator's one
- * confirm ({@link liveCopyImportReason}).
+ * confirm ({@link liveCopyImportReason}). A pair whose secret no stored
+ * exchange holds is asked about the same way where a handed-off, moved, or
+ * configuration-only exchange has its agreed terms and side: the operator
+ * takes the files into one of them, adds them as a new exchange, or cancels
+ * ({@link storedCopyImportReason}).
  *
  * A file the import will not take is refused with the reason its failure has
  * ({@link importFailureReason}): a configuration this app cannot hold says what
@@ -753,14 +784,20 @@ const KEY_FILE_CHOOSER_NOTE =
  * the same way to say the exchange now runs here ({@link PAIR_IMPORTED_NOTICE}). An
  * import with nothing to say goes straight through. */
 function ImportExchangeFile() {
-  const { onFiles, outcome, importing, confirmLiveCopy, dismiss } =
-    useImportFile({
-      maxBytes: MAX_IMPORT_FILE_BYTES,
-      oversizeReason: UNREADABLE_IMPORT_REASON,
-      importFile: (source, besideIds) =>
-        importManagedExchangeFile(source, undefined, besideOption(besideIds)),
-      failureAlert: importFailureAlert,
-    });
+  const {
+    onFiles,
+    outcome,
+    importing,
+    confirmLiveCopy,
+    answerStoredCopy,
+    dismiss,
+  } = useImportFile({
+    maxBytes: MAX_IMPORT_FILE_BYTES,
+    oversizeReason: UNREADABLE_IMPORT_REASON,
+    importFile: (source, besideIds) =>
+      importManagedExchangeFile(source, undefined, besideOption(besideIds)),
+    failureAlert: importFailureAlert,
+  });
 
   return (
     <div className={styles.callout}>
@@ -776,6 +813,7 @@ function ImportExchangeFile() {
       <ImportOutcomeAlerts
         outcome={outcome}
         onConfirmLiveCopy={confirmLiveCopy}
+        onAnswerStoredCopy={answerStoredCopy}
         onDismiss={dismiss}
       />
       <FileButton
@@ -800,20 +838,26 @@ function ImportExchangeFile() {
  * without asking about a listed exchange with the same terms, and names one in
  * its notice. Any other file is refused, naming the list's import for it. */
 function RestoreFromBackup({ id, label }: { id: string; label: string }) {
-  const { onFiles, outcome, importing, confirmLiveCopy, dismiss } =
-    useImportFile({
-      maxBytes: MAX_IMPORT_FILE_BYTES,
-      oversizeReason: UNREADABLE_IMPORT_REASON,
-      importFile: (source) => restoreManagedExchangeFromBackup(id, source),
-      failureAlert: (error) =>
-        error instanceof ManagedImportOtherExchangeError
-          ? {
-              color: "red",
-              title: OTHER_EXCHANGE_RESTORE_TITLE,
-              reason: otherExchangeRestoreReason(label),
-            }
-          : importFailureAlert(error),
-    });
+  const {
+    onFiles,
+    outcome,
+    importing,
+    confirmLiveCopy,
+    answerStoredCopy,
+    dismiss,
+  } = useImportFile({
+    maxBytes: MAX_IMPORT_FILE_BYTES,
+    oversizeReason: UNREADABLE_IMPORT_REASON,
+    importFile: (source) => restoreManagedExchangeFromBackup(id, source),
+    failureAlert: (error) =>
+      error instanceof ManagedImportOtherExchangeError
+        ? {
+            color: "red",
+            title: OTHER_EXCHANGE_RESTORE_TITLE,
+            reason: otherExchangeRestoreReason(label),
+          }
+        : importFailureAlert(error),
+  });
 
   return (
     <>
@@ -839,6 +883,7 @@ function RestoreFromBackup({ id, label }: { id: string; label: string }) {
       <ImportOutcomeAlerts
         outcome={outcome}
         onConfirmLiveCopy={confirmLiveCopy}
+        onAnswerStoredCopy={answerStoredCopy}
         onDismiss={dismiss}
       />
     </>
@@ -863,6 +908,13 @@ interface ImportOutcome {
     copies: ReadonlyArray<{ id: string; label: string }>;
     file: File;
   };
+  /** The stored exchanges a pair may belong to, and the two files to take
+   * into one of them, or install beside them all, on the operator's word. */
+  storedCopy?: {
+    copies: ReadonlyArray<ManagedStoredCopy>;
+    configurationFile: File;
+    keyFile: File;
+  };
 }
 
 /** A refusal under the heading every file refusal takes. */
@@ -876,7 +928,9 @@ function fileRefusal(reason: string): ImportOutcome {
  * refusal the control shows instead. A backup that may be a copy of listed
  * exchanges is held with their names until the operator confirms it, which
  * imports the file again beside all of them, or dismisses it, which imports
- * nothing. One file goes through `importFile`; a
+ * nothing. A pair that may belong to a stored exchange is held the same way
+ * until the operator takes it into one, adds it beside them all, or
+ * dismisses it. One file goes through `importFile`; a
  * configuration with its key file through {@link importManagedCommandLinePair},
  * whichever control took them. A file over its cap -- `maxBytes` for the one
  * file or the configuration, the key file's own for the key -- is refused with
@@ -901,6 +955,7 @@ function useImportFile({
   outcome: ImportOutcome;
   importing: boolean;
   confirmLiveCopy: () => void;
+  answerStoredCopy: (answer: ManagedPairImportOptions) => void;
   dismiss: () => void;
 } {
   const navigate = useNavigate();
@@ -940,6 +995,7 @@ function useImportFile({
     primaryFile: File,
     keyFile: File | undefined,
     besideIds?: ReadonlyArray<string>,
+    pairAnswer: ManagedPairImportOptions = {},
   ) {
     const refused =
       keyFile === undefined ? failureAlert : pairImportFailureAlert;
@@ -956,7 +1012,12 @@ function useImportFile({
         const { record, missingGrants, sameTermsAs } =
           keySource === undefined
             ? await importFile(source, besideIds)
-            : await importManagedCommandLinePair(source, keySource);
+            : await importManagedCommandLinePair(
+                source,
+                keySource,
+                undefined,
+                pairAnswer,
+              );
         const grantNotice =
           keySource === undefined
             ? managedImportGrantNotice(missingGrants)
@@ -971,13 +1032,20 @@ function useImportFile({
         }
         await navigate({ to: "/saved/$id", params: { id: record.id } });
       } catch (error) {
-        setOutcome(
-          error instanceof ManagedImportLiveCopyError
-            ? {
-                liveCopy: { copies: error.copies, file: primaryFile },
-              }
-            : { failure: refused(error) },
-        );
+        if (error instanceof ManagedImportLiveCopyError)
+          setOutcome({ liveCopy: { copies: error.copies, file: primaryFile } });
+        else if (
+          error instanceof ManagedImportStoredCopyError &&
+          keyFile !== undefined
+        )
+          setOutcome({
+            storedCopy: {
+              copies: error.copies,
+              configurationFile: primaryFile,
+              keyFile,
+            },
+          });
+        else setOutcome({ failure: refused(error) });
       } finally {
         inFlight.current = false;
         setImporting(false);
@@ -996,11 +1064,24 @@ function useImportFile({
     );
   }
 
+  function answerStoredCopy(answer: ManagedPairImportOptions) {
+    const { storedCopy } = outcome;
+    if (storedCopy === undefined || inFlight.current) return;
+    setOutcome({});
+    runImport(
+      storedCopy.configurationFile,
+      storedCopy.keyFile,
+      undefined,
+      answer,
+    );
+  }
+
   return {
     onFiles,
     outcome,
     importing,
     confirmLiveCopy,
+    answerStoredCopy,
     dismiss: () => setOutcome({}),
   };
 }
@@ -1011,17 +1092,50 @@ function useImportFile({
 function ImportOutcomeAlerts({
   outcome,
   onConfirmLiveCopy,
+  onAnswerStoredCopy,
   onDismiss,
 }: {
   outcome: ImportOutcome;
   onConfirmLiveCopy: () => void;
+  onAnswerStoredCopy: (answer: ManagedPairImportOptions) => void;
   onDismiss: () => void;
 }) {
   const navigate = useNavigate();
-  const { grantNotice, failure, liveCopy } = outcome;
+  const { grantNotice, failure, liveCopy, storedCopy } = outcome;
   const liveCopyLabels = liveCopy?.copies.map(({ label }) => label) ?? [];
   return (
     <>
+      {storedCopy !== undefined && (
+        <Alert color="yellow" title={STORED_COPY_IMPORT_TITLE} mb="sm">
+          <p className={styles.small}>
+            {storedCopyImportReason(storedCopy.copies)}
+          </p>
+          <div className={styles.savedRowActions}>
+            {storedCopy.copies.map(({ id }, index) => (
+              <Button
+                key={id}
+                variant="default"
+                onClick={() => onAnswerStoredCopy({ into: id })}
+              >
+                {storedCopyTakeLabel(storedCopy.copies, index)}
+              </Button>
+            ))}
+            <Button
+              variant="default"
+              onClick={() =>
+                onAnswerStoredCopy({
+                  besideIds: storedCopy.copies.map(({ id }) => id),
+                })
+              }
+            >
+              {STORED_COPY_IMPORT_CONFIRM}
+            </Button>
+            <Button variant="subtle" onClick={onDismiss}>
+              Cancel
+            </Button>
+          </div>
+        </Alert>
+      )}
       {liveCopy !== undefined && (
         <Alert color="yellow" title={LIVE_COPY_IMPORT_TITLE} mb="sm">
           <p className={styles.small}>{liveCopyImportReason(liveCopyLabels)}</p>

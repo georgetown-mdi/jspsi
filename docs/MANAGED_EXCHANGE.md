@@ -1112,16 +1112,17 @@ because two things have to be true and only the operator knows them:
 - **Whether it has run there since the hand-off.** Every command-line run changes
   the shared secret and writes the new one back into `.alcove.key`, so after a run
   that file holds the secret the partner expects and this browser's stored one does
-  not. The confirmation asks for that file; choose the `.alcove.key` from the
-  machine that was running the exchange and this browser picks the exchange back up
-  where the command line left it. Take it from the folder holding that exchange's
-  `alcove.yaml`: every exchange's key file has that same name, and the file chosen
-  replaces the only copy of the secret this browser has, so another exchange's file
-  or an older copy of this one leaves the exchange unable to connect and a fresh
-  invitation the only way back.
+  not. The confirmation asks for that file together with the `alcove.yaml` beside
+  it, both in one pick, from the folder the exchange was handed off to; this
+  browser picks the exchange back up where the command line left it. The key file
+  names no exchange, so the `alcove.yaml` is what is checked: files stating other
+  terms, or the other side's files, are refused and nothing changes. Nothing can
+  tell an older copy of the key file from the current one, though, and the file
+  chosen replaces the only copy of the secret this browser has, so an older copy
+  leaves the exchange unable to connect and a fresh invitation the only way back.
 
 Where nothing has run there since the hand-off, no file is needed: the secret
-stored here is still the partnership's. Where the file cannot be got at all, take
+stored here is still the partnership's. Where the files cannot be got at all, take
 the exchange back without it and create a fresh invitation for the partner from the
 same page -- the recovery for any secret this browser cannot match ([Recovery: fast
 re-invite](#recovery-fast-re-invite)).
@@ -1168,16 +1169,27 @@ no longer connect to your partner. What the pair import takes and refuses:
   time, or holds any other field is refused, saying which, and nothing is
   imported. The refusal never shows what the file holds.
 - **Only an exchange this browser runs.** An sftp or filedrop configuration, or
-  one with a `signing` block, is refused with its key file; import the
-  `alcove.yaml` on its own to edit it here.
+  one whose `signing` block asks for a receipt, is refused with its key file;
+  import the `alcove.yaml` on its own to edit it here. A `signing` block with
+  `mode: none` asks for none, so it runs here and is kept as written.
 - **One copy of an exchange.** An exchange is recognized by its shared secret. If
   this browser already runs the exchange the key file belongs to, nothing is
   imported and the refusal names it. If you handed it off to the command line
   from here, the import refuses and names the way back: open it from the list and
-  choose "Take this exchange back", with this key file. An exchange moved to
-  another device from here comes back as the same entry in the list. A key file
-  the command line has rotated since it left matches nothing and lands as a new
-  entry.
+  choose "Take this exchange back", with these two files. An exchange moved to
+  another device from here comes back as the same entry in the list, unless the
+  files are for the other side of it -- your partner's -- which is refused.
+- **An exchange you already have, after its secret changed.** A key file the
+  command line has rotated since the exchange left this browser matches no
+  secret here, and a configuration imported alone holds none. So when an
+  exchange in the list was handed off to the command line, moved to another
+  device, or imported as a configuration only, and has the same terms and the
+  same side as the files, the import stops and names it. You can take the files
+  into it -- taking a handed-off exchange back, restoring a moved one, or
+  completing a configuration with its key file -- add them as a new exchange
+  instead, or cancel. Two separate exchanges can share terms and side, so
+  nothing is taken in without your answer. Before taking a handed-off exchange
+  back, stop its scheduled run on the command line.
 
 The secret is kept only in this browser's stored copy of the exchange, as for an
 exchange set up here; the import marks the exchange as restored, and it reads as
@@ -1193,10 +1205,10 @@ place of the Run and schedule controls:
   not conduct -- it runs live browser exchanges (webrtc) only. The page names the
   channel and says to run the exchange with Alcove on the command line; a key
   file would not change that.
-- **A configuration with a `signing` block** asks for a signed exchange receipt,
-  which this browser does not produce. The page names `signing` as the part
-  this app cannot run, on any channel, and so does the list on webrtc; a key
-  file would not change that either.
+- **A configuration with a `signing` block** in `certificate` or
+  `session-derived` mode asks for a signed exchange receipt, which this browser
+  does not produce. The page and the list name `signing` as the part this app
+  cannot run, on any channel; a key file would not change that either.
 
 Nothing about the exchange on the other machine changes by importing its
 configuration -- it keeps running there, from the files it already has.

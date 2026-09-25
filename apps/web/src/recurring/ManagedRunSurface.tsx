@@ -58,9 +58,10 @@ import {
 } from "@psi/unfiledDisclosureStore";
 
 import {
+  MAX_CONFIGURATION_IMPORT_BYTES,
   MAX_KEY_FILE_IMPORT_BYTES,
-  retakeManagedExchange,
-} from "@psi/managed/managedRetake";
+} from "@psi/managed/managedCommandLineImport";
+import { retakeManagedExchange } from "@psi/managed/managedRetake";
 
 import {
   runnableManagedExchange,
@@ -121,6 +122,7 @@ import {
   RETAKE_NO_KEY_FILE_NOTE,
   RETAKE_STORE_FAILED,
   managedRetakeRefusal,
+  retakeFileChoiceRefusal,
 } from "./managedRetakeModel";
 import {
   STANDING_CONDITION_CLEAR_LABEL,
@@ -130,6 +132,7 @@ import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedConfigurationSurface } from "./ManagedConfigurationSurface";
 import { ManagedCronExportPanel } from "./ManagedCronExportPanel";
 import { REINVITE_RUN_IN_FLIGHT_REASON } from "./managedReinviteGate";
+import { managedImportFileChoice } from "./managedImportFiles";
 import { useManagedRunInFlight } from "./useManagedRunInFlight";
 
 import type { Ref } from "react";
@@ -2037,14 +2040,16 @@ function SpentSurface({
  *
  * Behind a confirmation, because the browser cannot see either thing the operator
  * has to have settled: that the scheduled run on the other machine is stopped, and
- * whether it has run since the hand-off -- which decides whether the `.alcove.key`
- * from that machine is needed. Declining writes nothing and leaves the copy spent.
+ * whether it has run since the hand-off -- which decides whether the `alcove.yaml`
+ * and `.alcove.key` from that machine are needed. Declining writes nothing and
+ * leaves the copy spent.
  *
- * The key file is optional at the confirmation rather than required, since the
- * stored secret is still the partnership's where nothing has run there. A file the
- * parse will not take, and a re-take the store refused, both keep the confirmation
- * open with what happened beside it: nothing reads as a take-back that did not
- * happen.
+ * The files are optional at the confirmation rather than required, since the
+ * stored secret is still the partnership's where nothing has run there; chosen,
+ * they are the pair, since the key file alone names no exchange to check it
+ * against. Files the reader will not take, and a re-take the store refused, both
+ * keep the confirmation open with what happened beside it: nothing reads as a
+ * take-back that did not happen.
  */
 function RetakeControl({
   id,
@@ -2054,30 +2059,45 @@ function RetakeControl({
   onRetaken: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const [keyFile, setKeyFile] = useState<File | null>(null);
+  const [chosenFiles, setChosenFiles] = useState<Array<File>>([]);
   const [retaking, setRetaking] = useState(false);
   const [refusal, setRefusal] = useState<ManagedRetakeRefusal>();
 
   function confirmRetake() {
+    const choice = managedImportFileChoice(chosenFiles);
+    if (choice !== undefined && choice.kind !== "pair") {
+      setRefusal(retakeFileChoiceRefusal(choice));
+      return;
+    }
     setRetaking(true);
     setRefusal(undefined);
     void (async () => {
       try {
-        // Capped before the read, as the artifact import is: the key file holds one
-        // secret and one instant, so an over-cap file is the wrong file rather than
+        // Capped before the read, as the pair import is: both are small
+        // operator-held files, so an over-cap one is the wrong file rather than
         // one to read into memory ahead of the bounded parse.
-        if (keyFile !== null && keyFile.size > MAX_KEY_FILE_IMPORT_BYTES) {
-          setRefusal(managedRetakeRefusal("unreadable-key-file"));
+        if (
+          choice !== undefined &&
+          (choice.configurationFile.size > MAX_CONFIGURATION_IMPORT_BYTES ||
+            choice.keyFile.size > MAX_KEY_FILE_IMPORT_BYTES)
+        ) {
+          setRefusal(managedRetakeRefusal({ kind: "unreadable-files" }));
           return;
         }
-        const source = keyFile === null ? undefined : await keyFile.text();
-        const result = await retakeManagedExchange(id, source);
+        const files =
+          choice === undefined
+            ? undefined
+            : {
+                configuration: await choice.configurationFile.text(),
+                key: await choice.keyFile.text(),
+              };
+        const result = await retakeManagedExchange(id, files);
         if (result.kind === "retaken") {
           setConfirming(false);
           onRetaken();
           return;
         }
-        setRefusal(managedRetakeRefusal(result.kind));
+        setRefusal(managedRetakeRefusal(result));
       } catch {
         setRefusal(RETAKE_STORE_FAILED);
       } finally {
@@ -2093,7 +2113,7 @@ function RetakeControl({
           variant="default"
           onClick={() => {
             setRefusal(undefined);
-            setKeyFile(null);
+            setChosenFiles([]);
             setConfirming(true);
           }}
         >
@@ -2112,16 +2132,25 @@ function RetakeControl({
         <p className={`${styles.small} ${styles.sub}`}>
           {RETAKE_NO_KEY_FILE_NOTE}
         </p>
-        <FileButton accept="application/json,.key" onChange={setKeyFile}>
+        <FileButton
+          accept="application/yaml,.yaml,.yml,application/json,.key"
+          multiple
+          onChange={(files) => {
+            setRefusal(undefined);
+            setChosenFiles(files);
+          }}
+        >
           {(props) => (
             <Button variant="default" {...props}>
-              Choose the .alcove.key file
+              Choose the alcove.yaml and .alcove.key
             </Button>
           )}
         </FileButton>
-        {keyFile !== null && (
-          <p className={`${styles.small} ${styles.mono}`}>{keyFile.name}</p>
-        )}
+        {chosenFiles.map((file) => (
+          <p key={file.name} className={`${styles.small} ${styles.mono}`}>
+            {file.name}
+          </p>
+        ))}
         {refusal !== undefined && (
           <Alert color="yellow" title={refusal.title} mt="sm" mb="sm">
             {refusal.reason}

@@ -18,6 +18,7 @@ import { ZodError } from "zod";
 import {
   ManagedConfigurationRefusedError,
   readManagedCommandLineConfiguration,
+  readManagedCommandLinePair,
 } from "@psi/managed/managedCommandLineImport";
 import {
   applyManagedExchangeLocalEdits,
@@ -35,8 +36,10 @@ import { managedImportFileKind } from "@psi/managed/managedExchangeImport";
 
 import {
   encodeManagedExchangeArtifact,
+  importManagedExchangeArtifact,
   serializeManagedExchangeArtifact,
 } from "@psi/managed/managedExchangeArtifact";
+import { savedExchangeRow } from "@recurring/savedExchangesModel";
 
 import type {
   ExchangeLocator,
@@ -955,6 +958,64 @@ describe("a signing block this app cannot run", () => {
       ),
     ).toThrow(ZodError);
   });
+});
+
+describe("a signing block whose mode is none", () => {
+  // `none` asks for no receipt, which this app meets by signing nothing, so
+  // the block is held unchanged and the exchange runs here.
+  const signing = { mode: "none", receiptOutput: "~/receipts/@quarterly" };
+  const keyText = (): string =>
+    JSON.stringify({ sharedSecret: generateSharedSecret() });
+
+  test("imports with its key file as an exchange that runs here", () => {
+    const record = readManagedCommandLinePair(
+      configText(commandLineDocument({ signing })),
+      keyText(),
+    );
+
+    expect(record.exchangeFile.signing).toEqual(signing);
+    expect(runnableManagedExchange(record)).toBe(true);
+    expect(documentPartsThisAppDoesNotRun(record.exchangeFile)).toEqual([]);
+    expect(savedExchangeRow(record, undefined, Date.now())).toMatchObject({
+      configurationOnly: false,
+    });
+  });
+
+  test("exports the block unchanged, to the command line and in a backup", () => {
+    const record = readManagedCommandLinePair(
+      configText(commandLineDocument({ signing })),
+      keyText(),
+    );
+
+    const text = composeManagedCronExport(record).config.text;
+    expect(parseSensitiveYaml(text, "re-export")).toMatchObject({
+      signing: { mode: "none", receipt_output: signing.receiptOutput },
+    });
+    expect(
+      parseExchangeSpec(parseSensitiveYaml(text, "re-export")).signing,
+    ).toEqual(signing);
+    const restored = importManagedExchangeArtifact(
+      serializeManagedExchangeArtifact(encodeManagedExchangeArtifact(record)),
+    ).record;
+    expect(restored.exchangeFile.signing).toEqual(signing);
+    expect(restored.sharedSecret).toBe(record.sharedSecret);
+  });
+
+  test.each(["certificate", "session-derived"] as const)(
+    "a %s block stays withheld: refused with its key file, a configuration only alone",
+    (mode) => {
+      const document = commandLineDocument({ signing: { mode } });
+
+      expect(() =>
+        readManagedCommandLinePair(configText(document), keyText()),
+      ).toThrow(ManagedConfigurationRefusedError);
+      const alone = readManagedCommandLineConfiguration(configText(document));
+      expect(runnableManagedExchange(alone)).toBe(false);
+      expect(documentPartsThisAppDoesNotRun(alone.exchangeFile)).toEqual([
+        "signing",
+      ]);
+    },
+  );
 });
 
 describe("routing a file to its leg", () => {

@@ -18,8 +18,11 @@ import {
 import {
   ManagedImportAlreadyHeldError,
   ManagedImportBackupNotConfigurationError,
+  ManagedImportChosenCopyError,
   ManagedImportCustodyUnreadableError,
   ManagedImportHandedOffError,
+  ManagedImportSideMismatchError,
+  ManagedImportStoredCopyError,
   importManagedCommandLinePair,
 } from "@psi/managed/managedExchangeImport";
 import {
@@ -40,8 +43,11 @@ import type {
   NewManagedExchange,
   RunnableManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
+import type {
+  ManagedPairReconcileOutcome,
+  ManagedRetakeOutcome,
+} from "@psi/managed/managedExchangeStore";
 import type { ManagedPairImportDeps } from "@psi/managed/managedExchangeImport";
-import type { ManagedPairReconcileOutcome } from "@psi/managed/managedExchangeStore";
 
 // The key leg of the command-line import: an alcove.yaml read with the
 // .alcove.key beside it installs a runnable record, the key file is validated
@@ -378,15 +384,18 @@ describe("laying a pair over the stored record it revives", () => {
 /** Injected boundaries for the pair import, recording what it wrote. */
 function recordingDeps(
   reconciled: ManagedPairReconcileOutcome = { kind: "no-match" },
+  retaken: ManagedRetakeOutcome = { kind: "not-handed-off" },
 ): ManagedPairImportDeps & {
   installed: Array<ManagedExchangeRecord>;
   reconcile: ReturnType<typeof vi.fn>;
+  retake: ReturnType<typeof vi.fn>;
   markImported: ReturnType<typeof vi.fn>;
 } {
   const installed: Array<ManagedExchangeRecord> = [];
   return {
     installed,
     reconcile: vi.fn(() => Promise.resolve(reconciled)),
+    retake: vi.fn(() => Promise.resolve(retaken)),
     install: (record) => {
       installed.push(record);
       return Promise.resolve(record);
@@ -447,6 +456,117 @@ describe("importing a configuration with its key file", () => {
       expect(deps.markImported).not.toHaveBeenCalled();
     },
   );
+
+  test("a stored exchange with its terms and side is offered, and nothing is written", async () => {
+    const { configuration, key, record } = exportedPair();
+    const copies = [
+      { id: "handed", label: "Riverbend", state: "handed-off" },
+    ] as const;
+    const deps = recordingDeps({ kind: "stored-copy", copies });
+    const error = await rejectionOf(() =>
+      importManagedCommandLinePair(configuration, key, deps),
+    );
+    expect(error).toBeInstanceOf(ManagedImportStoredCopyError);
+    expect((error as ManagedImportStoredCopyError).copies).toEqual(copies);
+    expect(errorText(error)).not.toContain(record.sharedSecret);
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.retake).not.toHaveBeenCalled();
+    expect(deps.markImported).not.toHaveBeenCalled();
+  });
+
+  test("the operator's answer reaches the reconciliation", async () => {
+    const { configuration, key } = exportedPair();
+    const at = "2026-07-14T12:00:00.000Z";
+    for (const answer of [{ into: "handed" }, { besideIds: ["handed"] }]) {
+      const deps = recordingDeps();
+      await importManagedCommandLinePair(configuration, key, deps, answer);
+      expect(deps.reconcile).toHaveBeenCalledWith(
+        expect.objectContaining({ side: "acceptor" }),
+        at,
+        answer,
+      );
+    }
+  });
+
+  test("a chosen hand-off takes the pair through its re-take, installing nothing", async () => {
+    const { configuration, key, record } = exportedPair();
+    const deps = recordingDeps(
+      { kind: "retake", id: "handed" },
+      { kind: "retaken", record },
+    );
+    const result = await importManagedCommandLinePair(
+      configuration,
+      key,
+      deps,
+      { into: "handed" },
+    );
+    expect(result.record).toBe(record);
+    expect(deps.retake).toHaveBeenCalledWith(
+      "handed",
+      "2026-07-14T12:00:00.000Z",
+      expect.objectContaining({ sharedSecret: record.sharedSecret }),
+    );
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.markImported).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    [{ kind: "run-in-flight" }, "run-in-flight"],
+    [{ kind: "gone" }, "changed"],
+    [{ kind: "not-handed-off" }, "changed"],
+    [{ kind: "mismatch", on: "side" }, "changed"],
+  ] as const)(
+    "a chosen hand-off whose re-take refuses (%o) writes nothing",
+    async (retaken, reason) => {
+      const { configuration, key } = exportedPair();
+      const deps = recordingDeps({ kind: "retake", id: "handed" }, retaken);
+      const error = await rejectionOf(() =>
+        importManagedCommandLinePair(configuration, key, deps, {
+          into: "handed",
+        }),
+      );
+      expect(error).toBeInstanceOf(ManagedImportChosenCopyError);
+      expect((error as ManagedImportChosenCopyError).reason).toBe(reason);
+      expect(deps.installed).toHaveLength(0);
+    },
+  );
+
+  test("a chosen configuration-only exchange is completed in place, installing nothing", async () => {
+    const { configuration, key, record } = exportedPair();
+    const deps = recordingDeps({ kind: "completed", record });
+    const result = await importManagedCommandLinePair(
+      configuration,
+      key,
+      deps,
+      { into: record.id },
+    );
+    expect(result.record).toBe(record);
+    expect(deps.installed).toHaveLength(0);
+    expect(deps.markImported).not.toHaveBeenCalled();
+  });
+
+  test("a chosen exchange that changed since is refused, writing nothing", async () => {
+    const { configuration, key } = exportedPair();
+    const deps = recordingDeps({ kind: "chosen-copy-changed" });
+    const error = await rejectionOf(() =>
+      importManagedCommandLinePair(configuration, key, deps, { into: "gone" }),
+    );
+    expect(error).toBeInstanceOf(ManagedImportChosenCopyError);
+    expect((error as ManagedImportChosenCopyError).reason).toBe("changed");
+    expect(deps.installed).toHaveLength(0);
+  });
+
+  test("a moved exchange holding the secret on the other side refuses, naming it", async () => {
+    const { configuration, key, record } = exportedPair();
+    const deps = recordingDeps({ kind: "side-mismatch", label: "Riverbend" });
+    const error = await rejectionOf(() =>
+      importManagedCommandLinePair(configuration, key, deps),
+    );
+    expect(error).toBeInstanceOf(ManagedImportSideMismatchError);
+    expect((error as ManagedImportSideMismatchError).label).toBe("Riverbend");
+    expect(errorText(error)).not.toContain(record.sharedSecret);
+    expect(deps.installed).toHaveLength(0);
+  });
 
   test("a malformed key file reaches no store step", async () => {
     const { configuration } = exportedPair();
