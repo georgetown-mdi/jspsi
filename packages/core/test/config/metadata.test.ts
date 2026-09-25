@@ -145,6 +145,21 @@ test.each([
   },
 );
 
+test.each(["constructor", "Constructor", "__proto__", "toString"])(
+  "column %s, an Object.prototype member name, is inferred as an ordinary column",
+  (name) => {
+    const metadata = inferMetadata(["id", name], []);
+    expect(metadata[1]).toEqual({
+      name,
+      type: "other",
+      role: "payload",
+      isPayload: true,
+    });
+    expect(safeParseMetadata(metadata).success).toBe(true);
+    expect(disclosedColumnNames(metadata)).toContain(name);
+  },
+);
+
 // --- inferMetadata: mixed columns --------------------------------------------
 
 test("known and unknown columns are inferred correctly in a single call", () => {

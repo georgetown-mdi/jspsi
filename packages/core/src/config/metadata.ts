@@ -428,7 +428,9 @@ export function inferMetadata(
 
   const result: Metadata = columnNames.map((name) => {
     const lookupName = name.toLowerCase();
-    if (!(lookupName in ALIAS_TYPE_META_MAP)) {
+    // An own-property test: `in` also matches inherited names such as
+    // `constructor` and `__proto__`, which have no entry.
+    if (!Object.hasOwn(ALIAS_TYPE_META_MAP, lookupName)) {
       if (lookupName.endsWith("_id"))
         return { name, type: "identifier", role: "payload", isPayload: true };
       return { name, type: "other", role: "payload", isPayload: true };
