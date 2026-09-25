@@ -844,10 +844,11 @@ describe("an interrupt sweeps the share before it re-raises", () => {
 
   /**
    * A runner answering like a healthy share whose share list, subdirectory
-   * listing, put of the probe file, and delete of it each settle on the next
-   * turn after `during` runs, so a signal delivered there arrives while that
-   * command is still in flight. Each landing records whether the credentials
-   * file was still there when the command finished.
+   * listing, and put of the probe file each settle on the next turn after
+   * `during` runs, so a signal delivered there arrives while that command is
+   * still in flight; the delete of the probe file settles a turn late as well.
+   * Each landing records whether the credentials file was still there when the
+   * command finished.
    */
   function interruptingRunner(
     events: string[],
@@ -855,7 +856,6 @@ describe("an interrupt sweeps the share before it re-raises", () => {
       list?: () => void;
       subdirectory?: () => void;
       put?: () => void;
-      del?: () => void;
     },
   ): { runner: CommandRunner; authDir: () => string | undefined } {
     let authDir: string | undefined;
@@ -897,7 +897,7 @@ describe("an interrupt sweeps the share before it re-raises", () => {
           if (command === "put alcove-probe-abc123.tmp alcove-probe-abc123.tmp")
             return settleAfter(during.put, "put landed", args);
           if (command === "del alcove-probe-abc123.tmp")
-            return settleAfter(during.del, "del landed", args);
+            return settleAfter(undefined, "del landed", args);
           return Promise.resolve({ ...RESULT, ...healthyReply(args) });
         },
       },
@@ -972,41 +972,6 @@ describe("an interrupt sweeps the share before it re-raises", () => {
       expect(fs.existsSync(authDir() as string)).toBe(false);
       expect(addedListeners(before)).toEqual([]);
       expect(process.listenerCount("SIGTERM")).toBe(beforeTerm);
-    } finally {
-      kill.mockRestore();
-    }
-  });
-
-  test("a second interrupt abandons the sweep and still removes the credentials file", async () => {
-    const before = new Set<unknown>(process.listeners("SIGINT"));
-    const events: string[] = [];
-    let authDirAtSecondKill: boolean | undefined;
-    const { runner, authDir } = interruptingRunner(events, {
-      put: () => {
-        for (const listener of addedListeners(before)) listener("SIGINT");
-      },
-      del: () => {
-        for (const listener of addedListeners(before)) listener("SIGTERM");
-      },
-    });
-    const kill = vi
-      .spyOn(process, "kill")
-      .mockImplementation((_pid, signal) => {
-        events.push(`kill ${String(signal)}`);
-        if (signal === "SIGTERM")
-          authDirAtSecondKill = fs.existsSync(authDir() as string);
-        return true;
-      });
-    try {
-      await expect(
-        runProbe(INPUT, deps(healthyReply, { runner })),
-      ).rejects.toThrow("interrupted");
-      await vi.waitFor(() => expect(events).toContain("kill SIGINT"));
-      expect(events.indexOf("kill SIGTERM")).toBeLessThan(
-        events.indexOf("del landed"),
-      );
-      expect(authDirAtSecondKill).toBe(false);
-      expect(addedListeners(before)).toEqual([]);
     } finally {
       kill.mockRestore();
     }

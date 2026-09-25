@@ -708,8 +708,12 @@ export async function runProbe(
     interrupted = true;
     stopListening(onSignal);
     const abandon = (again: NodeJS.Signals): void => {
-      removeWorkDir();
-      process.kill(process.pid, again);
+      stopListening(abandon);
+      try {
+        removeWorkDir();
+      } finally {
+        process.kill(process.pid, again);
+      }
     };
     listen(abandon);
     const reraise = (): void => {
