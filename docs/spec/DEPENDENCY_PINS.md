@@ -4,9 +4,9 @@ title: "Pinned Dependency Internals and Upgrade Checklists"
 
 # Pinned dependency internals
 
-Two dependency stacks are reached past their public APIs, so their internals are
-critical and their versions are exact-pinned; a third dependency, the PSI
-crypto addon, is a vendored local fork. This document records the internal
+Two dependency stacks and the CLI's WebRTC peer are reached past their public
+APIs, so their internals are critical and their versions are exact-pinned; a
+further dependency, the PSI crypto addon, is a vendored local fork. This document records the internal
 assumptions each rests on, the checklist to re-verify them before a bump merges,
 and the install-time policies that stand beside them: npm's install-script
 verdicts, the GitHub Action pin mirror, and the residuals npm's resolver leaves
@@ -343,11 +343,11 @@ npm error invalid: crossws@0.3.5, ^0.4.1 required by h3-v2@npm:h3@2.0.1-rc.20
 
 **What `npm ls` does with the same edge.** The invalid edge sits under `@tanstack/start-server-core`, below the depth `npm ls` reports by default, so `npm ls --omit=dev` exits 0 and prints the tree, both unfiltered and scoped `-w packages/core -w apps/cli -w apps/web`. So does the named-package form `npm ls <pkg> --omit=dev -w packages/core -w apps/cli -w apps/web` that [RELEASES.md](../RELEASES.md#software-bill-of-materials-sbom) prescribes for checking which packages the SBOM's hoisting residual drops. A full-depth `npm ls --all --omit=dev` walks onto the edge and exits 1 with `ELSPROBLEMS` naming the same `crossws@0.3.5`, so the whole-tree walk is the one form of the query that is unavailable.
 
-**Why the obvious fixes are wrong.** Forcing the 0.4 line into the root -- the only directory on `h3-v2`'s resolution path, since it resolves upward from `node_modules/@tanstack/start-server-core/node_modules/` and never reaches a workspace's -- clears the refusal, and loses a component from the BOM doing it. Measured 2026-09-04 on npm 11.19.0, by adding `"crossws": "^0.4.1"` to the root `devDependencies` and running `npm install`: the tree comes out fully valid, `npm ls --all` and `npm ls --all --omit=dev` both exiting 0, with 0.4.12 at the root for the peer, 0.3.5 nested beside `nitropack` and `h3`, and `listhen`'s `>=0.2.0 <0.5.0` satisfied by the root copy. The unflagged step 9 command then exits 0, and `npm run check:crossws-sbom-block` fails with the cleanup message it holds for that state. But the BOM that unflagged command emits has 182 components and omits `srvx@0.11.22`, where the same command with `--legacy-peer-deps` against that same forced tree emits 183 including it -- the count the flagged command already produces against the committed lockfile. `srvx` is no development package there: `npm ls srvx --all --omit=dev` reports it under `apps/web` twice over, through `@tanstack/start-plugin-core` and through `h3-v2`'s own `^0.11.13`. The build, the typecheck, and the unit suites all pass on the forced tree, so what rejects this candidate is that one trade: the flag exchanged for a release BOM missing a package the release runs. Forcing the line no longer crosses a type boundary in `apps/web/server/custom-entry.ts`, which does not import crossws at all -- the WebSocket `upgrade` block that once fed `nitroApp.h3App.websocket` into `crossws/adapters/node` is deleted. The constraint it existed to guard, that wiring a crossws adapter onto the shared HTTP server is unsafe while the PeerJS signaling listener shares it, is held by `scripts/check-nitro-websocket-unset.mjs`, which fails if `apps/web/nitro.config.ts` ever turns `experimental.websocket` on.
+**Why the obvious fixes are wrong.** Forcing the 0.4 line into the root -- the only directory on `h3-v2`'s resolution path, since it resolves upward from `node_modules/@tanstack/start-server-core/node_modules/` and never reaches a workspace's -- clears the refusal, and loses a component from the BOM doing it. Measured 2026-09-04 on npm 11.19.0, by adding `"crossws": "^0.4.1"` to the root `devDependencies` and running `npm install`: the tree comes out fully valid, `npm ls --all` and `npm ls --all --omit=dev` both exiting 0, with 0.4.12 at the root for the peer, 0.3.5 nested beside `nitropack` and `h3`, and `listhen`'s `>=0.2.0 <0.5.0` satisfied by the root copy. The unflagged step 9 command then exits 0, and `npm run check:crossws-sbom-block` fails with the cleanup message it holds for that state. But the BOM that unflagged command emits has 182 components and omits `srvx@0.11.22`, where the same command with `--legacy-peer-deps` against that same forced tree emits 183 including it -- the count the flagged command produced against the committed lockfile that day. `srvx` is no development package there: `npm ls srvx --all --omit=dev` reports it under `apps/web` twice over, through `@tanstack/start-plugin-core` and through `h3-v2`'s own `^0.11.13`. The build, the typecheck, and the unit suites all pass on the forced tree, so what rejects this candidate is that one trade: the flag exchanged for a release BOM missing a package the release runs. Forcing the line no longer crosses a type boundary in `apps/web/server/custom-entry.ts`, which does not import crossws at all -- the WebSocket `upgrade` block that once fed `nitroApp.h3App.websocket` into `crossws/adapters/node` is deleted. The constraint it existed to guard, that wiring a crossws adapter onto the shared HTTP server is unsafe while the PeerJS signaling listener shares it, is held by `scripts/check-nitro-websocket-unset.mjs`, which fails if `apps/web/nitro.config.ts` ever turns `experimental.websocket` on.
 
 The other candidates fail outright: `overrides` scoped to the parent or to the alias do not move the hoisted copy, and a global override collapses the tree to one version and drops `crossws` below the dev dependents that require it. Declaring it in `apps/web` leaves the peer unsatisfied because that directory is not on the resolution path, and `npm sbom --omit peer` still runs the tree-validity check.
 
-**The adopted workaround.** `--legacy-peer-deps` on the step 9 invocation disables peer-conflict validation for that command alone rather than mutating the lockfile or the installed tree, which is what separates it in kind from every candidate above. Measured 2026-08-27 against the committed lockfile: `npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev --legacy-peer-deps -w packages/core -w apps/cli -w apps/web` exits 0 at 183 components, and the same command without `-w apps/web` exits 0 at 64. Every one of those 64 also appears in the 183, so the flagged, full-scope command is a strict superset that closes the web console's runtime set into the BOM rather than dropping it. Its cost is stated where the command is documented: this one invocation would suppress a genuine peer conflict elsewhere in the tree just as quietly as it suppresses this one. That is why [RELEASES.md](../RELEASES.md#9-generate-and-attach-the-sbom) pairs it with `npm ls --all --omit=dev` as a compensating strict check that still fails loudly and, as of the same measurement, names only this same `crossws` edge.
+**The adopted workaround.** `--legacy-peer-deps` on the step 9 invocation disables peer-conflict validation for that command alone rather than mutating the lockfile or the installed tree, which is what separates it in kind from every candidate above. Measured 2026-09-25 on npm 11.19.1 against the committed lockfile: `npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev --legacy-peer-deps -w packages/core -w apps/cli -w apps/web` exits 0 at 176 components, and the same command without `-w apps/web` exits 0 at 64. Every one of those 64 also appears in the 176, so the flagged, full-scope command is a strict superset that closes the web console's runtime set into the BOM rather than dropping it. Its cost is stated where the command is documented: this one invocation would suppress a genuine peer conflict elsewhere in the tree just as quietly as it suppresses this one. That is why [RELEASES.md](../RELEASES.md#9-generate-and-attach-the-sbom) pairs it with `npm ls --all --omit=dev` as a compensating strict check that still fails loudly and, as of the same measurement, names only this same `crossws` edge.
 
 **Resolution path.** This clears upstream, without action here, once `h3` v2 ships stable (so `@tanstack/start-server-core` stops depending on a prerelease) or `nitropack` / `h3@1.x` move to the 0.4 line -- at which point the ranges are mutually satisfiable, npm hoists one version that satisfies everyone, and the unflagged release-scoped `npm sbom` runs again. A dev-inclusive `npm sbom` stays refused past that point, on two further entries the [`brace-expansion` override](#the-brace-expansion-advisory-is-fixed-by-a-root-override) contributes; the release command does not run one. Until then, step 9 runs with `--legacy-peer-deps` as above; re-check after any `@tanstack/*` or `nitropack` bump. When the flag is no longer needed, drop it from step 9, remove this section and step 9's cost note and compensating check, and re-check the SBOM section's hoisting residual in the same pass, since that residual is stated independently of this block and outlives it. A further local workaround, if one is ever wanted before then, is weighed against the rejected candidates recorded above rather than re-derived from scratch, and any that touches the tree still needs to keep `scripts/check-nitro-websocket-unset.mjs` passing.
 
@@ -749,10 +749,10 @@ governs Dependabot's security alerts, which
 [RELEASES.md](../RELEASES.md#4-review-and-audit-dependencies) records for
 triage and whose pull requests against `main` it handles in
 [A security update opened against
-main](../RELEASES.md#a-security-update-opened-against-main). What
-determines the reading: the first docker-ecosystem run after a
-promotion moves the entry to `main` shows an `ignore-conditions` entry naming
-`amazonlinux` instead of an empty list. While the list reads empty the entry is
+main](../RELEASES.md#a-security-update-opened-against-main). The
+entry is on `main`. What shows it in force is a docker-ecosystem run whose
+update-job definition has an `ignore-conditions` entry naming `amazonlinux`
+instead of an empty list. While the list reads empty the entry is
 inert and an `amazonlinux` pull request that arrives is closed unmerged -- what
 the entry removes is a filing, and the digest freeze plus the procedure below is
 what holds the base either way.
@@ -867,10 +867,11 @@ off CI.
 One limit sits between a green run there and a bump being proved:
 
 - **The build is single-arch.** That workflow builds native `amd64` with no
-  QEMU, and no release workflow builds this image at all, so the release
-  assertion speaks for the `amd64` rootfs at the new digest and not for the
-  `arm64` one. Reading the other architecture's release by hand, as above, is
-  what covers it.
+  QEMU, so on a pull request the release assertion speaks for the `amd64`
+  rootfs at the new digest and not for the `arm64` one. The release workflow's
+  multi-arch push builds this image for both architectures, so the assertion
+  runs for `arm64` first at release time; reading the other architecture's
+  release by hand, as above, is what covers it before then.
 
 ## Bumping the default base image
 
