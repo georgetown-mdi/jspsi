@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { ConnectionError } from "@alcove/core";
 import {
+  WEBRTC_CHUNK_ENVELOPE_FIXTURES,
   WEBRTC_INBOUND_FRAME_FIXTURES,
   comparableVerdict,
   frameScanRefusal,
@@ -143,6 +144,24 @@ describe("the CLI reassembler against core's pre-scan", () => {
           kind: "pending",
         });
       }
+    }
+  });
+});
+
+describe("the CLI reassembler against the shared chunk envelopes", () => {
+  test("refuses exactly the envelopes the web PeerJS wrap refuses", () => {
+    for (const fixture of WEBRTC_CHUNK_ENVELOPE_FIXTURES) {
+      const bounds = new BoundedInboundFrames();
+      let outcome: unknown;
+      try {
+        outcome = bounds.accept(fixture.datagram);
+      } catch (err) {
+        if (!(err instanceof ConnectionError)) throw err;
+        outcome = { refused: err.kind };
+      }
+      expect(outcome, fixture.label).toEqual(
+        fixture.refused ? { refused: "protocol" } : { kind: "pending" },
+      );
     }
   });
 });

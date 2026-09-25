@@ -30,6 +30,7 @@
 import { pack, unpack } from "peerjs-js-binarypack";
 
 import {
+  MAX_CHUNKS_PER_REASSEMBLY,
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   describeFrameStructureRefusal,
@@ -348,3 +349,76 @@ export function comparableVerdict(verdict: FrameVerdict): FrameVerdict {
     ? { kind: "delivered", value: normalizeBinary(verdict.value) }
     : verdict;
 }
+
+/** One labelled chunk envelope, packed as the datagram a peer puts on the wire, and
+ * whether both transports must refuse it (`true`) or hold it as a partial
+ * (`false`). Every field of an envelope is peer-chosen, and PeerJS turns `data` into
+ * `new Uint8Array(data)`, which allocates a buffer of the peer's declared size for a
+ * number or a numeric string. */
+export interface WebrtcChunkEnvelopeFixture {
+  readonly label: string;
+  readonly datagram: Uint8Array;
+  readonly refused: boolean;
+}
+
+function chunkEnvelope(fields: Record<string, unknown>): Uint8Array {
+  return packValue({
+    __peerData: 1,
+    n: 0,
+    data: new Uint8Array(4),
+    total: 2,
+    ...fields,
+  });
+}
+
+const chunkEnvelopes: Array<{
+  label: string;
+  fields: Record<string, unknown>;
+  refused: boolean;
+}> = [
+  { label: "a well-formed first chunk", fields: {}, refused: false },
+  {
+    label: "a number as chunk data",
+    fields: { data: 2_000_000 },
+    refused: true,
+  },
+  {
+    label: "a numeric string as chunk data",
+    fields: { data: "2000000" },
+    refused: true,
+  },
+  {
+    label: "an array-like object as chunk data",
+    fields: { data: { length: 2_000_000 } },
+    refused: true,
+  },
+  { label: "no chunk data", fields: { data: undefined }, refused: true },
+  {
+    label: "a string message id",
+    fields: { __peerData: "1" },
+    refused: true,
+  },
+  {
+    label: "an object message id that is not the close sentinel",
+    fields: { __peerData: { type: "other" } },
+    refused: true,
+  },
+  { label: "a zero chunk count", fields: { total: 0 }, refused: true },
+  { label: "a fractional chunk count", fields: { total: 1.5 }, refused: true },
+  { label: "an index at the declared count", fields: { n: 2 }, refused: true },
+  {
+    label: "a declared count past the reassembly limit",
+    fields: { total: MAX_CHUNKS_PER_REASSEMBLY + 1 },
+    refused: true,
+  },
+];
+
+/** The chunk envelopes both transports are held to: each malformed shape the CLI's
+ * receive dispatch refuses, a declared count past the reassembly limit, and a
+ * well-formed first chunk both must hold pending. */
+export const WEBRTC_CHUNK_ENVELOPE_FIXTURES: Array<WebrtcChunkEnvelopeFixture> =
+  chunkEnvelopes.map(({ label, fields, refused }) => ({
+    label,
+    datagram: chunkEnvelope(fields),
+    refused,
+  }));

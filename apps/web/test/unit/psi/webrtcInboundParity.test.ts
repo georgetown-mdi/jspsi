@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  WEBRTC_CHUNK_ENVELOPE_FIXTURES,
   WEBRTC_INBOUND_FRAME_FIXTURES,
   comparableVerdict,
   packValue,
@@ -231,5 +232,30 @@ describe("the web PeerJS wrap against core's pre-scan", () => {
       expect(failures, fixture.label).toEqual([]);
       expect(conn.delivered, fixture.label).toEqual([]);
     }
+  });
+});
+
+describe("the web PeerJS wrap against the shared chunk envelopes", () => {
+  test("refuses exactly the envelopes the CLI reassembler refuses", () => {
+    for (const fixture of WEBRTC_CHUNK_ENVELOPE_FIXTURES) {
+      const conn = new FakePeerJsConnection();
+      const failures: Array<ConnectionError> = [];
+      boundChunkReassembly(conn as unknown as DataConnection, (error) =>
+        failures.push(error),
+      );
+      conn._handleDataMessage({ data: fixture.datagram });
+
+      expect(
+        failures.map(({ kind }) => kind),
+        fixture.label,
+      ).toEqual(fixture.refused ? ["protocol"] : []);
+      expect(Object.keys(conn._chunkedData), fixture.label).toEqual(
+        fixture.refused ? [] : ["1"],
+      );
+      expect(conn.delivered, fixture.label).toEqual([]);
+    }
+    expect(
+      new Set(WEBRTC_CHUNK_ENVELOPE_FIXTURES.map(({ refused }) => refused)),
+    ).toEqual(new Set([true, false]));
   });
 });

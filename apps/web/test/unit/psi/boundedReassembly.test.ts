@@ -52,12 +52,16 @@ class FakeChunkedConnection {
     { data: Array<Uint8Array>; count: number; total: number }
   > = {};
   delivered: Array<Uint8Array> = [];
+  /** Chunks that reached PeerJS's handler, where it runs
+   * `new Uint8Array(chunk.data)`: a refused chunk must leave this unchanged. */
+  handledChunks = 0;
 
   _handleDataMessage = (message: { data: Uint8Array }): void => {
     this.delivered.push(message.data);
   };
 
   _handleChunk = (chunk: Chunk): void => {
+    this.handledChunks++;
     const id = chunk.__peerData;
     const info = this._chunkedData[id] ?? {
       data: [],
@@ -275,21 +279,6 @@ describe("boundChunkReassembly: wire-byte, chunk, and partial bounds", () => {
     expect(conn.delivered).toEqual([]);
   });
 
-  test("counts a string chunk by byte residency, not character length", () => {
-    const conn = new FakeChunkedConnection();
-    const fail = install(conn, { maxFrameBytes: 10 });
-
-    conn._handleChunk({
-      __peerData: 1,
-      n: 0,
-      total: 2,
-      data: "abcdef",
-    } as unknown as Chunk);
-
-    expect(fail).toHaveBeenCalledTimes(1);
-    expect((fail.mock.calls[0][0] as ConnectionError).kind).toBe("protocol");
-  });
-
   test("bounds a flood of tiny chunks by per-chunk residency", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, {
@@ -309,20 +298,27 @@ describe("boundChunkReassembly: wire-byte, chunk, and partial bounds", () => {
     );
   });
 
-  test("bounds the retained chunk count per reassembly", () => {
+  test("refuses a chunk declaring more chunks than the reassembly limit", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxChunks: 3 });
 
-    conn._handleChunk(makeChunk(1, 0, 100, 10));
-    conn._handleChunk(makeChunk(1, 1, 100, 10));
-    conn._handleChunk(makeChunk(1, 2, 100, 10));
-    expect(fail).not.toHaveBeenCalled();
-    conn._handleChunk(makeChunk(1, 3, 100, 10)); // 4th chunk > 3
+    conn._handleChunk(makeChunk(1, 0, 4, 10));
 
     expect(fail).toHaveBeenCalledTimes(1);
-    expect((fail.mock.calls[0][0] as ConnectionError).message).toContain(
-      "chunk",
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame exceeds its 3-chunk reassembly limit",
     );
+    expect(conn.handledChunks).toBe(0);
+  });
+
+  test("accepts a chunk declaring exactly the reassembly limit", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxChunks: 3 });
+
+    for (const n of [0, 1, 2]) conn._handleChunk(makeChunk(1, n, 3, 10));
+
+    expect(fail).not.toHaveBeenCalled();
+    expect(conn.delivered).toHaveLength(1);
   });
 
   test("throws when the PeerJS reassembly/unpack internals are absent", () => {
@@ -339,6 +335,115 @@ describe("boundChunkReassembly: wire-byte, chunk, and partial bounds", () => {
         vi.fn(),
       ),
     ).toThrow(/reassembly\/unpack internals/);
+  });
+});
+
+describe("boundChunkReassembly: chunk envelope shape", () => {
+  // Each `data` below is one PeerJS would turn into a buffer of the peer's
+  // choosing with `new Uint8Array(data)`, sized far past `maxFrameBytes`.
+  const nonBinaryPayloads: Array<[string, unknown]> = [
+    ["a number", 2_000_000],
+    ["a numeric string", "2000000"],
+    ["an array-like object", { length: 2_000_000 }],
+    ["an object claiming a byte length", { byteLength: 1 }],
+    ["an array", [1, 2, 3]],
+    ["a missing value", undefined],
+  ];
+
+  test.each(nonBinaryPayloads)(
+    "refuses %s as chunk data before charging or storing it",
+    (_label, data) => {
+      const conn = new FakeChunkedConnection();
+      const fail = install(conn, { maxFrameBytes: 1_000_000 });
+
+      conn._handleChunk({ __peerData: 1, n: 0, total: 2, data } as never);
+
+      expect(fail).toHaveBeenCalledTimes(1);
+      const err = fail.mock.calls[0][0] as ConnectionError;
+      expect(err).toBeInstanceOf(ConnectionError);
+      expect(err.kind).toBe("protocol");
+      expect(err.message).toBe(
+        "inbound WebRTC frame has a malformed chunk envelope: its chunk " +
+          "payload is not binary",
+      );
+      expect(conn.handledChunks).toBe(0);
+      expect(conn.partialCount).toBe(0);
+    },
+  );
+
+  test("refuses every later chunk once a non-binary one has failed the connection", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn, { maxFrameBytes: 100 });
+
+    conn._handleChunk({
+      __peerData: 1,
+      n: 0,
+      total: 2,
+      data: 2_000_000,
+    } as never);
+    conn._handleChunk(makeChunk(2, 0, 2, 1_000));
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect(conn.handledChunks).toBe(0);
+  });
+
+  const malformedEnvelopes: Array<[string, Record<string, unknown>, string]> = [
+    [
+      "a non-integer message id",
+      { __peerData: "1", n: 0, total: 2 },
+      "its chunk message id is not an integer",
+    ],
+    [
+      "a fractional chunk count",
+      { __peerData: 1, n: 0, total: 1.5 },
+      "its chunk count is not a positive integer",
+    ],
+    [
+      "a zero chunk count",
+      { __peerData: 1, n: 0, total: 0 },
+      "its chunk count is not a positive integer",
+    ],
+    [
+      "an index at the declared count",
+      { __peerData: 1, n: 2, total: 2 },
+      "its chunk index is outside the declared count",
+    ],
+    [
+      "a negative index",
+      { __peerData: 1, n: -1, total: 2 },
+      "its chunk index is outside the declared count",
+    ],
+  ];
+
+  test.each(malformedEnvelopes)(
+    "refuses a chunk with %s",
+    (_label, fields, detail) => {
+      const conn = new FakeChunkedConnection();
+      const fail = install(conn);
+
+      conn._handleChunk({ data: new Uint8Array(4), ...fields } as never);
+
+      expect(fail).toHaveBeenCalledTimes(1);
+      expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+        `inbound WebRTC frame has a malformed chunk envelope: ${detail}`,
+      );
+      expect(conn.handledChunks).toBe(0);
+    },
+  );
+
+  test("accepts an ArrayBuffer slice as well as a typed-array view", () => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn);
+
+    conn._handleChunk({
+      __peerData: 1,
+      n: 0,
+      total: 2,
+      data: new ArrayBuffer(4),
+    } as never);
+
+    expect(fail).not.toHaveBeenCalled();
+    expect(conn.handledChunks).toBe(1);
   });
 });
 
