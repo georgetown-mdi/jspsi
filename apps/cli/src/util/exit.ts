@@ -10,6 +10,7 @@ import {
   ConnectionError,
   getLogger,
   InternalConsistencyError,
+  MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
   UsageError,
 } from "@alcove/core";
@@ -87,7 +88,8 @@ export function worseReceiptVerdictExitCode(a: number, b: number): number {
 
 /**
  * The process exit code a caught command error reports: EX_USAGE (64) for a
- * {@link UsageError} or a {@link ConnectionError} of kind `usage`,
+ * {@link UsageError} or a {@link ConnectionError} of kind `usage`, bare or
+ * behind a `transport`-kind wrap ({@link usageFaultBehindTransportWrap}),
  * {@link INTERNAL_FAULT_EXIT_CODE} (70) for an {@link InternalConsistencyError},
  * {@link AUTHENTICATION_FAILED_EXIT_CODE} (77) for an
  * {@link AuthenticationError}, otherwise the error's own numeric `exitCode`
@@ -111,13 +113,40 @@ export function worseReceiptVerdictExitCode(a: number, b: number): number {
  * `process.exit`.
  */
 export function exitCodeForError(err: unknown): number {
-  if (err instanceof UsageError) return 64;
-  if (err instanceof ConnectionError && err.kind === "usage") return 64;
+  if (isUsageFault(err)) return 64;
+  if (usageFaultBehindTransportWrap(err)) return 64;
   if (err instanceof InternalConsistencyError) return INTERNAL_FAULT_EXIT_CODE;
   if (err instanceof AuthenticationError)
     return AUTHENTICATION_FAILED_EXIT_CODE;
   const own = (err as { exitCode?: unknown } | null | undefined)?.exitCode;
   return typeof own === "number" ? own : 69;
+}
+
+function isUsageFault(err: unknown): boolean {
+  return (
+    err instanceof UsageError ||
+    (err instanceof ConnectionError && err.kind === "usage")
+  );
+}
+
+/**
+ * Whether `err` is a `transport`-kind {@link ConnectionError} whose cause,
+ * through further `transport`-kind links only, is a usage fault. The message
+ * bridge (`fromEventConnection`) wraps every send and poll failure that way,
+ * so a {@link UsageError} the file-sync transport raised -- a bounded-transport
+ * refusal, an unexpected or corrupt file, a consumption timeout -- reaches a
+ * command boundary behind it. Any other kind ends the walk, so a `security`
+ * failure keeps its own code whatever it wraps.
+ */
+function usageFaultBehindTransportWrap(err: unknown): boolean {
+  let link: unknown = err;
+  for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH; depth++) {
+    if (!(link instanceof ConnectionError) || link.kind !== "transport")
+      return false;
+    link = link.cause;
+    if (isUsageFault(link)) return true;
+  }
+  return false;
 }
 
 /**
