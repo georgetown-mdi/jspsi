@@ -81,6 +81,18 @@ const SPACE_NAMED_LISTING = [
   "",
 ].join("\n");
 
+/** A listing holding names that start with one space and with several. */
+const LEADING_SPACE_LISTING = [
+  "  .                                   D        0  Mon Jan  1 00:00:00 2024",
+  "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
+  "   secret-client-list.csv             A      100  Mon Jan  1 00:00:00 2024",
+  "      q3-payroll.csv                  A      100  Mon Jan  1 00:00:00 2024",
+  "   .                                  A      100  Mon Jan  1 00:00:00 2024",
+  "",
+  "\t\t10485760 blocks of size 1024. 5242880 blocks available",
+  "",
+].join("\n");
+
 /** A listing one entry past the bound the transport will refuse to read. */
 function oversizedListing(): string {
   return [
@@ -1013,6 +1025,15 @@ describe("a failing listing keeps the operator's filenames out of the output", (
     );
     const empty = await runProbe(INPUT, timedOutListing(""));
     expect(verdictJson(withEntries)).toBe(verdictJson(empty));
+  });
+
+  test("an entry whose name starts with a space is dropped from the excerpt and counted", () => {
+    const excerpt = withoutListingEntries(LEADING_SPACE_LISTING);
+    expect(excerpt).not.toContain("secret-client-list");
+    expect(excerpt).not.toContain("q3-payroll");
+    expect(excerpt).toContain("blocks available");
+    expect(countEntries(LEADING_SPACE_LISTING)).toBe(3);
+    expect(freeMegabytes(LEADING_SPACE_LISTING)).toBe(5120);
   });
 
   test("smbclient's own lines stay in the excerpt", () => {

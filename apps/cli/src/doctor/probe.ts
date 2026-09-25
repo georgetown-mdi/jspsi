@@ -161,11 +161,12 @@ export function freeMegabytes(listing: string): number | undefined {
 
 /**
  * Whether a line of smbclient output is a directory-listing entry. smbclient
- * indents every entry by two spaces and starts its own messages at the first
+ * indents every entry by two spaces, a name that starts with a space included,
+ * tab-indents its free-space line, and starts its own messages at the first
  * column.
  */
 function isListingEntry(line: string): boolean {
-  return /^ {2}\S/.test(line);
+  return /^ {2}.*\S/.test(line);
 }
 
 /**
@@ -192,7 +193,7 @@ export function countEntries(listing: string): number {
   return listing
     .split("\n")
     .filter(isListingEntry)
-    .map((line) => line.trim().split(/\s+/)[0])
+    .map((line) => line.slice(2).split(/\s+/)[0])
     .filter((name) => name !== "." && name !== "..").length;
 }
 
