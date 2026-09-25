@@ -795,6 +795,29 @@ describe("local cleanup does not depend on the remote", () => {
   });
 });
 
+describe("a local fault is raised rather than reported as a verdict", () => {
+  // The doctor handler maps the raised error to exit 69, pinned in
+  // exitBoundaryMapping.test.ts.
+  test("a work directory that cannot be created stops the run with no report", async () => {
+    const before = process.listenerCount("SIGINT");
+    const mkdtemp = vi.spyOn(fs, "mkdtempSync").mockImplementation(() => {
+      throw Object.assign(new Error("no temporary directory"), {
+        code: "ENOENT",
+      });
+    });
+    try {
+      const probeDeps = deps(healthyReply);
+      await expect(runProbe(INPUT, probeDeps)).rejects.toThrow(
+        "no temporary directory",
+      );
+      expect(probeDeps.calls.map((call) => call.args)).toEqual([["--version"]]);
+      expect(process.listenerCount("SIGINT")).toBe(before);
+    } finally {
+      mkdtemp.mockRestore();
+    }
+  });
+});
+
 describe("an interrupt sweeps the share before it re-raises", () => {
   const RESULT: CommandResult = { code: 0, output: "", timedOut: false };
 
