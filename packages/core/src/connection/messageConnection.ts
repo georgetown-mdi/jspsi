@@ -7,11 +7,14 @@ import type { Connection } from "../types";
  *   exhausted (peer unreachable, dropped, inactivity timeout). Retrying the
  *   whole exchange is reasonable.
  * - `security`: an authentication/replay/ordering check failed. Must not be
- *   silently retried; report it loudly as possible tampering.
+ *   silently retried; report it loudly as possible tampering. The
+ *   authentication subset is the `AuthenticationError` subclass, which the
+ *   CLI's error->exit boundary maps to 77 (EX_NOPERM).
  * - `usage`: the connection was misconfigured or used incorrectly (e.g. a send
  *   after close, a path shared by another session). The caller must fix
  *   something before retrying. The CLI's error->exit boundary maps only this
- *   kind to 64 (EX_USAGE) alongside `UsageError`; every other kind takes 69.
+ *   kind to 64 (EX_USAGE) alongside `UsageError`; every other kind takes 69,
+ *   apart from the `AuthenticationError` subclass above.
  * - `protocol`: the peer violated the message protocol (e.g. sent out of turn).
  * - `closed`: a parked operation was cancelled by a local
  *   {@link MessageConnection.close} (e.g. a signal-driven shutdown). Nothing

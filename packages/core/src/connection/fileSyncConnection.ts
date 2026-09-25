@@ -16,8 +16,9 @@ import type {
   FileDropConnectionConfig,
 } from "../config/connection";
 import type { HandshakeRole } from "../types";
-import { ConnectionError, errorMessage } from "./messageConnection";
+import { errorMessage } from "./messageConnection";
 import {
+  AuthenticationError,
   UsageError,
   ConnectionClosedError,
   TransportOperationStalledError,
@@ -1129,11 +1130,10 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
         if (refusal !== undefined) {
           // A host-identity failure -- a pinned-fingerprint mismatch or the
           // no-pin fail-closed refusal (both verifier branches settle through
-          // refusal()) -- is a trust-boundary fault, so it has the security
-          // kind consumers classify on.
-          throw new ConnectionError(
+          // refusal()) -- is an authentication failure against the server, so
+          // it has the class and the security kind consumers classify on.
+          throw new AuthenticationError(
             `SFTP host-key verification failed: ${refusal.summary}`,
-            "security",
             { cause: chainDetailCauses(refusal.details, err) },
           );
         }

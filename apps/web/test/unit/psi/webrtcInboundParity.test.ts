@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  WEBRTC_CHUNK_ENVELOPE_FIXTURES,
   WEBRTC_INBOUND_FRAME_FIXTURES,
   comparableVerdict,
   packValue,
@@ -83,7 +84,7 @@ class FakePeerJsConnection {
   /** Each unpacked frame that reached the application. */
   delivered: Array<unknown> = [];
 
-  _handleDataMessage = (message: { data: Uint8Array }): void => {
+  _handleDataMessage = (message: { data: Uint8Array | ArrayBuffer }): void => {
     const value = unpackFrame(message.data);
     if (isChunkEnvelope(value)) this._handleChunk(value);
     else this.delivered.push(value);
@@ -231,5 +232,32 @@ describe("the web PeerJS wrap against core's pre-scan", () => {
       expect(failures, fixture.label).toEqual([]);
       expect(conn.delivered, fixture.label).toEqual([]);
     }
+  });
+});
+
+describe("the web PeerJS wrap against the shared chunk envelopes", () => {
+  test("refuses exactly the envelopes the CLI reassembler refuses", () => {
+    for (const fixture of WEBRTC_CHUNK_ENVELOPE_FIXTURES) {
+      const conn = new FakePeerJsConnection();
+      const failures: Array<ConnectionError> = [];
+      boundChunkReassembly(conn as unknown as DataConnection, (error) =>
+        failures.push(error),
+      );
+      // As PeerJS's data channel delivers it: under an ArrayBuffer, BinaryPack
+      // decodes a slice to an ArrayBuffer, the shape a `__proto__` key can mimic.
+      conn._handleDataMessage({ data: fixture.datagram.slice().buffer });
+
+      expect(
+        failures.map(({ kind }) => kind),
+        fixture.label,
+      ).toEqual(fixture.refused ? ["protocol"] : []);
+      expect(Object.keys(conn._chunkedData), fixture.label).toEqual(
+        fixture.refused ? [] : ["1"],
+      );
+      expect(conn.delivered, fixture.label).toEqual([]);
+    }
+    expect(
+      new Set(WEBRTC_CHUNK_ENVELOPE_FIXTURES.map(({ refused }) => refused)),
+    ).toEqual(new Set([true, false]));
   });
 });

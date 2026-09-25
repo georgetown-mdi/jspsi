@@ -599,6 +599,7 @@ export function InviterScreen() {
     run,
     outputs,
     failure,
+    runRecord,
     warnings,
     jobId,
     reattached,
@@ -1793,6 +1794,7 @@ export function InviterScreen() {
               run={run}
               outputs={outputs}
               failure={failure}
+              runRecord={runRecord}
               warnings={warnings}
               partnerAcceptsByCli={isCliTransport(transport)}
               onDownloadAcceptKit={

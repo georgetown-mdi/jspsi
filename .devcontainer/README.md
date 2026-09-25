@@ -90,8 +90,10 @@ Four layers, so prompt-free operation inside is safe:
 `post-create.sh` writes the container's *user* settings wholesale from
 `claude-settings.json`, the tracked template beside it: `permissions.defaultMode:
 bypassPermissions` so sessions inside start prompt-free, the session model and
-effort, the editor and TUI preferences, and the statusline command pointing at
-`/workspace/.claude/statusline.mjs` on the bind-mounted workspace. None of this
+effort, the editor and TUI preferences, the statusline command pointing at
+`/workspace/.claude/statusline.mjs` on the bind-mounted workspace, and
+`cleanupPeriodDays: 60`, which keeps session transcripts past Claude Code's
+30-day default so a retro that runs late still has its window. None of this
 touches the host's own Claude configuration. The template is the source of truth
 for those settings, so a change to make belongs in it: the `~/.claude` volume is
 per-`${devcontainerId}` and a hand-edit inside one is replaced the next time a

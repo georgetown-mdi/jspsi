@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 
 import {
   readControlFileWithGate,
+  HELLO_MAX_BYTES,
   helloEnvelope,
   bilateralMismatch,
   composeDirsDisplay,
@@ -46,6 +47,7 @@ import {
   isPeerWaitTimeout,
   BilateralModeMismatchError,
   ConnectionClosedError,
+  FrameSizeExceededError,
 } from "../../src/errors";
 
 // A FileTransportClient stub whose only meaningful method is get(); every other
@@ -196,7 +198,51 @@ describe("isPeerHelloName / isPeerJoiningName", () => {
 
 describe("readControlFileWithGate", () => {
   const future = () => new Date(Date.now() + 60_000);
+  const listedSize = 64;
   const signal = () => new AbortController().signal;
+
+  test("refuses a hello listed over HELLO_MAX_BYTES without reading it", async () => {
+    let calls = 0;
+    const client = stubClient(async () => {
+      calls += 1;
+      return helloBuffer(false, false);
+    });
+    const thrown = await readControlFileWithGate(
+      client,
+      "in/peer-hello.json",
+      HELLO_MAX_BYTES + 1,
+      future(),
+      1,
+      HelloEnvelopeSchema,
+      "presentAtEntry",
+      signal(),
+    ).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+    expect(thrown).toBeInstanceOf(FrameSizeExceededError);
+    expect(calls).toBe(0);
+    expect(sanitizeErrorForDisplay(thrown)).toContain("in/peer-hello.json");
+  });
+
+  test("reads a hello listed at HELLO_MAX_BYTES with the read capped at that size", async () => {
+    const maxBytesSeen: Array<number | undefined> = [];
+    const client = stubClient(async (_path, options) => {
+      maxBytesSeen.push(options?.maxBytes);
+      return helloBuffer(false, false);
+    });
+    await readControlFileWithGate(
+      client,
+      "in/peer-hello.json",
+      HELLO_MAX_BYTES,
+      future(),
+      1,
+      HelloEnvelopeSchema,
+      "presentAtEntry",
+      signal(),
+    );
+    expect(maxBytesSeen).toEqual([HELLO_MAX_BYTES]);
+  });
 
   test("rethrows a terminal UsageError from get() without retrying", async () => {
     let calls = 0;
@@ -209,6 +255,7 @@ describe("readControlFileWithGate", () => {
       readControlFileWithGate(
         client,
         "in/peer-hello.json",
+        listedSize,
         future(),
         1,
         HelloEnvelopeSchema,
@@ -229,6 +276,7 @@ describe("readControlFileWithGate", () => {
     const envelope = await readControlFileWithGate(
       client,
       "in/peer-hello.json",
+      listedSize,
       future(),
       1,
       HelloEnvelopeSchema,
@@ -251,6 +299,7 @@ describe("readControlFileWithGate", () => {
       readControlFileWithGate(
         client,
         "in/peer-hello.json",
+        listedSize,
         future(),
         1,
         HelloEnvelopeSchema,
@@ -286,6 +335,7 @@ describe("readControlFileWithGate", () => {
       const err = await readControlFileWithGate(
         client,
         "in/-----BEGIN RSA PRIVATE KEY-----.json",
+        listedSize,
         future(),
         1,
         HelloEnvelopeSchema,
@@ -311,6 +361,7 @@ describe("readControlFileWithGate", () => {
       await readControlFileWithGate(
         client,
         "in/peer-hello.json",
+        listedSize,
         new Date(Date.now() - 1),
         1,
         HelloEnvelopeSchema,
@@ -342,6 +393,7 @@ describe("readControlFileWithGate", () => {
     const thrown = await readControlFileWithGate(
       client,
       "in/peer-hello.json",
+      listedSize,
       new Date(Date.now() - 1),
       1,
       HelloEnvelopeSchema,
@@ -378,6 +430,7 @@ describe("readControlFileWithGate", () => {
       const thrown = await readControlFileWithGate(
         client,
         filePath,
+        listedSize,
         new Date(Date.now() - 1),
         1,
         HelloEnvelopeSchema,
@@ -412,6 +465,7 @@ describe("readControlFileWithGate", () => {
       const thrown = await readControlFileWithGate(
         client,
         "",
+        listedSize,
         new Date(Date.now() - 1),
         1,
         HelloEnvelopeSchema,

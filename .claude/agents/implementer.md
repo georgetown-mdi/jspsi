@@ -31,10 +31,8 @@ produce is your final message to the caller. Never end expecting a reply.
   branch's work: an untracked leftover there blocks
   `require-clean-tree-for-review.mjs` on the branch's next review round.
   Anything the change itself needs belongs in the commit.
-- Never start a long command with `run_in_background`: you have no turn left for
-  the completion notification to land in. Run it in the FOREGROUND with a raised
-  `timeout` (the Bash tool's ceiling is 600000 ms); split a command that exceeds
-  the ceiling, or hand the work back to the caller.
+- Wait on a long command as `CLAUDE.md`'s one-shot wait rule says (Agent
+  conventions, Spawns and reports).
 - Before you report, run `npm run typecheck && npm run lint && npm run format` and
   the tests relevant to your change (a core change means every workspace unit
   suite), and state in your report whether the work is committed.

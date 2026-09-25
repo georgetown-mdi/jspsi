@@ -67,7 +67,7 @@ Beyond the conventions in `CONTRIBUTING.md`:
 - Prettier ignores markdown.
 - The Bash tool runs zsh: unquoted `$var` does not word-split, bare `grep` is ugrep, and an unmatched glob is an error -- quote globs, and use arrays or `xargs` for multi-file commands.
 - `vitest -w` is watch mode and hangs a non-interactive session; use `npx vitest run` or `npm test -w <workspace>`.
-- Never sleep-poll a background run: every poll re-bills the polling session's whole context. Wait for the completion notification, or block on the condition itself (`until <test>; do sleep 2; done`), spending the interval on other work. Enforced by `block-sleep-poll.mjs` on Bash.
+- Never sleep-poll a background run: every poll re-bills the polling session's whole context. Wait for the completion notification, or loop on the condition inside one bounded call (`timeout 600 sh -c 'until <test>; do sleep 2; done'`). Enforced by `block-sleep-poll.mjs` on Bash.
 
 ### Branches, worktrees and checkouts
 
@@ -79,7 +79,7 @@ Beyond the conventions in `CONTRIBUTING.md`:
 ### Spawns and reports
 
 - When you finish implementing a branch, end your report with a review-tier recommendation sized from the actual diff (`git diff "staging...HEAD" --stat` plus a security-surface check), not from the issue. Tiers and rule: `.claude/commands/start-issue.md`, Step 5.
-- A one-shot agent -- a `.claude/agents/` role spawn, a `/light-review` round, a `Workflow` `agent()` call -- has no next turn: run a long command in the FOREGROUND with a raised `timeout` (Bash ceiling, 600000 ms), never `run_in_background`, since a completion notification cannot re-invoke a returned agent. Split a longer command into stages, or hand it back to the caller.
+- A one-shot agent the Agent tool spawned may run a long command with `run_in_background`, wrapped in `timeout <N>`, and end its turn: the harness resumes it with the result. A foreground command with a raised `timeout` also works (Bash ceiling, 600000 ms). A `Workflow` `agent()` call is unprobed: foreground only, in stages past the ceiling. Probe: `block-sleep-poll.mjs` header.
 - Dev containers are firewall-blocked: never give subagents web-search or web-fetch tasks. CI run-log bodies are not blocked -- read failure detail via `gh run view --job <id> --log-failed`, falling back to the check-run annotations API only when no log body is available.
 - Every Agent spawn passes an explicit model, or names a `subagent_type` whose `.claude/agents/` definition pins the tier -- Opus for implementation and ordinary review, Sonnet for mechanical work. Enforced by `require-agent-model.mjs`.
 - A brief or report asserts a repo convention or a fact only by citing the repo file that states it; anything taken from memory is labeled advisory or unverified -- an agent cannot tell an unsourced claim from a real one, and applies both.

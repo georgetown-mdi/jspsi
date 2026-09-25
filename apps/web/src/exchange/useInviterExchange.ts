@@ -51,6 +51,7 @@ import { invitationUsable } from "@psi/formatting";
 import { selectExchangeDriver } from "@psi/exchangeDriverSelection";
 
 import { buildRunEvents } from "./runEvents";
+import { useFailedRunRecord } from "./useFailedRunRecord";
 
 import {
   WAITING_STAGE_ID,
@@ -66,6 +67,7 @@ import type {
   ExchangeErrorCategory,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
+import type { AvailableRecordOffer, RunOutputs } from "@psi/runOutputs";
 import type { ExchangeRun, ExchangeSeat } from "./exchangeRun";
 import type {
   JobInputSource,
@@ -79,7 +81,6 @@ import type { JobExchangeOptions } from "@jobs/intentSchemas";
 import type { LoadedEnforcementRecords } from "@console/loadedConfig";
 import type { ReceiptsIntentFields } from "@psi/receiptsModel";
 import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
-import type { RunOutputs } from "@psi/runOutputs";
 import type { Transport } from "@psi/transportChooser";
 
 const log = getLogger("useInviterExchange");
@@ -645,6 +646,9 @@ export function useInviterExchange({
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
+  /** The exchange record a failed in-browser run holds, offered for download
+   * beside the failure; undefined on every other run. */
+  runRecord: AvailableRecordOffer | undefined;
   warnings: ReadonlyArray<string>;
   /** The console job id of the current server-job run, once created; undefined
    * on a browser run and before the job exists. Drives the completed-run recurring
@@ -666,6 +670,7 @@ export function useInviterExchange({
   const [run, setRun] = useState<ExchangeRun>(initialRun);
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
+  const { runRecord, offerRunRecord, clearRunRecord } = useFailedRunRecord();
   const [warnings, setWarnings] = useState<Array<string>>([]);
   // The status of an exchange this run re-attached to on a busy (409) create,
   // else undefined. Drives the run surface's recovery-style copy; reset when a run
@@ -730,6 +735,7 @@ export function useInviterExchange({
     setRun(initialRun());
     setOutputs(undefined);
     setFailure(undefined);
+    clearRunRecord();
     setWarnings([]);
     setCurrentJobId(undefined);
     setReattached(undefined);
@@ -898,6 +904,7 @@ export function useInviterExchange({
       setWarnings,
       setReattached,
       setReattaching,
+      offerRunRecord,
       setJobId: (id) => {
         currentJobIdRef.current = id;
         setCurrentJobId(id);
@@ -934,6 +941,7 @@ export function useInviterExchange({
       setRun(initialRun());
       setOutputs(undefined);
       setFailure(undefined);
+      clearRunRecord();
       setWarnings([]);
       setCurrentJobId(undefined);
       setReattached(undefined);
@@ -1000,6 +1008,7 @@ export function useInviterExchange({
     run,
     outputs,
     failure,
+    runRecord,
     warnings,
     jobId: currentJobId,
     reattached,

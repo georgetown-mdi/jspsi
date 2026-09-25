@@ -1,10 +1,12 @@
 // Classifying a caught error into a process exit code, and the two boundaries
 // that apply it: the classification a boundary reads when its errors vary,
-// plus two of the sysexits rungs docs/CLI.md's exit-code table lists -- 70
-// for an internal fault and 65 for a definite verify-receipt failure. The
-// table's other rungs are declared where they are set.
+// plus four of the sysexits rungs docs/CLI.md's exit-code table lists -- 70
+// for an internal fault, 77 for an authentication failure, and
+// verify-receipt's 65 and 66 verdict codes. The table's other rungs are
+// declared where they are set.
 
 import {
+  AuthenticationError,
   ConnectionError,
   getLogger,
   InternalConsistencyError,
@@ -28,12 +30,26 @@ import {
 export const INTERNAL_FAULT_EXIT_CODE = 70;
 
 /**
+ * The process exit code for an authentication failure: `EX_NOPERM` (77). Held
+ * by core's {@link AuthenticationError} -- the key exchange rejecting the
+ * shared secret or the peer, or an SFTP host key other than the pinned one --
+ * and set on the refusal for a rotated shared secret this party could not
+ * save, after which every later key exchange fails the same way.
+ *
+ * Not 69: a retry against the same secret or the same server reaches the same
+ * refusal, and on a schedule so does every later run. The documented response
+ * is to re-invite, or to verify the server's key (see docs/CLI.md, Exit
+ * codes).
+ */
+export const AUTHENTICATION_FAILED_EXIT_CODE = 77;
+
+/**
  * The process exit code `alcove verify-receipt` reports for a definite
  * verification failure: `EX_DATAERR` (65), the sysexits code for input data
  * that was incorrect in some way. Read by both of the command's report
- * renderers -- the unsigned record and the dual-signed record -- and rolled up
- * by the command handler with `Math.max` alongside the 0 the other outcomes
- * report, so a failure on either half still reports this code.
+ * renderers -- the unsigned record and the dual-signed record -- and combined
+ * across them by {@link worseReceiptVerdictExitCode}, so a failure on either
+ * half reports this code.
  *
  * Distinct from the top-level catch-all (`process.exit(1)` in `index.ts`),
  * which stays 1: an unattended supervisor that sees this code knows the run
@@ -43,23 +59,53 @@ export const INTERNAL_FAULT_EXIT_CODE = 70;
 export const RECEIPT_VERIFICATION_FAILED_EXIT_CODE = 65;
 
 /**
+ * The process exit code `alcove verify-receipt` reports for an incomplete
+ * verdict: `EX_NOINPUT` (66). Nothing contradicted the record, but a check
+ * could not run because an input it needs -- data, terms, a pinned
+ * fingerprint, a signing identity, the exchange record -- was not supplied or
+ * could not be read. Nonzero so a script gating on exit 0 accepts only a
+ * receipt that was fully checked, and distinct from
+ * {@link RECEIPT_VERIFICATION_FAILED_EXIT_CODE} because the remedy is to
+ * supply the missing inputs, not to distrust the record.
+ */
+export const RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE = 66;
+
+/**
+ * The exit code for two verify-receipt verdicts one run reports: a failure
+ * outranks an incomplete verdict, which outranks a verified one. Not a
+ * numeric maximum, since the incomplete code is the larger number.
+ */
+export function worseReceiptVerdictExitCode(a: number, b: number): number {
+  const rank = (code: number): number =>
+    code === RECEIPT_VERIFICATION_FAILED_EXIT_CODE
+      ? 2
+      : code === RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE
+        ? 1
+        : 0;
+  return rank(a) >= rank(b) ? a : b;
+}
+
+/**
  * The process exit code a caught command error reports: EX_USAGE (64) for a
  * {@link UsageError} or a {@link ConnectionError} of kind `usage`,
  * {@link INTERNAL_FAULT_EXIT_CODE} (70) for an {@link InternalConsistencyError},
- * otherwise the error's own numeric `exitCode` when it has one, else
- * EX_UNAVAILABLE (69). The classification a boundary reads when its errors
- * vary; a boundary whose errors are all usage faults exits 64 outright.
+ * {@link AUTHENTICATION_FAILED_EXIT_CODE} (77) for an
+ * {@link AuthenticationError}, otherwise the error's own numeric `exitCode`
+ * when it has one, else EX_UNAVAILABLE (69). The classification a boundary
+ * reads when its errors vary; a boundary whose errors are all usage faults
+ * exits 64 outright.
  *
  * A {@link ConnectionError}'s taxonomy is a FIELD (`kind`) rather than a
  * subclass, so it is read here rather than left to the 69 default: a `usage`
  * kind names a caller, protocol, or terms correction that a re-run cannot
- * supply, while `transport`, `closed`, `security`, and `protocol` stay 69,
- * availability conditions a retry can clear.
+ * supply. The one subclass read here is {@link AuthenticationError}; every
+ * other `security`-kind failure, and `transport`, `closed`, and `protocol`,
+ * stay 69.
  *
- * The own-`exitCode` rung matters in both directions: `openInputSource` and
- * `buildDataSpec` throw plain `Error`s holding `exitCode`, so a missing input
- * file keeps its own code rather than collapsing to 69, and a run whose
- * exchange completed while its result file did not reach disk has
+ * The own-`exitCode` rung matters in both directions: `openInputSource`
+ * throws a plain `Error` holding `exitCode`, so a missing input file keeps
+ * its own code rather than collapsing to 69, and a run whose exchange
+ * completed while its result file did not reach disk has
  * `PERSISTENCE_LOSS_EXIT_CODE` (73). The rung is typed rather than
  * `??`-defaulted so a non-numeric `exitCode` on some other object cannot reach
  * `process.exit`.
@@ -68,6 +114,8 @@ export function exitCodeForError(err: unknown): number {
   if (err instanceof UsageError) return 64;
   if (err instanceof ConnectionError && err.kind === "usage") return 64;
   if (err instanceof InternalConsistencyError) return INTERNAL_FAULT_EXIT_CODE;
+  if (err instanceof AuthenticationError)
+    return AUTHENTICATION_FAILED_EXIT_CODE;
   const own = (err as { exitCode?: unknown } | null | undefined)?.exitCode;
   return typeof own === "number" ? own : 69;
 }

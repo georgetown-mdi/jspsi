@@ -2,7 +2,7 @@ import { runExchangeLifecycle } from "./exchangeLifecycle";
 
 import type {
   Acquire,
-  ExchangeErrorCategory,
+  ExchangeFailure,
   ExchangeOutputs,
   GenerateOutput,
   StageDefinition,
@@ -35,11 +35,10 @@ export interface ExchangeDriverEvents<
   /** The run succeeded: the owner-widened outputs. */
   onResult: (outputs: TOutputs) => void;
   /** The run failed, tagged with the category that decides the consumer's
-   * recovery affordance. */
-  onError: (failure: {
-    category: ExchangeErrorCategory;
-    error: unknown;
-  }) => void;
+   * recovery affordance, and holding the run's exchange record where the
+   * in-browser driver has one to offer. The server-job driver sets no record:
+   * the console holds that run's pair, and the seat asks for it. */
+  onError: (failure: ExchangeFailure) => void;
   /** A non-fatal, operator-relevant notice raised mid-run: the server-job
    * driver forwards each relay `warning` event's message (e.g. the CLI's
    * cross-party host-key divergence notice), and the in-browser driver raises

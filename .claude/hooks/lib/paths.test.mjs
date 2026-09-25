@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,7 +14,8 @@ import { canonicalPath, nearestExistingDirectory } from "./paths.mjs";
 describe("lib/paths", () => {
   const dirs = [];
   const scratch = () => {
-    const dir = mkdtempSync(join(tmpdir(), "hook-paths-"));
+    // Resolved, since the temporary directory can itself sit behind a symlink.
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "hook-paths-")));
     dirs.push(dir);
     return dir;
   };
