@@ -3,6 +3,7 @@ import {
   assertCountOnlyTransmitsNoColumn,
   inferMetadata,
   isDisclosedToPartner,
+  linkageDateOfBirthColumn,
 } from "./config/metadata.js";
 import {
   assertBothSidedDeduplicateImplemented,
@@ -14,7 +15,10 @@ import {
   resolvedMatchingFromTerms,
 } from "./linkageTermsPolicy.js";
 import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
-import { getDefaultStandardization } from "./defaults/builtInStandardization.js";
+import {
+  DEFAULT_DATE_INPUT_FORMAT,
+  getDefaultStandardization,
+} from "./defaults/builtInStandardization.js";
 import {
   buildStandardizedDataset,
   declaredEffectiveKeyCount,
@@ -27,7 +31,7 @@ import {
   assertLinkageTermsSatisfiable,
   assertStandardizationMatchesTerms,
 } from "./linkageSatisfiability.js";
-import { columnValues, inferDateFormat } from "./utils/date.js";
+import { columnValues, inferDateFormatWithCounts } from "./utils/date.js";
 import {
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
@@ -1221,15 +1225,26 @@ export function prepareForExchange(
 
   let dateInputFormat: string | undefined;
   if (exchangeDataSpec.standardization === undefined) {
-    // Only a `role: linkage` date_of_birth column participates in linkage,
-    // so only one may drive the inferred date format.
-    const dobCol = metadata.find(
-      (c) => c.type === "date_of_birth" && c.role === "linkage",
-    );
+    const dobCol = linkageDateOfBirthColumn(metadata);
     if (dobCol !== undefined) {
-      dateInputFormat = inferDateFormat(columnValues(rawRows, dobCol.name));
-      if (dateInputFormat !== undefined)
-        log.info(`inferred date of birth format: ${dateInputFormat}`);
+      const inference = inferDateFormatWithCounts(
+        columnValues(rawRows, dobCol.name),
+      );
+      dateInputFormat = inference.format;
+      if (inference.format !== undefined)
+        log.info(
+          `inferred date of birth format: ${inference.format}` +
+            (inference.unparsed > 0
+              ? ` (${inference.unparsed} of ${inference.scanned} sampled values do not parse and are dropped)`
+              : ""),
+        );
+      else if (inference.scanned > 0)
+        log.warn(
+          `could not infer the date of birth format: no candidate format ` +
+            `parses most of the ${inference.scanned} sampled values, so they ` +
+            `are parsed as ${DEFAULT_DATE_INPUT_FORMAT}. Set the parse_date ` +
+            `input_format in a standardization to choose the format.`,
+        );
     }
   }
 

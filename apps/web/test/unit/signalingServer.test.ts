@@ -519,6 +519,38 @@ describe("signaling socket guards", () => {
 
     second.close();
   });
+
+  test("a socket closing removes its client's registration only while that client holds the id", async () => {
+    // A registration removed ahead of its socket's close leaves the id free,
+    // and another client may take it before that close arrives. The close
+    // then belongs to a client the realm no longer holds, and the newer
+    // registration stays.
+    const sig = await startSignaling();
+    const earlier = new WebSocket(signalingUrl(sig.port, "peer-shared"));
+    earlier.on("error", () => {});
+    await waitForFrame(earlier, "OPEN");
+    const earlierClient = sig.realm.getClientById("peer-shared")!;
+    expect(sig.realm.removeClient(earlierClient)).toBe(true);
+
+    const later = new WebSocket(
+      signalingUrl(sig.port, "peer-shared").replace(
+        "token=tok",
+        "token=another-token",
+      ),
+    );
+    await waitForFrame(later, "OPEN");
+    const laterClient = sig.realm.getClientById("peer-shared");
+    expect(laterClient).toBeDefined();
+    expect(laterClient).not.toBe(earlierClient);
+
+    earlier.close();
+    await waitFor(() => earlier.readyState === WebSocket.CLOSED);
+    await waitFor(() => sig.wss.socketServer.clients.size === 1);
+
+    expect(sig.realm.getClientById("peer-shared")).toBe(laterClient);
+    expect(later.readyState).toBe(WebSocket.OPEN);
+    later.close();
+  });
 });
 
 // A release the peer declines to cooperate with must still happen on the bound,

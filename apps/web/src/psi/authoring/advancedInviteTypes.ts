@@ -90,6 +90,15 @@ export interface DraftKey {
  */
 export type OutputDirection = "both" | "inviter" | "partner";
 
+/**
+ * The date-of-birth input format a server-side profile inferred for each
+ * column it could infer one for, keyed by column name. The console reads its
+ * file server-side and holds no rows, so the format of whichever column the
+ * operator binds as the date of birth is looked up here rather than inferred
+ * in the browser.
+ */
+export type ProfiledDateInputFormats = ReadonlyMap<string, string>;
+
 /** Map an {@link OutputDirection} to the inviter's {@link Output} pair. The three
  * cases are exactly the three valid (non-"neither") combinations, so no choice can
  * yield a forbidden pair. The acceptor derives its own (mirrored) output from

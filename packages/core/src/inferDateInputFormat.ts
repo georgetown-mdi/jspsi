@@ -1,16 +1,15 @@
 import type { LocalFile } from "papaparse";
 
 import { CSV_LINE_BYTE_CEILING, loadCSVColumnSample } from "./file.js";
-import { inferMetadata } from "./config/metadata.js";
+import { inferMetadata, linkageDateOfBirthColumn } from "./config/metadata.js";
 import { INFER_DATE_SCAN_CAP, inferDateFormat } from "./utils/date.js";
 
 /**
- * Resolve the date-of-birth column of a header, by running {@link inferMetadata}
- * over the column names and taking the first column it types `date_of_birth`, or
- * `undefined` when none is. The ONE definition of that selection, so every caller
- * that needs to locate the DOB column for date-format inference -- the CLI's init
- * path, the shared {@link inferDateInputFormatFromSource} below, and the web
- * server's streaming file profile -- picks the same column and cannot drift.
+ * Resolve the date-of-birth column of a header: {@link linkageDateOfBirthColumn}
+ * over the metadata {@link inferMetadata} gives the column names, or `undefined`
+ * when there is none. The column a config authored from this header, such as
+ * the CLI's `init` template through {@link inferDateInputFormatFromSource},
+ * binds the `date_of_birth` field to.
  *
  * An empty column name is dropped rather than handed to {@link inferMetadata}:
  * this selection runs inside the read -- `loadCSVColumnSample`'s chunk handler
@@ -27,7 +26,7 @@ export function inferDateOfBirthColumn(
   const named = columns.filter((name) => name.length > 0);
   // No name is empty past that filter, so no refusal can fire and there is no
   // cause to state; the read's caller raises the one that names the removal.
-  return inferMetadata(named, []).find((c) => c.type === "date_of_birth")?.name;
+  return linkageDateOfBirthColumn(inferMetadata(named, []))?.name;
 }
 
 /** The header columns plus the inferred date-input format of a source's

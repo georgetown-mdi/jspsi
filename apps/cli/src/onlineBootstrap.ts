@@ -6,6 +6,7 @@ import {
   loadCSVFile,
   prepareForExchange,
   inferMetadata,
+  linkageDateOfBirthColumn,
   DEFAULT_LINKAGE_RULE_SET,
   linkageTermsFromRuleSet,
   getDefaultStandardization,
@@ -658,7 +659,7 @@ export function buildDataSpec(args: {
       linkageStrategy,
     );
 
-  const dobCol = metadata.find((c) => c.type === "date_of_birth");
+  const dobCol = linkageDateOfBirthColumn(metadata);
   const dateInputFormat =
     args.dateInputFormat ??
     (dobCol !== undefined

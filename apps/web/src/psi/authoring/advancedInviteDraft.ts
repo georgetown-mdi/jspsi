@@ -8,6 +8,7 @@ import {
   getDefaultStandardization,
   inferDateFormat,
   inferMetadata,
+  linkageDateOfBirthColumn,
   optInLinkageKeys,
   referencedLinkageFieldNames,
 } from "@alcove/core";
@@ -34,6 +35,7 @@ import type {
   AdvancedInviteDraft,
   AdvancedInviteSeed,
   DraftKey,
+  ProfiledDateInputFormats,
 } from "./advancedInviteTypes";
 
 /**
@@ -52,9 +54,9 @@ import type {
  * assumes. Needed here because the advanced path and the acceptor's
  * Prepare-data editor always supply an explicit standardization (unlike the
  * quick path, which lets the exchange infer), so without this a non-US date
- * file would silently parse with the wrong format. Mirrors the exchange's own
- * inference (first present `role: linkage` date_of_birth column drives
- * {@link inferDateFormat}, falling back to `MM/DD/YYYY`).
+ * file would silently parse with the wrong format. The format is that of the
+ * column the exchange's own inference reads ({@link inferDateInputFormat}),
+ * falling back to `MM/DD/YYYY`.
  *
  * The inferred format lives only in the local cleaning steps -- the
  * cross-party terms hold the field, not its cleaning -- so this never moves
@@ -64,10 +66,10 @@ export function defaultStandardizationForRows(
   metadata: Metadata,
   terms: LinkageTerms,
   rawRows: ReadonlyArray<CSVRow>,
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): Standardization {
   return getDefaultStandardization(metadata, terms, {
-    dateInputFormat: dateInputFormat ?? inferDateInputFormat(metadata, rawRows),
+    dateInputFormat: inferDateInputFormat(metadata, rawRows, dateInputFormats),
   });
 }
 
@@ -96,7 +98,7 @@ export function inviterDefaultStandardization(
   terms: LinkageTerms,
   enabledKeys: ReadonlyArray<LinkageKey>,
   rawRows: ReadonlyArray<CSVRow> = [],
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): Standardization {
   const declared = new Set(terms.linkageFields.map((field) => field.name));
   const referenced = referencedLinkageFieldNames(enabledKeys);
@@ -116,7 +118,7 @@ export function inviterDefaultStandardization(
     metadata,
     widened,
     rawRows,
-    dateInputFormat,
+    dateInputFormats,
   );
 }
 
@@ -128,42 +130,45 @@ function enabledLinkageKeys(keys: ReadonlyArray<DraftKey>): Array<LinkageKey> {
 }
 
 /**
- * The date-of-birth input format the recommended cleaning parses with: inferred
- * from the first present `role: linkage` date_of_birth column's values, or
- * `undefined` (the `MM/DD/YYYY` default) when there is no such column or the layout
- * cannot be inferred. The single derivation {@link defaultStandardizationForRows}
- * falls back to when no pre-inferred format is threaded, and the value the console
- * profiles server-side so the browser can author without the rows.
+ * The date-of-birth input format the recommended cleaning parses with, for the
+ * column core's {@link linkageDateOfBirthColumn} selects from `metadata` -- the
+ * column the exchange infers from -- or `undefined` (the `MM/DD/YYYY` default)
+ * when there is no such column or its layout cannot be inferred.
+ *
+ * Inferred from that column's `rawRows` values or, when `dateInputFormats` is
+ * given (the console, which holds no rows), looked up there by the column's
+ * name. Either way a retyped column is parsed with its own format, never the
+ * format of the column a seed or profile first chose.
  */
 export function inferDateInputFormat(
   metadata: Metadata,
   rawRows: ReadonlyArray<CSVRow>,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): string | undefined {
-  const dobColumn = metadata.find(
-    (column) => column.type === "date_of_birth" && column.role === "linkage",
-  );
-  return dobColumn !== undefined
-    ? inferDateFormat(columnValues(rawRows, dobColumn.name))
-    : undefined;
+  const dobColumn = linkageDateOfBirthColumn(metadata);
+  if (dobColumn === undefined) return undefined;
+  return dateInputFormats !== undefined
+    ? dateInputFormats.get(dobColumn.name)
+    : inferDateFormat(columnValues(rawRows, dobColumn.name));
 }
 
 /**
- * The date-of-birth input format {@link seedAdvancedInvite} derives for a set of
- * columns and their rows -- {@link inferDateInputFormat} over the same seed metadata
- * ({@link normalizeForEditor} of {@link inferMetadata}) the seed builds. The hosted
- * intake derives it once here so the value can thread every reconciliation in place
- * of the full rows, and a seed from (columns, format) reproduces one from full rows.
+ * The per-column date-of-birth input formats the console's server-side profile
+ * reports, inferred here from rows in memory: each column's format as
+ * {@link inferDateFormat} reads its values, for every column it infers one for.
+ * A seed or reconciliation handed these and no rows equals one handed the rows,
+ * whichever column the operator binds as the date of birth.
  */
-export function dateInputFormatForColumns(
-  columns: Array<string>,
+export function dateInputFormatsForColumns(
+  columns: ReadonlyArray<string>,
   rawRows: ReadonlyArray<CSVRow>,
-): string | undefined {
-  return inferDateInputFormat(
-    // A column list this is handed, not a read of its own: the intake that read
-    // the header refuses an empty name before seeding an editor from it.
-    normalizeForEditor(inferMetadata(columns, [])),
-    rawRows,
-  );
+): ProfiledDateInputFormats {
+  const formats = new Map<string, string>();
+  for (const column of columns) {
+    const format = inferDateFormat(columnValues(rawRows, column));
+    if (format !== undefined) formats.set(column, format);
+  }
+  return formats;
 }
 
 /**
@@ -173,14 +178,14 @@ export function dateInputFormatForColumns(
  * the built-in set's unused keys are offered beside them, off
  * ({@link offerableDraftKeys}). Calling this again is the "Reset to
  * defaults" action. `rawRows` defaults to empty (yielding the `MM/DD/YYYY`
- * date default); a pre-inferred `dateInputFormat`
- * ({@link dateInputFormatForColumns}) overrides that derivation.
+ * date default); profiled `dateInputFormats`
+ * ({@link dateInputFormatsForColumns}) stand in for the rows.
  */
 export function seedAdvancedInvite(
   identity: string,
   columns: Array<string>,
   rawRows: ReadonlyArray<CSVRow> = [],
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): { draft: AdvancedInviteDraft; seed: AdvancedInviteSeed } {
   // Normalized so the collapsed disclosure control opens on a faithful diagonal
   // (an inferred identifier column is not silently disclosed). Normalization only
@@ -219,7 +224,7 @@ export function seedAdvancedInvite(
         terms,
         enabledLinkageKeys(keys),
         rawRows,
-        dateInputFormat,
+        dateInputFormats,
       ),
       keys,
     },
@@ -302,7 +307,7 @@ export function setDraftMetadataKeepingKeys(
   draft: AdvancedInviteDraft,
   metadata: Metadata,
   rawRows: ReadonlyArray<CSVRow> = [],
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): AdvancedInviteDraft {
   return {
     ...draft,
@@ -314,7 +319,7 @@ export function setDraftMetadataKeepingKeys(
       draft.identity,
       enabledLinkageKeys(draft.keys),
       rawRows,
-      dateInputFormat,
+      dateInputFormats,
     ),
   };
 }
@@ -341,7 +346,7 @@ export function setDraftMetadata(
   draft: AdvancedInviteDraft,
   metadata: Metadata,
   rawRows: ReadonlyArray<CSVRow> = [],
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): AdvancedInviteDraft {
   const keys = reconcileKeys(
     draft.keys,
@@ -360,7 +365,7 @@ export function setDraftMetadata(
         draft.identity,
         enabledKeys,
         rawRows,
-        dateInputFormat,
+        dateInputFormats,
       ),
       metadata,
       draft.identity,
@@ -505,7 +510,7 @@ function reconcileStandardization(
   identity: string,
   enabledKeys: ReadonlyArray<LinkageKey>,
   rawRows: ReadonlyArray<CSVRow>,
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): Standardization {
   const columnByName = new Map(metadata.map((column) => [column.name, column]));
   const prevTypeByName = new Map(
@@ -535,7 +540,7 @@ function reconcileStandardization(
     getDefaultLinkageTerms(identity, metadata),
     enabledKeys,
     rawRows,
-    dateInputFormat,
+    dateInputFormats,
   );
   const additions = fullDefault.filter((transformation) => {
     const column = columnByName.get(transformation.input);
@@ -959,13 +964,13 @@ function standardizationForImportedTerms(
   defaultTerms: LinkageTerms,
   terms: LinkageTerms,
   rawRows: ReadonlyArray<CSVRow>,
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): Standardization {
   const base = defaultStandardizationForRows(
     metadata,
     defaultTerms,
     rawRows,
-    dateInputFormat,
+    dateInputFormats,
   );
   // The recommended steps each imported field's type cleans with, keyed by field
   // name. Derived from the default standardization over the IMPORTED terms (not the
@@ -980,7 +985,7 @@ function standardizationForImportedTerms(
       metadata,
       terms,
       rawRows,
-      dateInputFormat,
+      dateInputFormats,
     ).map((transformation) => [transformation.output, transformation.steps]),
   );
   // The default-named field each type already binds; only the EXTRA same-typed
@@ -1054,7 +1059,7 @@ export function draftFromTerms(
   seed: AdvancedInviteSeed,
   lifetimeSeconds: number = INVITATION_LIFETIME_SECONDS,
   rawRows: ReadonlyArray<CSVRow> = [],
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
   includeOwnColumns?: OwnColumnSelection,
 ): AdvancedInviteDraft {
   const standardization = standardizationForImportedTerms(
@@ -1062,7 +1067,7 @@ export function draftFromTerms(
     seed.terms,
     terms,
     rawRows,
-    dateInputFormat,
+    dateInputFormats,
   );
   // Disable -- but keep -- any imported key the reconstructed binding cannot
   // supply: it would otherwise block the WHOLE import behind a

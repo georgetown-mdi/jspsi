@@ -34,7 +34,7 @@ const PROFILE_WIRE = {
   rowCount: 2,
   columns: ["first_name", "dob"],
   sanitizedColumnPositions: [],
-  dateInputFormat: "%m/%d/%Y",
+  dateInputFormats: [{ column: "dob", format: "MM/DD/YYYY" }],
   columnSamples: [
     { column: "first_name", values: ["Ann"] },
     { column: "dob", values: ["01/02/1990"] },
@@ -128,7 +128,7 @@ describe("fetchJobInputProfile", () => {
     expect(profile.name).toBe("clients.csv");
     expect(profile.columns).toEqual(["first_name", "dob"]);
     expect(profile.sanitizedColumnPositions).toEqual([]);
-    expect(profile.dateInputFormat).toBe("%m/%d/%Y");
+    expect(profile.dateInputFormats).toEqual(new Map([["dob", "MM/DD/YYYY"]]));
     expect(profile.columnSamples).toBeInstanceOf(Map);
     expect(profile.columnSamples.get("first_name")).toEqual(["Ann"]);
     expect(profile.columnSamples.get("dob")).toEqual(["01/02/1990"]);
@@ -188,6 +188,22 @@ describe("fetchJobInputProfile", () => {
       { ...PROFILE_WIRE, columnSamples: [{ column: "a", values: "Ann" }] },
       { ...PROFILE_WIRE, columnSamples: [{ column: 1, values: ["Ann"] }] },
       { ...PROFILE_WIRE, columnSamples: [{ values: ["Ann"] }] },
+    ]) {
+      expect(
+        await fetchJobInputProfile("x", undefined, () =>
+          Promise.resolve(jsonResponse(bad)),
+        ),
+      ).toEqual({ kind: "unavailable", reason: "unknown" });
+    }
+  });
+
+  test("rejects a dateInputFormats that is not an array of pairs", async () => {
+    const { dateInputFormats: _formats, ...withoutFormats } = PROFILE_WIRE;
+    for (const bad of [
+      withoutFormats,
+      { ...PROFILE_WIRE, dateInputFormats: { dob: "MM/DD/YYYY" } },
+      { ...PROFILE_WIRE, dateInputFormats: [{ column: "dob", format: 1 }] },
+      { ...PROFILE_WIRE, dateInputFormats: [{ format: "MM/DD/YYYY" }] },
     ]) {
       expect(
         await fetchJobInputProfile("x", undefined, () =>

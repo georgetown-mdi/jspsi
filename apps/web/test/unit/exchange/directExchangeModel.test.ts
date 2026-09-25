@@ -420,6 +420,7 @@ describe("the file step's state", () => {
       columns,
       sanitizedColumnPositions,
       columnSamples: new Map(columns.map((column) => [column, ["1", "2"]])),
+      dateInputFormats: new Map(),
     };
   }
 

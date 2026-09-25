@@ -3,6 +3,15 @@ import type { IClient } from "../../../models/client.ts";
 import type { IMessage } from "../../../models/message.ts";
 import type { IRealm } from "../../../models/realm.ts";
 
+// Bound on the bytes the relay leaves queued toward one destination socket
+// that has not yet taken them: a frame is sent only while the socket holds at
+// most this much, else the socket is terminated, its registration removed, and
+// the sender told it left. A socket so holds at most this plus one relayed
+// frame, itself at most 4.4 times the 256 KiB wire cap (`1e20,` reprints as 22
+// bytes; parseBoundedJson admits any structure that size) plus 1.5 KiB of
+// `src`: under 1.11 MiB. See docs/spec/CHANNEL_SECURITY.md.
+export const MAX_RELAY_BUFFERED_BYTES = 1024 * 1024;
+
 export const TransmissionHandler = ({
   realm,
 }: {
@@ -15,27 +24,28 @@ export const TransmissionHandler = ({
 
     const destinationClient = realm.getClientById(dstId);
 
-    // User is connected!
     if (destinationClient) {
       const socket = destinationClient.getSocket();
+      let delivered = false;
       try {
         if (socket) {
           const data = JSON.stringify(message);
 
-          socket.send(data);
-        } else {
-          // Neither socket no res available. Peer dead?
-          throw new Error("Peer dead");
+          if (socket.bufferedAmount <= MAX_RELAY_BUFFERED_BYTES) {
+            socket.send(data);
+            delivered = true;
+          }
         }
-      } catch (e) {
-        // This happens when a peer disconnects without closing connections and
-        // the associated WebSocket has not closed.
-        // Tell other side to stop trying.
-        if (socket) {
-          socket.close();
-        } else {
-          realm.removeClientById(destinationClient.getId());
-        }
+      } catch {
+        delivered = false;
+      }
+
+      if (!delivered) {
+        // The destination has no socket, cannot take a send, or has stopped
+        // reading. Terminate rather than close: a peer that is not reading will
+        // not answer a close frame either.
+        socket?.terminate();
+        realm.removeClient(destinationClient);
 
         handle(client, {
           type: MessageType.LEAVE,
@@ -49,9 +59,22 @@ export const TransmissionHandler = ({
       const ignoredTypes = [MessageType.LEAVE, MessageType.EXPIRE];
 
       if (!ignoredTypes.includes(type) && dstId) {
-        realm.addMessageToQueue(dstId, message);
+        // A frame the realm will not hold gets the answer a held frame gets
+        // when its destination never arrives, without the wait for expiry.
+        if (!realm.addMessageToQueue(dstId, message)) {
+          handle(client, {
+            type: MessageType.EXPIRE,
+            src: dstId,
+            dst: srcId,
+          });
+        }
       } else if (type === MessageType.LEAVE && !dstId) {
-        realm.removeClientById(srcId);
+        // A client that leaves the realm leaves with its socket, so no socket
+        // outlives its registration.
+        if (client) {
+          client.getSocket()?.terminate();
+          realm.removeClient(client);
+        }
       } else {
         // Unavailable destination specified with message LEAVE or EXPIRE
         // Ignore

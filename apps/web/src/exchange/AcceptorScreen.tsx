@@ -624,7 +624,7 @@ export function AcceptorScreen() {
           sizeBytes: consoleSource.sizeBytes,
           columns: consoleSource.columns,
           rowCount: consoleSource.rowCount,
-          dateInputFormat: consoleSource.dateInputFormat,
+          dateInputFormats: consoleSource.dateInputFormats,
         }),
       });
       goToStep("columns");
@@ -758,7 +758,7 @@ export function AcceptorScreen() {
           columnsState,
           linkageTerms,
           seedRows(acquired),
-          acquired.dateInputFormat,
+          acquired.dateInputFormats,
         )
       : undefined;
   const verdict =

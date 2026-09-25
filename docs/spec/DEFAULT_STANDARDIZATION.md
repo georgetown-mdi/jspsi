@@ -303,26 +303,37 @@ parameter that varies per party.
 
 `MM/DD/YYYY` is the value used when no format is supplied. An exchange that
 authors no `standardization` supplies one instead: it infers the layout from
-the values of the `role: linkage` `date_of_birth` column the field binds to, so
-a file written `YYYY-MM-DD` is parsed as written rather than dropped wholesale.
+the values of the first `role: linkage` `date_of_birth` column, the column the
+field binds to, so a file written `YYYY-MM-DD` is parsed as written rather than
+dropped wholesale. A front end that writes the default standardization out for
+its operator -- the CLI's `init` and invite paths, the web editors, the
+console -- infers from that same column, so a column the operator retypes as
+the date of birth is parsed with its own layout.
 
-Inference starts with every candidate in the table below. For each non-empty
-value at least one candidate parses, every candidate that does not parse it is
-eliminated; a value no candidate parses is skipped as noise. Scanning stops as
-soon as one candidate remains or the scan cap of non-empty values is reached,
-and the result is the earliest surviving candidate in the table's order. That
-order is the tie-break, and a tie means every survivor agrees with the values
-seen -- a column whose days are all 12 or under leaves `MM/DD/YYYY` and
-`DD/MM/YYYY` both standing, and the earlier one wins.
+Inference scans the column's non-empty values, up to the scan cap, and tests
+each against every candidate in the table below. A candidate parses a value
+when the `date_of_birth` pipeline above, with that candidate as its
+`input_format`, keeps the value -- the same rule the run applies, so a format
+is never inferred from values the run would drop.
 
-Inference yields nothing when it eliminated no candidate at all -- an empty
-column, or one whose every value was noise -- and the pipeline then keeps the
+- The result is the candidate that parses the most scanned values. On a tie
+  the earlier candidate in the table's order wins: a column whose days are all
+  12 or under is parsed equally by `MM/DD/YYYY` and `DD/MM/YYYY`, and
+  `MM/DD/YYYY` wins.
+- A value no candidate parses is noise and counts for none.
+- The result must parse more than half of the scanned values some candidate
+  parses. A few mistyped values -- a three-digit year, a two-digit year, a
+  day-first date -- therefore cannot choose the format, and a column split
+  evenly between two layouts yields none.
+
+Inference yields nothing for an empty column, one whose every value is noise,
+or one no candidate parses a majority of, and the pipeline then keeps the
 `MM/DD/YYYY` above. The same fallback applies when the input declares no
-`role: linkage` `date_of_birth` column for the field to bind to.
+`role: linkage` `date_of_birth` column.
 
 | Parameter | Value |
 | --------- | ----- |
-| Candidate input formats, in elimination order | `MM/DD/YYYY`, `YYYY-MM-DD`, `YYYYMMDD`, `MM-DD-YYYY`, `MM/DD/YY`, `YYYY/MM/DD`, `DD/MM/YYYY`, `DD-MM-YYYY` |
+| Candidate input formats, in tie-break order | `MM/DD/YYYY`, `YYYY-MM-DD`, `YYYYMMDD`, `MM-DD-YYYY`, `MM/DD/YY`, `YYYY/MM/DD`, `DD/MM/YYYY`, `DD-MM-YYYY` |
 | Maximum non-empty values scanned | `1000` |
 
 Because the inferred format only tells the parser how to read this party's own

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   MAX_MESSAGES_PER_QUEUE,
   MAX_OUTSTANDING_QUEUES,
+  MAX_QUEUED_DESTINATIONS_PER_SENDER,
   MAX_QUEUE_BYTES,
   Realm,
 } from "@alcove/peerjs-broker/models/realm";
@@ -163,11 +164,44 @@ describe("two-tier liveness reaper", () => {
       reaper.stop();
     }
   });
+
+  test("a reaped client's held frames and destination budget are dropped", () => {
+    const realm = new Realm();
+    realm.setClient(new Client({ id: "reaped", token: "t" }), "reaped");
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`dst-${i}`, {
+          type: MessageType.OFFER,
+          src: "reaped",
+          dst: `dst-${i}`,
+        }),
+      ).toBe(true);
+    }
+    const reaper = startReaper(realm);
+    try {
+      vi.advanceTimersByTime(UNCONFIRMED_TIMEOUT_MS + 1_000);
+      expect(realm.getClientById("reaped")).toBeUndefined();
+      expect(realm.getClientsIdsWithQueue()).toEqual([]);
+    } finally {
+      reaper.stop();
+    }
+
+    realm.setClient(new Client({ id: "reaped", token: "u" }), "reaped");
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`next-${i}`, {
+          type: MessageType.OFFER,
+          src: "reaped",
+          dst: `next-${i}`,
+        }),
+      ).toBe(true);
+    }
+  });
 });
 
 describe("relay message-queue bounds", () => {
-  function offerTo(dst: string): IMessage {
-    return { type: MessageType.OFFER, src: "spammer", dst };
+  function offerTo(dst: string, src = "spammer"): IMessage {
+    return { type: MessageType.OFFER, src, dst };
   }
 
   // A near-full-size signaling frame: a 64 K-character payload, so MAX_QUEUE_BYTES
@@ -200,21 +234,126 @@ describe("relay message-queue bounds", () => {
 
   test("caps the number of distinct queued destinations", () => {
     const realm = new Realm();
-    // Spray more distinct unregistered destinations than the bound allows.
+    // Spray more distinct unregistered destinations than the bound allows,
+    // from enough senders that no one of them reaches its own budget.
+    const held: Array<boolean> = [];
     for (let i = 0; i < MAX_OUTSTANDING_QUEUES + 500; i += 1) {
-      realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`));
+      const sender = `sender-${Math.floor(i / MAX_QUEUED_DESTINATIONS_PER_SENDER)}`;
+      held.push(
+        realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`, sender)),
+      );
     }
     expect(realm.getClientsIdsWithQueue().length).toBe(MAX_OUTSTANDING_QUEUES);
+    expect(held.filter(Boolean)).toHaveLength(MAX_OUTSTANDING_QUEUES);
+    expect(held.slice(MAX_OUTSTANDING_QUEUES)).not.toContain(true);
+  });
+
+  test("caps the destinations one sender holds frames for", () => {
+    const realm = new Realm();
+    const held: Array<boolean> = [];
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER + 5; i += 1) {
+      held.push(realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`)));
+    }
+    expect(held.slice(0, MAX_QUEUED_DESTINATIONS_PER_SENDER)).not.toContain(
+      false,
+    );
+    expect(held.slice(MAX_QUEUED_DESTINATIONS_PER_SENDER)).not.toContain(true);
+    expect(realm.getClientsIdsWithQueue()).toHaveLength(
+      MAX_QUEUED_DESTINATIONS_PER_SENDER,
+    );
+
+    // The sender still adds to a destination it already holds frames for,
+    // and another sender is unaffected by this one's budget.
+    expect(realm.addMessageToQueue("dst-0", offerTo("dst-0"))).toBe(true);
+    expect(realm.getMessageQueueById("dst-0")?.size()).toBe(2);
+    expect(
+      realm.addMessageToQueue("dst-other", offerTo("dst-other", "other")),
+    ).toBe(true);
+
+    // A queue cleared -- drained by its destination or expired -- returns
+    // its slot to every sender that held frames in it.
+    realm.clearMessageQueue("dst-0");
+    expect(realm.addMessageToQueue("dst-new", offerTo("dst-new"))).toBe(true);
+    expect(realm.addMessageToQueue("dst-newer", offerTo("dst-newer"))).toBe(
+      false,
+    );
+  });
+
+  test("removing a client drops its held frames and leaves other senders' in place", () => {
+    const realm = new Realm();
+    const leaver = new Client({ id: "leaver", token: "t" });
+    realm.setClient(leaver, "leaver");
+    realm.addMessageToQueue("shared", offerTo("shared", "leaver"));
+    realm.addMessageToQueue("shared", offerTo("shared", "other"));
+    realm.addMessageToQueue("shared", offerTo("shared", "leaver"));
+    realm.addMessageToQueue("alone", offerTo("alone", "leaver"));
+
+    expect(realm.removeClient(leaver)).toBe(true);
+
+    expect(realm.getMessageQueueById("alone")).toBeUndefined();
+    const shared = realm.getMessageQueueById("shared")!;
+    expect(shared.getMessages().map(({ message }) => message.src)).toEqual([
+      "other",
+    ]);
+    expect(shared.byteSize()).toBe(accountedBytes(offerTo("shared", "other")));
+
+    // The departed id holds no budget, and the remaining sender still holds
+    // its slot in the shared queue until that queue is cleared.
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`, "leaver")),
+      ).toBe(true);
+    }
+    for (let i = 1; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`o-${i}`, offerTo(`o-${i}`, "other")),
+      ).toBe(true);
+    }
+    expect(realm.addMessageToQueue("o-last", offerTo("o-last", "other"))).toBe(
+      false,
+    );
+  });
+
+  test("a stale removal leaves the current client's held frames in place", () => {
+    const realm = new Realm();
+    const stale = new Client({ id: "peer", token: "t" });
+    const current = new Client({ id: "peer", token: "u" });
+    realm.setClient(stale, "peer");
+    realm.setClient(current, "peer");
+    realm.addMessageToQueue("dst", offerTo("dst", "peer"));
+
+    expect(realm.removeClient(stale)).toBe(false);
+    expect(realm.getMessageQueueById("dst")?.size()).toBe(1);
   });
 
   test("caps the depth of a single queue", () => {
     const realm = new Realm();
+    const held: Array<boolean> = [];
     for (let i = 0; i < MAX_MESSAGES_PER_QUEUE + 50; i += 1) {
-      realm.addMessageToQueue("dst", offerTo("dst"));
+      held.push(realm.addMessageToQueue("dst", offerTo("dst")));
     }
     expect(realm.getMessageQueueById("dst")?.size()).toBe(
       MAX_MESSAGES_PER_QUEUE,
     );
+    expect(held.slice(MAX_MESSAGES_PER_QUEUE)).not.toContain(true);
+  });
+
+  test("a frame refused by the byte cap leaves no empty queue behind", () => {
+    const realm = new Realm();
+    const oversized: IMessage = {
+      type: MessageType.OFFER,
+      src: "s",
+      dst: "d",
+      payload: "x".repeat(MAX_QUEUE_BYTES),
+    };
+    expect(realm.addMessageToQueue("d", oversized)).toBe(false);
+    expect(realm.getClientsIdsWithQueue()).toEqual([]);
+    // Nor does it spend the sender's budget.
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`, "s")),
+      ).toBe(true);
+    }
   });
 
   test("caps the resident bytes of a single queue", () => {

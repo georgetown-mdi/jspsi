@@ -20,7 +20,7 @@ A failure before that point produces no record, and owes none: nothing earlier i
 
 A run cut between its own send and the partner's payload received nothing, and its record commits to an empty received payload for that reason -- the same present-and-empty commitment a [count-only](#count-only-psi-c-records) run writes, since what this party received is nothing either way. The record does not distinguish the two: a reader of the artifact alone cannot tell a run cut before the reply from a partner that transmitted no payload, and neither reading overstates what this party disclosed. That distinction is a live-run one, not a fact the frozen document holds: a caller of this implementation reads it off the terminated run's error (`exchangeDisclosedWithoutPartnerPayload`). No CLI event and no browser view reports it.
 
-The asymmetry runs the other way on the responder leg. Its payload send is the exchange's terminal frame (`packages/core/src/payloadExchange.ts`), so the region a responder's record is owed from opens at the very end of its exchange rather than before the partner's reply.
+The asymmetry runs the other way on the responder leg. Its payload send is the last frame of the payload exchange (`packages/core/src/payloadExchange.ts`) -- and of the whole exchange on an unsigned run, since only a signing run's [receipt swap](PROTOCOL.md#the-signed-receipt-step) follows it -- so the region a responder's record is owed from opens at the end of its payload exchange rather than before the partner's reply.
 
 **Every record states which of the two it is**, in a mandatory `outcome`:
 
@@ -330,7 +330,7 @@ What pairs a receipt to one run is the **`receiptBinder`** the [exchange record]
 
 - `verified` -- the record and the receipt hold the same value: they are one run.
 - `mismatch` -- they hold different values: the two artifacts are from different runs, and the whole verdict is `failed`. Every other check may pass; the pairing is what separates two runs of one partnership.
-- `unpaired` -- the record has no `receiptBinder` at all. A record omits the field exactly when its exchange derived no binder (no signing identity, or a path with no session key), so no receipt can belong to it: also `failed`.
+- `unpaired` -- the record has no `receiptBinder` at all. A record omits the field exactly when its exchange derived no binder (no signing identity, a path with no session key, or a signing run that terminated before deriving one), so no receipt can belong to it: also `failed`.
 - `not-checked` -- no record was supplied. Nothing is contradicted and nothing fails, but which run the receipt attests stays open, so the verdict is held at `incomplete` and never reaches `verified`. This is the case for a holder legitimately in possession of only the receipt; the remedy is the run's record, not a weaker verdict.
 
 A record whose [`outcome`](#when-a-record-is-owed) is `receipt-swap-terminated` takes the same three record-bearing outcomes as any other: where its run derived a binder it holds it, so a receipt held beside it pairs or mismatches on the value. What the outcome adds is that the writing party held no receipt of its own -- a genuine receipt pairing to such a record is the partner's copy, whose own signatures and anchors the verdict reports as it does for any receipt. The record's outcome is not itself a verification input and changes no verdict; it is a fact about the run, read from the record.

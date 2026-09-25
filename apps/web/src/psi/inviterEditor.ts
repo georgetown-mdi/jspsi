@@ -35,6 +35,7 @@ import type {
   AdvancedInviteSeed,
   DraftLegalAgreement,
   OutputDirection,
+  ProfiledDateInputFormats,
 } from "./authoring/advancedInvite";
 
 import type {
@@ -58,21 +59,21 @@ import type { Transport } from "./transportChooser";
  * parsed rows and columns every derivation binds to. `rowCount` is the file's
  * row total, held explicitly so display surfaces do not read `rawRows.length`
  * (the console acquires only a server-side profile, not the rows).
- * `dateInputFormat` is a pre-inferred date-of-birth layout
- * ({@link dateInputFormatForColumns}), set only by sources that profile
- * without rows (the console); absent, each derivation infers it from the
- * rows. */
+ * `dateInputFormats` holds the per-column date-of-birth layouts a profile
+ * inferred ({@link dateInputFormatsForColumns}), set only by sources that
+ * profile without rows (the console); absent, each derivation infers the
+ * layout from the rows. */
 export interface AcquiredCsv {
   fileName: string;
   sizeBytes: number;
   rawRows: Array<CSVRow>;
   columns: Array<string>;
   rowCount: number;
-  dateInputFormat?: string;
+  dateInputFormats?: ProfiledDateInputFormats;
   /** True when this shape holds no rows -- the console acquires a server-side
    * profile, not the file, so `rawRows` is a throwing getter there. The draft
    * reconciliations read rows only to infer the date-of-birth format, which the
-   * console supplies as `dateInputFormat`, so a rows-withheld shape contributes an
+   * console supplies in `dateInputFormats`, so a rows-withheld shape contributes an
    * empty row set to those helpers ({@link seedRows}) rather than reading the
    * getter. */
   rowsWithheld?: boolean;
@@ -81,7 +82,7 @@ export interface AcquiredCsv {
 /** The rows the draft reconciliations feed to the seed/standardization helpers,
  * whose only use of rows is date-of-birth format inference. A rows-withheld
  * console shape ({@link AcquiredCsv.rowsWithheld}) contributes an empty set,
- * since its `dateInputFormat` was already profiled; a hosted shape contributes
+ * since its `dateInputFormats` were already profiled; a hosted shape contributes
  * its parsed rows. Exported so the expert-mode terms import/export -- the one
  * other `rawRows` consumer -- reads through the same guard. */
 export function seedRows(csv: AcquiredCsv): Array<CSVRow> {
@@ -131,7 +132,7 @@ export function editorFromCsv(
     inviterName,
     csv.columns,
     seedRows(csv),
-    csv.dateInputFormat,
+    csv.dateInputFormats,
   );
 }
 
@@ -259,7 +260,7 @@ export function editorWithImportedTerms(
       { ...editor.seed, metadata },
       editor.draft.lifetimeSeconds,
       seedRows(csv),
-      csv.dateInputFormat,
+      csv.dateInputFormats,
       editor.draft.includeOwnColumns,
     ),
     keysAuthored: true,
@@ -389,7 +390,7 @@ export function editorWithRecommendedCleaning(
         getDefaultLinkageTerms(editor.draft.identity, editor.draft.metadata),
         enabledKeys(editor.draft),
         seedRows(csv),
-        csv.dateInputFormat,
+        csv.dateInputFormats,
       ),
     },
   };
@@ -440,7 +441,7 @@ export function resetToRecommended(
 
 /** Reconcile an existing session onto a re-profiled file whose column set is
  * unchanged: the authored draft (keys, cleaning, disclosure, transport) is kept and
- * the profile-derived date-of-birth format is threaded back through the keep-keys
+ * the profile-derived date-of-birth formats are threaded back through the keep-keys
  * reconciliation ({@link setDraftMetadataKeepingKeys}), so a re-profile refreshes the
  * file's facts without discarding the operator's customizations. A sealed session is
  * returned unchanged -- its terms are locked. The caller reseeds instead when the
@@ -456,7 +457,7 @@ export function editorReprofiled(
       editor.draft,
       editor.draft.metadata,
       seedRows(csv),
-      csv.dateInputFormat,
+      csv.dateInputFormats,
     ),
   };
 }
@@ -489,13 +490,13 @@ function withMetadata(
               editor.draft,
               metadata,
               seedRows(csv),
-              csv.dateInputFormat,
+              csv.dateInputFormats,
             )
           : setDraftMetadata(
               editor.draft,
               metadata,
               seedRows(csv),
-              csv.dateInputFormat,
+              csv.dateInputFormats,
             ),
     },
     demotedIdentifiers,

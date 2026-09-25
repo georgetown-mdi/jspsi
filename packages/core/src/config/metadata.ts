@@ -113,6 +113,20 @@ export function disclosedColumnNames(metadata: Metadata): Array<string> {
 }
 
 /**
+ * The date-of-birth column the `date_of_birth` input format is inferred from:
+ * the first `role: linkage` column of that type, the column the default
+ * standardization binds the field to. Every caller inferring the format selects
+ * through this, so the format is read from the column the run parses.
+ */
+export function linkageDateOfBirthColumn(
+  metadata: ReadonlyArray<ColumnMetadata>,
+): ColumnMetadata | undefined {
+  return metadata.find(
+    (column) => column.type === "date_of_birth" && column.role === "linkage",
+  );
+}
+
+/**
  * Which of this party's own input columns its result file holds beside the
  * partner's values, as the local `include_own_columns` config key selects
  * them: `disclosed` for the columns transmitted to the partner
@@ -428,7 +442,9 @@ export function inferMetadata(
 
   const result: Metadata = columnNames.map((name) => {
     const lookupName = name.toLowerCase();
-    if (!(lookupName in ALIAS_TYPE_META_MAP)) {
+    // An own-property test: `in` also matches inherited names such as
+    // `constructor` and `__proto__`, which have no entry.
+    if (!Object.hasOwn(ALIAS_TYPE_META_MAP, lookupName)) {
       if (lookupName.endsWith("_id"))
         return { name, type: "identifier", role: "payload", isPayload: true };
       return { name, type: "other", role: "payload", isPayload: true };

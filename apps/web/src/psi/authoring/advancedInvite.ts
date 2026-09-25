@@ -29,13 +29,14 @@ export type {
   DraftLegalAgreement,
   FuzzyComparison,
   OutputDirection,
+  ProfiledDateInputFormats,
 } from "./advancedInviteTypes";
 export { outputForDirection } from "./advancedInviteTypes";
 
 export {
   addElement,
   addKey,
-  dateInputFormatForColumns,
+  dateInputFormatsForColumns,
   defaultStandardizationForRows,
   draftFromTerms,
   draftWithFieldAdded,

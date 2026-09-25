@@ -987,7 +987,7 @@ export function InviterScreen() {
       sizeBytes: profile.sizeBytes,
       columns: profile.columns,
       rowCount: profile.rowCount,
-      dateInputFormat: profile.dateInputFormat,
+      dateInputFormats: profile.dateInputFormats,
     });
     const reseed = (reseedAnnouncement?: string) => {
       const seeded = editorFromCsv(name, csv);

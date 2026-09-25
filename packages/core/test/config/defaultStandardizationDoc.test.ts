@@ -252,10 +252,8 @@ describe("DEFAULT_STANDARDIZATION.md date-format inference", () => {
     return row[1];
   };
 
-  test("lists the candidate formats in elimination order", () => {
-    const documented = parameter(
-      "Candidate input formats, in elimination order",
-    )
+  test("lists the candidate formats in tie-break order", () => {
+    const documented = parameter("Candidate input formats, in tie-break order")
       .split(",")
       .map(unwrapCodeSpan);
     expect(documented).toEqual([...CANDIDATE_DATE_FORMATS]);

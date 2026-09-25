@@ -48,6 +48,7 @@ import {
   signingIdentityDivergence,
 } from "@psi/receiptsModel";
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
+import { dateInputFormatsForColumns } from "@psi/authoring/advancedInvite";
 
 import {
   setColumnDisclosure,
@@ -144,6 +145,52 @@ describe("acceptor columns editor state", () => {
       "firstName",
       "lastName",
     ]);
+  });
+});
+
+describe("the acceptor's date-of-birth format follows the bound column", () => {
+  test("a column retyped as the date of birth is parsed with its own format", () => {
+    // The seed binds `dob` (US layout); the operator retypes `birth_date` (ISO
+    // layout) as the date of birth and `dob` as other. The console derives the
+    // cleaning from the profiled per-column formats with no rows, and must parse
+    // `birth_date` as ISO, as the hosted path inferring from the rows does.
+    const dobTerms: LinkageTerms = {
+      ...nameTerms,
+      linkageFields: [{ name: "date_of_birth", type: "date_of_birth" }],
+      linkageKeys: [{ name: "d", elements: [{ field: "date_of_birth" }] }],
+    };
+    const columns = ["dob", "birth_date"];
+    const csvRows: Array<CSVRow> = [
+      { dob: "01/31/1990", birth_date: "1990-01-31" },
+      { dob: "12/25/1985", birth_date: "1985-12-25" },
+    ];
+    const formats = dateInputFormatsForColumns(columns, csvRows);
+    const seed = acceptorInitialColumnsState(columns);
+    const retyped: AcceptorColumnsState = {
+      ...seed,
+      metadata: setColumnTypeForMatching(
+        seed.metadata.map((column) =>
+          column.name === "dob" ? { ...column, type: "other" } : column,
+        ),
+        "birth_date",
+        "date_of_birth",
+      ),
+    };
+    const fromProfile = acceptorColumnsEditorState(
+      retyped,
+      dobTerms,
+      [],
+      formats,
+    );
+    const [transform] = fromProfile.standardization;
+    expect(transform.input).toBe("birth_date");
+    expect(transform.steps).toContainEqual({
+      function: "parse_date",
+      params: { inputFormat: "YYYY-MM-DD", outputFormat: "YYYYMMDD" },
+    });
+    expect(fromProfile).toEqual(
+      acceptorColumnsEditorState(retyped, dobTerms, csvRows),
+    );
   });
 });
 

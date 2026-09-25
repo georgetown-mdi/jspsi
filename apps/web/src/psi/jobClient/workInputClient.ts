@@ -49,11 +49,16 @@ export type JobInputsResult =
   | { kind: "error" };
 
 /** The validated console profile: the wire {@link JobInputProfile}'s fields with
- * `columnSamples` rebuilt as a `Map` keyed by column name. A prototype-member column
- * name (`__proto__`, `constructor`, `prototype`) is ordinary map data on this hop, so
- * no read resolves to an inherited member and no write drives a prototype setter. */
-export type ProfiledJobInput = Omit<JobInputProfile, "columnSamples"> & {
+ * `columnSamples` and `dateInputFormats` rebuilt as `Map`s keyed by column name. A
+ * prototype-member column name (`__proto__`, `constructor`, `prototype`) is
+ * ordinary map data on this hop, so no read resolves to an inherited member and
+ * no write drives a prototype setter. */
+export type ProfiledJobInput = Omit<
+  JobInputProfile,
+  "columnSamples" | "dateInputFormats"
+> & {
   columnSamples: Map<string, Array<string>>;
+  dateInputFormats: Map<string, string>;
 };
 
 /** Why a profile is unavailable, a closed set the picker turns into copy. `not_found`
@@ -183,11 +188,12 @@ function jobInputListingOf(body: unknown): JobInputListing | null {
 }
 
 /** Validate a profile response body, returning null when any required field is
- * malformed. `columnSamples` arrives as an ordered array of `{ column, values }`
- * pairs and is validated into a `Map`, so a prototype-member column name stays plain
- * data (a `{ [column]: values }` object would drive the prototype setter on write and
- * resolve inherited members on read). A blank column name is admitted -- the console
- * raises its own unnamed-column alert -- and a repeated name keeps the last pair. */
+ * malformed. `columnSamples` and `dateInputFormats` arrive as ordered arrays of
+ * per-column pairs and are validated into `Map`s, so a prototype-member column
+ * name stays plain data (a `{ [column]: values }` object would drive the
+ * prototype setter on write and resolve inherited members on read). A blank
+ * column name is admitted -- the console raises its own unnamed-column alert --
+ * and a repeated name keeps the last pair. */
 function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
   if (!isRecord(body)) return null;
   const { name, sizeBytes, modifiedAt, rowCount, columns, columnSamples } =
@@ -210,9 +216,14 @@ function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
     if (!isStringArray(values)) return null;
     samples.set(column, values);
   }
-  const dateInputFormat = body.dateInputFormat;
-  if (dateInputFormat !== undefined && typeof dateInputFormat !== "string")
-    return null;
+  if (!Array.isArray(body.dateInputFormats)) return null;
+  const dateInputFormats = new Map<string, string>();
+  for (const entry of body.dateInputFormats) {
+    if (!isRecord(entry)) return null;
+    const { column, format } = entry;
+    if (typeof column !== "string" || typeof format !== "string") return null;
+    dateInputFormats.set(column, format);
+  }
   return {
     name,
     sizeBytes,
@@ -221,7 +232,7 @@ function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
     columns,
     sanitizedColumnPositions: body.sanitizedColumnPositions,
     columnSamples: samples,
-    ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
+    dateInputFormats,
   };
 }
 

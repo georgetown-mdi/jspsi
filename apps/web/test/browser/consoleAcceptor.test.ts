@@ -396,7 +396,7 @@ const ACCEPT_PROFILE = {
   rowCount: 2,
   columns: ["first_name", "last_name"],
   sanitizedColumnPositions: [],
-  dateInputFormat: "%m/%d/%Y",
+  dateInputFormats: [],
   columnSamples: [
     { column: "first_name", values: ["Ann", "Bo"] },
     { column: "last_name", values: ["Lee", "Ray"] },
