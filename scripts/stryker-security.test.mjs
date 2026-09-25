@@ -13,18 +13,27 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { evaluateFloors, scoreOf } from "./stryker-security.mjs";
+import {
+  evaluateFloors,
+  scoreOf,
+  survivorsWithoutTestsRun,
+} from "./stryker-security.mjs";
 
 // The scoreOf and evaluateFloors tests cover the pure gating decision only --
-// the tally, the score ratio, the floor comparison, the missing-mutants and
-// zero-denominator failure branches, and the raised-floor suggestion --
-// against hand-built report fixtures shaped like the real Stryker JSON report
-// this script reads at runtime (`files[<path>].mutants[].status`). They do
-// NOT drive Stryker itself or the toolchain install; that live half is `npm
-// run test:mutation`.
+// the tally, the score ratio, the floor comparison, the missing-mutants,
+// zero-denominator and zero-tests-run failure branches, and the raised-floor
+// suggestion -- against hand-built report fixtures shaped like the real
+// Stryker JSON report this script reads at runtime
+// (`files[<path>].mutants[]`, each with `status` and `testsCompleted`). They
+// do NOT drive Stryker itself or the toolchain install; that live half is
+// `npm run test:mutation`.
 
+// Stryker records a test count on every mutant it ran tests against, and none
+// on a NoCoverage one.
 function mutants(statuses) {
-  return statuses.map((status) => ({ status }));
+  return statuses.map((status) =>
+    status === "NoCoverage" ? { status } : { status, testsCompleted: 1 },
+  );
 }
 
 describe("scoreOf", () => {
@@ -159,6 +168,59 @@ describe("evaluateFloors", () => {
     );
     expect(atFloor.rows[0].score).toBeCloseTo(40.9);
     expect(atFloor.rows[0].raisedFloorSuggestion).toBeUndefined();
+  });
+
+  it("fails a file above its floor when a survivor ran zero tests, naming the file and line", () => {
+    const report = {
+      files: {
+        [FILE]: {
+          mutants: [
+            ...mutants(Array(9).fill("Killed")),
+            {
+              status: "Survived",
+              testsCompleted: 0,
+              coveredBy: ["1", "2"],
+              location: { start: { line: 42, column: 5 } },
+            },
+          ],
+        },
+      },
+    };
+    const { rows, failures } = evaluateFloors(report, { [FILE]: 50 });
+    expect(rows[0].verdict).toBe("ok");
+    expect(failures).toEqual([
+      `${FILE}: 1 surviving mutant ran zero tests (line 42). Tests cover them, so the runner's per-mutant test selection executed nothing; check packages/core/vitest.stryker.config.ts and the Stryker vitest runner before reading this file's score.`,
+    ]);
+  });
+
+  it("passes survivors that ran tests and uncovered mutants that ran none", () => {
+    const report = {
+      files: {
+        [FILE]: {
+          mutants: [
+            { status: "Killed", testsCompleted: 1 },
+            { status: "Survived", testsCompleted: 4, coveredBy: ["1"] },
+            { status: "NoCoverage", coveredBy: [] },
+          ],
+        },
+      },
+    };
+    expect(evaluateFloors(report, { [FILE]: 0 }).failures).toEqual([]);
+  });
+
+  it("counts a survivor with no testsCompleted field as having run zero tests", () => {
+    expect(
+      survivorsWithoutTestsRun([
+        { status: "Survived" },
+        { status: "Survived", testsCompleted: 0 },
+        { status: "Survived", testsCompleted: 2 },
+        { status: "Killed", testsCompleted: 0 },
+        { status: "NoCoverage" },
+      ]),
+    ).toEqual([
+      { status: "Survived" },
+      { status: "Survived", testsCompleted: 0 },
+    ]);
   });
 
   it("evaluates every configured file independently", () => {

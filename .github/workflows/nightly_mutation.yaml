@@ -6,8 +6,9 @@ name: Nightly Mutation Tests
 # re-runs packages/core's unit tier per mutant, so what this leg reports is
 # whether a test DISTINGUISHES the mutated behavior, not whether a line was
 # executed. It fails when any one file scores below the floor committed beside
-# it in packages/core/stryker.config.mjs; scripts/stryker-security.mjs is the
-# runner, and `npm run test:mutation` is the same run locally.
+# it in packages/core/stryker.config.mjs, or has a surviving mutant that no test
+# ran against; scripts/stryker-security.mjs is the runner, and `npm run
+# test:mutation` is the same run locally.
 #
 # Nightly rather than per-PR: each mutant costs a suite run, so the corpus takes
 # minutes even at three files, and the merge-time path stays fast. Runs only on

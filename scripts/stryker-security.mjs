@@ -41,6 +41,10 @@
 //   - The floors are compared per file, so a corpus file that stops being
 //     mutated at all -- renamed, deleted, or dropped from the configuration --
 //     is a hard failure here rather than a silently vacuous pass.
+//   - A runner change that stops tests from executing per mutant leaves
+//     survivors Stryker still counts against the score, which may stay above
+//     its floor. A surviving mutant with zero tests completed is therefore a
+//     hard failure naming its file, whatever the score.
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -148,14 +152,30 @@ export function scoreOf(mutants) {
 }
 
 /**
+ * The mutants that survived with zero tests executed against them. Stryker
+ * marks a mutant no test covers NoCoverage and runs none, so a Survived one
+ * had tests selected: zero completed means the runner executed nothing, not
+ * that the tests missed the mutation. A survivor without a `testsCompleted`
+ * count is counted with them, so a report that stops carrying the count
+ * fails the leg rather than silencing this check.
+ */
+export function survivorsWithoutTestsRun(mutants) {
+  return mutants.filter(
+    (mutant) =>
+      mutant.status === "Survived" && (mutant.testsCompleted ?? 0) === 0,
+  );
+}
+
+/**
  * The whole per-file gate: every file in `scoreFloors` checked against the
  * Stryker JSON report, with no I/O of its own. Returns the summary rows for
  * the report (one per file the score could be computed for, each already
  * holding its display verdict and any raised-floor suggestion) and the
  * failure messages -- a file missing from the report, a file whose mutants
- * all fell outside the ratio, and a file below its committed floor all add to
- * `failures` rather than a row, so `failures.length > 0` is the single signal
- * the entry point below exits non-zero on.
+ * all fell outside the ratio, a file below its committed floor, and a file
+ * with a survivor no test ran against all add to `failures`, so
+ * `failures.length > 0` is the single signal the entry point below exits
+ * non-zero on.
  */
 export function evaluateFloors(report, scoreFloors) {
   const rows = [];
@@ -189,6 +209,20 @@ export function evaluateFloors(report, scoreFloors) {
     if (belowFloor) {
       failures.push(
         `${file}: mutation score ${score.toFixed(2)}% is below its committed floor of ${floor}% (${killed} of ${denominator} mutants killed).`,
+      );
+    }
+    const unexercised = survivorsWithoutTestsRun(mutants);
+    if (unexercised.length > 0) {
+      const lines = unexercised
+        .map((mutant) => mutant.location?.start?.line)
+        .filter((line) => line !== undefined);
+      const distinctLines = [...new Set(lines)];
+      const where =
+        distinctLines.length > 0
+          ? ` (${distinctLines.length === 1 ? "line" : "lines"} ${distinctLines.join(", ")})`
+          : "";
+      failures.push(
+        `${file}: ${unexercised.length} surviving ${unexercised.length === 1 ? "mutant" : "mutants"} ran zero tests${where}. Tests cover them, so the runner's per-mutant test selection executed nothing; check packages/core/vitest.stryker.config.ts and the Stryker vitest runner before reading this file's score.`,
       );
     }
   }
