@@ -1,7 +1,11 @@
 import path from "node:path";
 
+import { ZodError } from "zod";
+
 import {
   MAX_ERROR_CAUSE_DEPTH,
+  NestingDepthExceededError,
+  NodeCountExceededError,
   errorWithPartnerCauseLinks,
   sanitizeForDisplay,
 } from "@alcove/core";
@@ -68,6 +72,7 @@ import {
 } from "./signingIdentity";
 import { buildJobHandoff } from "./handoff";
 import { checkedMountedKeyFilePath } from "./mountedKeyFile";
+import { formatFirstIssue } from "./schemaIssueMessage";
 import { probeSftpHostKey } from "./sftpProbe";
 import { removeSftpCredentialFile } from "./sftpScratch";
 import { validateAuthoredSftpServer } from "./sftpServer";
@@ -219,6 +224,51 @@ export class MountedSigningPathsUnconvertedError extends Error {
       "the opened configuration states signing paths of its own and was not converted to the console's",
     );
     this.name = "MountedSigningPathsUnconvertedError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.createJob} when core refuses the configuration or
+ * the hand-off composed from a schema-valid intent: a cross-field rule the
+ * intent schema does not restate (a split sftp connection run without retain
+ * mode), or a composed document past core's size bounds. The route maps it to a
+ * 400 whose body is {@link JobIntentUncomposableError.detail}.
+ */
+export class JobIntentUncomposableError extends Error {
+  /** The refusal as `<field>: <reason>`, `<field>` naming a field of the
+   * composed configuration, or core's fixed message when it names none. */
+  readonly detail: string;
+
+  constructor(detail: string, options?: ErrorOptions) {
+    super(
+      `the intent could not be composed into a configuration: ${detail}`,
+      options,
+    );
+    this.detail = detail;
+    this.name = "JobIntentUncomposableError";
+  }
+}
+
+/**
+ * Run one composition step, turning core's refusal of what it composed into a
+ * {@link JobIntentUncomposableError}: a schema issue described through the
+ * shared formatter, or one of the key-rewrite size bounds. Any other throw
+ * propagates unchanged.
+ */
+function composedFromIntent<TComposed>(compose: () => TComposed): TComposed {
+  try {
+    return compose();
+  } catch (error) {
+    if (error instanceof ZodError)
+      throw new JobIntentUncomposableError(formatFirstIssue(error.issues), {
+        cause: error,
+      });
+    if (
+      error instanceof NodeCountExceededError ||
+      error instanceof NestingDepthExceededError
+    )
+      throw new JobIntentUncomposableError(error.message, { cause: error });
+    throw error;
   }
 }
 
@@ -547,6 +597,15 @@ export class JobManager {
    * only, so a restart forgets it.
    */
   private openedConfiguration: OpenedMountedConfiguration | undefined;
+  /**
+   * The shutdown in progress for each record whose child {@link shutdown}
+   * signalled: the promise every shutdown call returns, settled from
+   * {@link reconcileTerminal} once the child's exit is observed.
+   */
+  private readonly shutdownWaits = new WeakMap<
+    JobRecord,
+    { exited: Promise<void>; resolveExited: () => void }
+  >();
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -578,6 +637,13 @@ export class JobManager {
   async createJob(intent: JobCreateIntent): Promise<string> {
     const id = generateJobId();
 
+    // Claim the slot with no await between the null check and the assignment --
+    // every check in between is synchronous -- so two concurrent POSTs cannot
+    // both observe a free slot. The busy check runs first, so an occupied
+    // console answers with the occupying exchange's id, which the caller
+    // re-attaches to, whatever else this create would be refused for.
+    if (this.slot !== null) throw new ExchangeBusyError(this.slotId()!);
+
     let serverEntry: JobSftpServerEntry | undefined;
     if (intent.channel === "sftp") {
       if (this.authoredSftpServer === undefined)
@@ -601,12 +667,6 @@ export class JobManager {
         throw new JobRendezvousRetainRequiredError();
     }
 
-    // Claim the slot with no await between the null check and the assignment --
-    // the identity resolution and the signing refusal in between are both
-    // synchronous -- so two concurrent POSTs cannot both observe a free slot.
-    // The busy rejection holds the occupying exchange's id so the caller can
-    // re-attach to it.
-    if (this.slot !== null) throw new ExchangeBusyError(this.slotId()!);
     // A run of the opened configuration continues the exchange under the key
     // file beside it. Checked after the busy check, so a create posted to
     // recover a lost attachment meets the rejection that re-attaches it, and
@@ -1050,19 +1110,21 @@ export class JobManager {
     const openedConfigurationNotice = runsOpenedConfiguration
       ? openedConfigurationWarning(this.dataRoot, opened)
       : undefined;
-    const handoff = buildJobHandoff(intent, serverEntry, {
-      credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
-      filedropSplit: this.jobRendezvousOutboundDir !== undefined,
-      keyFileBesideConfiguration: mountedKeyPath !== undefined,
-      ...(mountedDocument !== undefined
-        ? {
-            mountedDocument,
-            mountedDocumentConverted:
-              intent.mode !== "zeroSetup" &&
-              intent.mountedConfigurationConverted === true,
-          }
-        : {}),
-    });
+    const handoff = composedFromIntent(() =>
+      buildJobHandoff(intent, serverEntry, {
+        credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
+        filedropSplit: this.jobRendezvousOutboundDir !== undefined,
+        keyFileBesideConfiguration: mountedKeyPath !== undefined,
+        ...(mountedDocument !== undefined
+          ? {
+              mountedDocument,
+              mountedDocumentConverted:
+                intent.mode !== "zeroSetup" &&
+                intent.mountedConfigurationConverted === true,
+            }
+          : {}),
+      }),
+    );
 
     const record: JobRecord = {
       id,
@@ -1168,12 +1230,14 @@ export class JobManager {
     identityPath: string,
     mountedKeyPath: string | undefined,
   ): Promise<{ configPath: string; keyPath: string }> {
-    const configDocument = composeDocumentByChannel(
-      intent,
-      this.jobRendezvousDir,
-      this.jobRendezvousOutboundDir,
-      serverEntry,
-      this.signingPathsFor(workdir, identityPath),
+    const configDocument = composedFromIntent(() =>
+      composeDocumentByChannel(
+        intent,
+        this.jobRendezvousDir,
+        this.jobRendezvousOutboundDir,
+        serverEntry,
+        this.signingPathsFor(workdir, identityPath),
+      ),
     );
     const configPath = await writeJobFile(
       workdir,
@@ -1520,6 +1584,7 @@ export class JobManager {
       record.transportTeardownOverran = diagnostics.transportTeardownOverran;
 
     this.maybeFreeSlot(record);
+    this.shutdownWaits.get(record)?.resolveExited();
   }
 
   /**
@@ -1669,15 +1734,34 @@ export class JobManager {
   }
 
   /**
-   * Shutdown hook: SIGTERM the single active record's running child so no orphaned
-   * CLI outlives the server. Called from the server lifecycle on shutdown.
+   * Shutdown hook: SIGTERM the running child, SIGKILL it if it is still running
+   * after the SIGKILL grace, and resolve once its exit has been observed, so the
+   * server exits only after the CLI's own cleanup and no orphaned CLI outlives
+   * it. Resolves at once when no child is running. A repeated call while that
+   * child is stopping signals nothing further and returns the same promise.
    */
-  shutdown(): void {
+  shutdown(): Promise<void> {
     const slot = this.slot;
-    if (slot === null || slot.phase !== "active") return;
+    if (slot === null || slot.phase !== "active") return Promise.resolve();
     const record = slot.record;
+    if (record.terminal !== null || record.handle === null)
+      return Promise.resolve();
+    const inProgress = this.shutdownWaits.get(record);
+    if (inProgress !== undefined) return inProgress.exited;
+
+    let resolveExited = (): void => undefined;
+    const exited = new Promise<void>((resolve) => {
+      resolveExited = resolve;
+    });
+    this.shutdownWaits.set(record, { exited, resolveExited });
     this.clearCancelTimers(record);
-    if (record.handle?.isRunning()) record.handle.signal("SIGTERM");
+    record.handle.signal("SIGTERM");
+    const toSigkill = setTimeout(() => {
+      if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
+    }, this.cancelSigkillGraceMs);
+    record.cancelTimers.push(toSigkill);
+    toSigkill.unref();
+    return exited;
   }
 }
 

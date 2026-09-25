@@ -229,8 +229,9 @@ export function resolveCliBinaryPath(
 const STDERR_TAIL_CAP = 8192;
 
 /**
- * The maximum length buffered on the fd-3 line reader, in UTF-16 code units,
- * before the partial line is discarded as oversized.
+ * The maximum length of one fd-3 line, in UTF-16 code units. A longer line is
+ * discarded as oversized, and the reader never buffers more than this of an
+ * unterminated one.
  */
 const FD3_LINE_CAP = 1_048_576;
 
@@ -457,8 +458,9 @@ export function sanitizedChildEnv(): NodeJS.ProcessEnv {
  * Line-buffer fd 3 as NDJSON. Each complete line is parsed, schema-validated
  * against the v1 vocabulary, and every string field sanitized before it reaches
  * the handler. A malformed or unknown line does not crash the relay: it is
- * reported as a degradation notice and dropped. The buffer is capped so an
- * unterminated flood cannot grow without bound.
+ * reported as a degradation notice and dropped. The size cap applies to each
+ * line on its own, so an oversized line costs only itself, and it bounds the
+ * buffer so an unterminated flood cannot grow without limit.
  *
  * @internal exported for unit tests, which drive the stream-level degradations
  * (an absent fd 3, a read error on it) a spawned child cannot stage.
@@ -482,28 +484,36 @@ export function attachFd3Reader(
   }
   const fd3 = fd3Raw as Readable;
   let buffer = "";
+  // Set once an oversized line has been reported while still unterminated, so
+  // the rest of it is dropped up to its newline rather than parsed as a line.
+  let discardingOversizedLine = false;
+  const reportOversizedLine = (): void =>
+    handlers.onDegraded(
+      "relayStreamOversizedLine",
+      "CLI event stream line exceeded the size cap",
+    );
   fd3.setEncoding("utf8");
   fd3.on("data", (chunk: string) => {
     buffer += chunk;
-    if (buffer.length > FD3_LINE_CAP) {
-      handlers.onDegraded(
-        "relayStreamOversizedLine",
-        "CLI event stream line exceeded the size cap",
-      );
-      buffer = "";
-      return;
-    }
     let newlineIndex = buffer.indexOf("\n");
     while (newlineIndex !== -1) {
       const line = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
-      handleFd3Line(line, handlers);
+      if (discardingOversizedLine) discardingOversizedLine = false;
+      else if (line.length > FD3_LINE_CAP) reportOversizedLine();
+      else handleFd3Line(line, handlers);
       newlineIndex = buffer.indexOf("\n");
+    }
+    if (buffer.length > FD3_LINE_CAP) {
+      if (!discardingOversizedLine) reportOversizedLine();
+      discardingOversizedLine = true;
+      buffer = "";
     }
   });
   fd3.on("end", () => {
     const trailing = buffer.trim();
-    if (trailing.length > 0) handleFd3Line(trailing, handlers);
+    if (trailing.length > 0 && !discardingOversizedLine)
+      handleFd3Line(trailing, handlers);
     buffer = "";
   });
   fd3.on("error", () => {

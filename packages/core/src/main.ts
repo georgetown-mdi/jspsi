@@ -147,7 +147,7 @@ export { snakeizeKeys } from "./utils/camelizeKeys";
 // the operator is reading the snake_case document (see the declaration's
 // JSDoc).
 export { snakeizeKey } from "./utils/camelizeKeys";
-// The camelize/snakeize nesting-depth discipline. The invitation decode path
+// The camelize/snakeize depth and node-count bounds. The invitation decode path
 // normalizes transform.params through this bounded camelizeKeys chokepoint
 // (the camelize pre-pass in config/invitation.ts), so a pathologically deep
 // params is rejected at decode like it is on every other parse path; the CLI's
@@ -157,6 +157,7 @@ export { snakeizeKey } from "./utils/camelizeKeys";
 export {
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
+  NodeCountExceededError,
 } from "./utils/camelizeKeys";
 export {
   canonicalString,

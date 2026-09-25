@@ -40,15 +40,69 @@ const NON_CROSS_ORIGIN_FETCH_SITES: ReadonlySet<string> = new Set([
   "none",
 ]);
 
-/** Parse a value to its origin (scheme+host+port, default-port-normalized), or
- * null when it is not a parseable absolute URL -- an opaque `"null"` origin among
- * them, so an opaque-origin request is treated as a mismatch. */
-function originOf(value: string): string | null {
+/** The port each web scheme implies when a URL names none. */
+const DEFAULT_PORT_BY_SCHEME: ReadonlyMap<string, string> = new Map([
+  ["http:", "80"],
+  ["https:", "443"],
+]);
+
+/** A request authority: the hostname, and the port when one was named. */
+interface Authority {
+  hostname: string;
+  port: string | null;
+}
+
+/** Parse an `Origin` value to its hostname, its port (the scheme's default when
+ * it names none) and its scheme's default port, or null when it is not an http
+ * or https origin -- an opaque `"null"` origin among them, so an opaque-origin
+ * request is treated as a mismatch. */
+function originAuthorityOf(
+  value: string,
+): { hostname: string; port: string; schemeDefaultPort: string } | null {
+  let url: URL;
   try {
-    return new URL(value).origin;
+    url = new URL(value);
   } catch {
     return null;
   }
+  const schemeDefaultPort = DEFAULT_PORT_BY_SCHEME.get(url.protocol);
+  if (schemeDefaultPort === undefined) return null;
+  return {
+    hostname: url.hostname,
+    port: url.port === "" ? schemeDefaultPort : url.port,
+    schemeDefaultPort,
+  };
+}
+
+/** Parse a `Host` header to its hostname and the port it names, or null when it
+ * is unparseable. Each scheme's parse drops its own default port, so a port
+ * either parse keeps is one the header named. */
+function authorityOfHostHeader(host: string): Authority | null {
+  try {
+    const asHttp = new URL(`http://${host}`);
+    const asHttps = new URL(`https://${host}`);
+    const port = asHttp.port !== "" ? asHttp.port : asHttps.port;
+    return { hostname: asHttp.hostname, port: port === "" ? null : port };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether `Origin` names the host the request was sent to. The scheme is not
+ * compared: the server cannot tell an http request from one a TLS front
+ * terminated, and one host and port serve one scheme. A `Host` naming no port
+ * stands for the default port of the origin's scheme.
+ */
+function originMatchesHost(origin: string, host: string | null): boolean {
+  const originAuthority = originAuthorityOf(origin);
+  const hostAuthority = host === null ? null : authorityOfHostHeader(host);
+  if (originAuthority === null || hostAuthority === null) return false;
+  return (
+    originAuthority.hostname === hostAuthority.hostname &&
+    originAuthority.port ===
+      (hostAuthority.port ?? originAuthority.schemeDefaultPort)
+  );
 }
 
 /**
@@ -57,8 +111,9 @@ function originOf(value: string): string | null {
  * headers page JavaScript cannot forge, so a visited page cannot drive the
  * API cross-origin (e.g. make the console connect out to an attacker-chosen
  * host); the console's same-origin UI and a header-less loopback client both
- * pass unchanged. The expected origin is derived from the `Host` header.
- * Returns a `403` {@link Response} to short-circuit, or null to proceed.
+ * pass unchanged. The `Origin` is compared with the `Host` header
+ * ({@link originMatchesHost}). Returns a `403` {@link Response} to
+ * short-circuit, or null to proceed.
  */
 function rejectCrossOriginBrowserRequest(request: Request): Response | null {
   const fetchSite = request.headers.get("sec-fetch-site");
@@ -66,9 +121,7 @@ function rejectCrossOriginBrowserRequest(request: Request): Response | null {
     return jobEmptyResponse(403);
   const origin = request.headers.get("origin");
   if (origin === null) return null;
-  const host = request.headers.get("host");
-  const expected = host === null ? null : originOf(`http://${host}`);
-  if (expected === null || originOf(origin) !== expected)
+  if (!originMatchesHost(origin, request.headers.get("host")))
     return jobEmptyResponse(403);
   return null;
 }
@@ -82,8 +135,8 @@ const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set([
   "::1",
 ]);
 
-/** Derive the hostname of a `Host` header the way {@link originOf} derives an
- * origin -- parse it as the authority of an http URL, take the port-stripped
+/** Derive the hostname of a `Host` header the way {@link authorityOfHostHeader}
+ * does -- parse it as the authority of an http URL, take the port-stripped
  * `hostname`, strip the brackets Node leaves on an IPv6 literal (`[::1]`), and
  * lowercase. Null when the header is absent or unparseable, so the caller fails
  * closed. */
@@ -167,6 +220,34 @@ export function gateJobRoute(request: Request): GateOutcome {
  * raise of the intake cap moves it in the same edit.
  */
 export const MAX_JOB_BODY_BYTES = 2 * MAX_INPUT_CSV_LENGTH + 24 * 1024 ** 2;
+
+/**
+ * The slowest upload rate, in bytes per second, a job request body is given
+ * time to arrive at: a create at {@link MAX_JOB_BODY_BYTES} arrives within
+ * {@link JOB_API_REQUEST_TIMEOUT_MS} at this rate or faster.
+ */
+export const MIN_JOB_UPLOAD_BYTES_PER_SECOND = 1024 ** 2;
+
+/**
+ * The whole-request bound a server with the job API enabled applies in place
+ * of the signaling default, sized to the largest body a job route reads: at
+ * {@link MIN_JOB_UPLOAD_BYTES_PER_SECOND} that body takes this long to arrive.
+ * A console is reached only from the operator's own machine, so the longer bound
+ * a slow body gets there is not the exposure it would be on the hosted server.
+ */
+export const JOB_API_REQUEST_TIMEOUT_MS =
+  Math.ceil(MAX_JOB_BODY_BYTES / MIN_JOB_UPLOAD_BYTES_PER_SECOND) * 1000;
+
+/**
+ * The whole-request bound the server should apply: {@link
+ * JOB_API_REQUEST_TIMEOUT_MS} when the job API is enabled, else undefined, which
+ * leaves the signaling default in place.
+ */
+export function jobApiRequestTimeoutMs(
+  config: JobApiConfig = readJobApiConfig(),
+): number | undefined {
+  return isJobApiEnabled(config) ? JOB_API_REQUEST_TIMEOUT_MS : undefined;
+}
 
 /**
  * The byte cap on a `PUT /api/jobs/sftp` authoring body: a small memory bound on

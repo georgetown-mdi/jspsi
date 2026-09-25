@@ -1,7 +1,10 @@
+import fs from "node:fs";
+
 import { describe, expect, test } from "vitest";
 
 import { MAX_NAME_LENGTH, MAX_TEXT_LENGTH } from "@alcove/core";
 
+import { JobIntentUncomposableError, JobManager } from "@jobs/jobManager";
 import {
   MAX_EXPECTED_PAYLOAD_COLUMNS,
   MAX_METADATA_COLUMNS,
@@ -14,7 +17,13 @@ import { buildJobHandoff } from "@jobs/handoff";
 import { fetchRecurringHandoff } from "@psi/managed/recurringHandoff";
 import { jobJsonResponse } from "@jobs/gate";
 
-import { testSftpServerEntry, validSftpIntent } from "../../utils/jobFixtures";
+import {
+  STUB_CLI_PATH,
+  tempDataRoot,
+  testSftpServerEntry,
+  validIntent,
+  validSftpIntent,
+} from "../../utils/jobFixtures";
 
 import type { Metadata, Standardization } from "@alcove/core";
 
@@ -139,6 +148,40 @@ describe("the hand-off cap covers the create intent's schema maxima", () => {
           { credentialPasted: false, filedropSplit: false },
         ),
       ).toThrow(/node count/);
+    },
+    WIDEST_COMPOSE_TIMEOUT_MS,
+  );
+
+  test(
+    "a create past the compose's node budget is refused as uncomposable and frees the slot",
+    async () => {
+      const dataRoot = tempDataRoot("handoff-node-budget");
+      const rendezvousDir = tempDataRoot("handoff-node-budget-rvz");
+      fs.mkdirSync(dataRoot, { recursive: true });
+      fs.mkdirSync(rendezvousDir, { recursive: true });
+      try {
+        const manager = new JobManager({
+          dataRoot,
+          binaryPath: STUB_CLI_PATH,
+          jobRendezvousDir: rendezvousDir,
+        });
+        const create = manager.createJob(
+          validIntent({
+            metadata: maxMetadata(),
+            standardization: maxStandardization(MAX_STANDARDIZATION_STEPS),
+          }),
+        );
+        await expect(create).rejects.toBeInstanceOf(JobIntentUncomposableError);
+        await expect(create).rejects.toHaveProperty(
+          "detail",
+          expect.stringMatching(/node count/),
+        );
+        expect(manager.occupiedSlotId()).toBeNull();
+        expect(fs.readdirSync(dataRoot)).toEqual([]);
+      } finally {
+        fs.rmSync(dataRoot, { recursive: true, force: true });
+        fs.rmSync(rendezvousDir, { recursive: true, force: true });
+      }
     },
     WIDEST_COMPOSE_TIMEOUT_MS,
   );

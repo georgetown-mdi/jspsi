@@ -18,13 +18,15 @@ import { getLogger, setLogLevel } from "@alcove/core";
 
 import {
   bootSftpCredentialScratchDir,
-  shutdownJobManager,
+  registerJobManagerShutdown,
   warnJobApiProfileMismatch,
   warnJobRendezvousProvisioning,
 } from "../src/jobs/index";
 import { ConfigManager } from "../src/utils/serverConfig";
+import { jobApiRequestTimeoutMs } from "../src/jobs/routeSupport";
 import { registerServer } from "../src/httpServer";
 
+import { attachRequestAbortSignal } from "./requestAbortSignal";
 import { hardenUpgradeSurface } from "./upgradeHardening";
 
 import type { AddressInfo } from "node:net";
@@ -41,6 +43,9 @@ const log = getLogger("server-entry");
 
 const nitroApp = useNitroApp();
 
+// Give each handler's `request.signal` the client disconnect.
+nitroApp.hooks.hook("request", attachRequestAbortSignal);
+
 const server =
   cert && key
     ? // @ts-ignore part of preset
@@ -49,8 +54,13 @@ const server =
       new HttpServer(toNodeListener(nitroApp.h3App));
 
 // Bound a slow or partial signaling upgrade handshake (slowloris) on the shared
-// HTTP server; post-101 reaping is the signaling layer's job.
-hardenUpgradeSurface(server);
+// HTTP server; post-101 reaping is the signaling layer's job. With the job API
+// enabled, the whole-request bound is sized to its largest upload instead.
+const requestTimeoutMs = jobApiRequestTimeoutMs();
+hardenUpgradeSurface(
+  server,
+  requestTimeoutMs === undefined ? {} : { requestTimeoutMs },
+);
 
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 const port = (config.PORT || 3000) as number;
@@ -126,12 +136,11 @@ const listener = server.listen(path ? { path } : { port, host }, (err) => {
 // Trap unhandled errors
 trapUnhandledNodeErrors();
 
-// SIGTERM every running CLI child on shutdown so no orphaned CLI outlives the
-// server. A no-op when the job API was never enabled. Registered BEFORE the
-// graceful-shutdown handler: signal listeners run in registration order, and the
-// children must be signalled before any handler that may end the process.
-for (const signal of ["SIGINT", "SIGTERM"] as const)
-  process.once(signal, shutdownJobManager);
+// Stop the running CLI child on shutdown and hold the process until it has
+// exited, so no orphaned CLI outlives the server. A no-op when the job API was
+// never enabled. Registered BEFORE the graceful-shutdown handler, whose signal
+// listener must run after the child has been signalled.
+registerJobManagerShutdown(nitroApp.hooks);
 
 // Graceful shutdown
 setupGracefulShutdown(listener, nitroApp);

@@ -329,6 +329,53 @@ describe("the browser-CSRF gate rejects a cross-origin browser request", () => {
     expect(response.status).toBe(403);
   });
 
+  // A console served over TLS, directly or behind a TLS front, sees an https
+  // Origin on every browser write while the server itself cannot tell which
+  // scheme the browser used.
+  test.each([
+    { host: "localhost", origin: "https://localhost" },
+    { host: "localhost:8443", origin: "https://localhost:8443" },
+    { host: "localhost:443", origin: "https://localhost" },
+    { host: "[::1]:3000", origin: "https://[::1]:3000" },
+    { host: "localhost:3000", origin: "http://localhost:3000" },
+  ])("Origin $origin passes for Host $host", async ({ host, origin }) => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { host, origin }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("an https Origin passes for an allowlisted Host behind a TLS front", async () => {
+    enableJobApi();
+    vi.stubEnv("JOB_ALLOWED_HOSTS", "console.lan");
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        host: "console.lan",
+        origin: "https://console.lan",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test.each([
+    { host: "localhost:3000", origin: "https://localhost:3001" },
+    { host: "localhost", origin: "https://localhost:8443" },
+    { host: "localhost:80", origin: "https://localhost" },
+    { host: "localhost", origin: "https://127.0.0.1" },
+    { host: "localhost", origin: "ftp://localhost" },
+    { host: "localhost", origin: "null" },
+  ])("Origin $origin is 403 for Host $host", async ({ host, origin }) => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { host, origin }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+  });
+
   test("the gate runs on the probe route too (shared gate)", async () => {
     seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
     const rejected = (await handlersOf(SftpProbeRoute).POST({
@@ -1230,6 +1277,43 @@ describe("POST /api/jobs and the authored sftp connection", () => {
     expect(await response.text()).toBe("");
   });
 
+  test("an intent core refuses at compose is a 400 naming the rule, with nothing left behind", async () => {
+    const root = tempDataRoot("routes-sftp-split");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+    const secretDir = tempDataRoot("routes-secret");
+    roots.push(secretDir);
+    fs.mkdirSync(secretDir, { recursive: true });
+    const secretPath = path.join(secretDir, "password");
+    fs.writeFileSync(secretPath, "s3cret\n");
+    manager.authorSftpServer({
+      host: "sftp.example.org",
+      port: 2222,
+      username: "linkage",
+      inboundPath: "/exchange/in",
+      outboundPath: "/exchange/out",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+    });
+
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/^connection: .*requires retain_files: true$/);
+    expect(fs.readdirSync(root)).toEqual([]);
+    expect(manager.occupiedSlotId()).toBeNull();
+  });
+
   test("the create path composes the authored connection into the job config", async () => {
     // The connection material comes only from the authored entry: the composed
     // alcove.yaml has its host and @path credential ref, and nothing
@@ -1288,6 +1372,34 @@ describe("POST /api/jobs rejects a concurrent filedrop job", () => {
     expect(second.status).toBe(409);
     expect(await second.json()).toEqual({ id: firstId });
   });
+
+  test("an sftp create with no connection authored is a 409 while the filedrop run holds the slot", async () => {
+    const root = tempDataRoot("routes-filedrop");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      jobRendezvousDir: rvzRoot(),
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+
+    const first = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(first.status).toBe(201);
+    const { id: firstId } = (await first.json()) as { id: string };
+
+    const second = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ id: firstId });
+  });
 });
 
 describe("POST /api/jobs on a split-provisioned console", () => {
@@ -1338,6 +1450,23 @@ describe("POST /api/jobs on a split-provisioned console", () => {
     // Only the file-handling options differ from the 400 above, so that 400 was
     // the split rendezvous meeting a run that would not keep its files.
     expect(response.status).toBe(201);
+  });
+
+  test("an intent without retain mode is a 409 while another run holds the slot", async () => {
+    enableSplitRendezvous();
+    const first = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent({ options: RETAIN_OPTIONS })),
+      params: {},
+    })) as Response;
+    expect(first.status).toBe(201);
+    const { id: firstId } = (await first.json()) as { id: string };
+
+    const second = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual({ id: firstId });
   });
 });
 
