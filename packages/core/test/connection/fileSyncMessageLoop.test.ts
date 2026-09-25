@@ -2011,6 +2011,36 @@ describe("FileSyncMessageLoop delete-mode consume failure", () => {
     expect(rendered).toContain("permission denied");
     expect(f.files.size).toBe(1);
   });
+
+  test.each([
+    ["local unlink", "ENOENT"],
+    ["SFTP SSH_FX_NO_SUCH_FILE", 2],
+  ])(
+    "a retry that finds the message already deleted (%s) delivers it once",
+    async (_transport, absentCode) => {
+      const f = makeLoop({ pollingFrequency: 1 });
+      plantDeleteMessage(f.files, { hi: true });
+      let deleteCalls = 0;
+      f.client.delete = async (path: string) => {
+        deleteCalls++;
+        f.files.delete(path);
+        if (deleteCalls === 1) throw new Error("connection reset");
+        throw Object.assign(new Error("no such file"), { code: absentCode });
+      };
+
+      f.loop.start();
+      await new Promise((r) => setTimeout(r, 100));
+      const { pollerActive } = f.loop as unknown as LoopInternals;
+      f.loop.stop();
+
+      expect(deleteCalls).toBe(2);
+      const delivered = f.emitted.filter((e) => e.event === "data");
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0].arg).toEqual({ hi: true });
+      expect(f.emitted.filter((e) => e.event === "error")).toHaveLength(0);
+      expect(pollerActive).toBe(true);
+    },
+  );
 });
 
 describe("FileSyncMessageLoop stop during the idle-boundary release", () => {

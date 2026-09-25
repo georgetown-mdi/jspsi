@@ -238,6 +238,14 @@ export function isRecognizedLoopFile(
 // listing is not converging, which is pathological.
 const MAX_CONSECUTIVE_ENOENT = 3;
 
+// A delete of a file that is already gone, as each transport reports it: a
+// local unlink's POSIX code "ENOENT", or ssh2-sftp-client's numeric
+// SSH_FX_NO_SUCH_FILE status (2), which the SFTP adapter passes through as is.
+function isDeleteTargetAbsentError(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return code === "ENOENT" || code === 2;
+}
+
 // The message-loop-relevant subset of the connection's Options, read live
 // through the deps `options` accessor. The connection's full Options is a
 // superset, so `() => this.options` satisfies this; naming only what poll() and
@@ -1083,22 +1091,26 @@ export class FileSyncMessageLoop {
                 await deps.client().delete(inPath);
               } catch (deleteErr: unknown) {
                 if (deleteErr instanceof UsageError) throw deleteErr;
-                // Terminal: the delete is the sender's go-ahead, and a message
-                // left on disk is re-read by the next poll, so emitting it
-                // here would deliver it again on every cycle.
-                throw new UsageError(
-                  "could not delete a partner message after reading it " +
-                    "(two attempts). In delete mode each message is deleted " +
-                    "once read, so the account must be allowed to delete " +
-                    "files in the exchange directory. Grant that permission, " +
-                    "or have both parties set retain_files: true.",
-                  {
-                    cause: chainDetailCauses(
-                      [`message file: ${messageFile.name}`],
-                      deleteErr,
-                    ),
-                  },
-                );
+                // The first attempt can take effect with its reply lost, so
+                // an absent file on the retry means the message is consumed.
+                if (!isDeleteTargetAbsentError(deleteErr)) {
+                  // Terminal: the delete is the sender's go-ahead, and a
+                  // message left on disk is re-read by the next poll, so
+                  // emitting it here would deliver it again on every cycle.
+                  throw new UsageError(
+                    "could not delete a partner message after reading it " +
+                      "(two attempts). In delete mode each message is deleted " +
+                      "once read, so the account must be allowed to delete " +
+                      "files in the exchange directory. Grant that permission, " +
+                      "or have both parties set retain_files: true.",
+                    {
+                      cause: chainDetailCauses(
+                        [`message file: ${messageFile.name}`],
+                        deleteErr,
+                      ),
+                    },
+                  );
+                }
               }
             }
 
