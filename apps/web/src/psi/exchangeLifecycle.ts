@@ -3,6 +3,7 @@ import {
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
   describeResolvedRunShape,
+  exchangeRecordFromFailure,
   getLogger,
   runExchange,
 } from "@alcove/core";
@@ -17,6 +18,7 @@ import type Peer from "peerjs";
 import type { PeerCloseOutcome } from "./transport/waitForPeerClose";
 
 import type {
+  BuiltExchangeRecord,
   EntityClusterSummary,
   ExchangeResult,
   MessageConnection,
@@ -272,6 +274,34 @@ export type ExchangeOutputs =
 export type GenerateOutput<TOutputs extends ExchangeOutputs = ExchangeOutputs> =
   (result: ExchangeResult, prepared: PreparedExchange) => TOutputs;
 
+/** A failed run as the lifecycle reports it to its owner. */
+export interface ExchangeFailure {
+  category: ExchangeErrorCategory;
+  error: unknown;
+  /** The self-attested record of a run that had already sent this party's
+   * payload: the one core hands back on a run that then failed
+   * ({@link exchangeRecordFromFailure}), or a completed run's own when
+   * building its local outputs threw. Absent when the run owed no record or
+   * core could not build one (docs/spec/EXCHANGE_RECORD.md, When a record is
+   * owed). */
+  record?: BuiltExchangeRecord;
+}
+
+/** The record core attached to a failed run, if any. Guarded because the lookup
+ * walks the error's `cause` chain, and a throwing accessor there must not replace
+ * the run's own failure. */
+function recordFromFailure(error: unknown): BuiltExchangeRecord | undefined {
+  try {
+    return exchangeRecordFromFailure(error);
+  } catch (lookupFailure) {
+    log.error(
+      "reading a failed run's exchange record from its error failed:",
+      lookupFailure,
+    );
+    return undefined;
+  }
+}
+
 /** Options for {@link runExchangeLifecycle}. */
 interface RunExchangeLifecycleOptions<
   TOutputs extends ExchangeOutputs = ExchangeOutputs,
@@ -297,10 +327,7 @@ interface RunExchangeLifecycleOptions<
   onStages: (stages: Array<StageDefinition>) => void;
   onStage: (stageId: string) => void;
   onResult: (outputs: TOutputs) => void;
-  onError: (failure: {
-    category: ExchangeErrorCategory;
-    error: unknown;
-  }) => void;
+  onError: (failure: ExchangeFailure) => void;
   /** A non-fatal, operator-relevant notice raised mid-run. Two sources, arriving
    * at opposite ends of the run: the deduplicating cardinality and the pair-table
    * projection, raised right after the terms resolve and before the first round,
@@ -344,6 +371,10 @@ interface RunExchangeLifecycleOptions<
  *   is `"security"` so the UI shows an authentication failure rather than a
  *   retryable transport drop; a `generateOutput` throw (the exchange already
  *   succeeded) is `"output"`; a teardown-only throw raises neither.
+ * - **A failure after this party's payload send keeps the record.** Both a
+ *   run failure core attached a record to and an `"output"` failure of a
+ *   completed run report it on {@link ExchangeFailure.record}, so the owner
+ *   can still offer it for download.
  * - **The broker socket drops on the first inbound frame** (F4), while the data
  *   channel stays open for the exchange. Best-effort: a throw in that listener
  *   cannot fail the exchange.
@@ -582,12 +613,21 @@ export async function runExchangeLifecycle<
     try {
       outputs = generateOutput(result, prepared);
     } catch (error) {
-      emitError({ category: "output", error });
+      emitError({
+        category: "output",
+        error,
+        ...(result.audit !== undefined ? { record: result.audit } : {}),
+      });
       return;
     }
     emitResult(outputs);
   } catch (error) {
-    emitError({ category: classifyExchangeFailure(error, "run"), error });
+    const record = recordFromFailure(error);
+    emitError({
+      category: classifyExchangeFailure(error, "run"),
+      error,
+      ...(record !== undefined ? { record } : {}),
+    });
   } finally {
     signal.removeEventListener("abort", onAbort);
     await teardown();

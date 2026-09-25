@@ -39,6 +39,7 @@ import {
 import { buildRunEvents } from "./runEvents";
 import { failureFor } from "./useInviterExchange";
 import { prepareAcceptorExchange } from "./acceptorExchange";
+import { useFailedRunRecord } from "./useFailedRunRecord";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -51,6 +52,7 @@ import type {
   ExchangeErrorCategory,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
+import type { AvailableRecordOffer, RunOutputs } from "@psi/runOutputs";
 import type { CSVRow, InvitationToken } from "@alcove/core";
 import type {
   JobInputSource,
@@ -64,7 +66,6 @@ import type { JobExchangeOptions } from "@jobs/intentSchemas";
 import type { ReceiptsIntentFields } from "@psi/receiptsModel";
 import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";
-import type { RunOutputs } from "@psi/runOutputs";
 import type { Transport } from "@psi/transportChooser";
 
 const log = getLogger("useAcceptorExchange");
@@ -296,6 +297,9 @@ export function useAcceptorExchange({
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
+  /** The exchange record a failed in-browser run holds, offered for download
+   * beside the failure; undefined on every other run. */
+  runRecord: AvailableRecordOffer | undefined;
   /** The run's non-fatal warnings in arrival order, each already escaped at the
    * run callbacks' display boundary ({@link buildRunEvents}). The console's
    * rendezvous preflight raises these before the exchange starts -- a non-empty
@@ -323,6 +327,7 @@ export function useAcceptorExchange({
   const [run, setRun] = useState<ExchangeRun>(() => initialRun("acceptor"));
   const [outputs, setOutputs] = useState<RunOutputs>();
   const [failure, setFailure] = useState<RunFailure>();
+  const { runRecord, offerRunRecord, clearRunRecord } = useFailedRunRecord();
   const [warnings, setWarnings] = useState<Array<string>>([]);
   // The status of an exchange this accept re-attached to on a busy (409) create,
   // else undefined. Drives the run surface's recovery-style copy; reset when a run
@@ -384,6 +389,7 @@ export function useAcceptorExchange({
     setRun(initialRun("acceptor"));
     setOutputs(undefined);
     setFailure(undefined);
+    clearRunRecord();
     setWarnings([]);
     setCurrentJobId(undefined);
     setReattached(undefined);
@@ -572,6 +578,7 @@ export function useAcceptorExchange({
       setWarnings,
       setReattached,
       setReattaching,
+      offerRunRecord,
       setJobId: (id) => {
         currentJobIdRef.current = id;
         setCurrentJobId(id);
@@ -607,6 +614,7 @@ export function useAcceptorExchange({
       setRun(initialRun("acceptor"));
       setOutputs(undefined);
       setFailure(undefined);
+      clearRunRecord();
       setWarnings([]);
       setCurrentJobId(undefined);
       setReattached(undefined);
@@ -672,6 +680,7 @@ export function useAcceptorExchange({
     run,
     outputs,
     failure,
+    runRecord,
     warnings,
     jobId: currentJobId,
     reattached,
