@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
 import { MAX_DIRECTORY_ENTRIES } from "../../../src/connection/listingGuard";
+import { OutputCapture } from "../../../src/doctor/runner";
 import type { CommandResult, CommandRunner } from "../../../src/doctor/runner";
 import {
   PROBE_CHECK_IDS,
@@ -128,6 +129,7 @@ function authPathOf(args: string[]): string | undefined {
  * A runner that answers from `reply` and records every invocation, including a
  * snapshot of the credentials file as it stood at the time -- the file is
  * removed when the run ends, so it can only be inspected from inside a call.
+ * The reply's output passes through the real runner's output cap.
  */
 function fakeRunner(reply: (args: string[]) => Partial<CommandResult>): {
   runner: CommandRunner;
@@ -150,11 +152,18 @@ function fakeRunner(reply: (args: string[]) => Partial<CommandResult>): {
               : {}),
           };
         calls.push(call);
-        return Promise.resolve({
+        const result: CommandResult = {
           code: 0,
           output: "",
           timedOut: false,
           ...reply(args),
+        };
+        const capture = new OutputCapture();
+        capture.append(result.output);
+        return Promise.resolve({
+          ...result,
+          output: capture.text,
+          truncated: capture.truncated || result.truncated === true,
         });
       },
     },
@@ -527,6 +536,23 @@ describe("inputs that change the shape of the run", () => {
     expect(check.status).toBe("warn");
     expect(check.action).toContain("dedicated to the exchange");
     expect(overallOf(report)).toBe("ok");
+  });
+
+  test("a listing the output cap cut has the advisory and no free-space figure", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args) === "ls" && args.includes("-D")
+          ? { output: STATUS_NAMED_LISTING.split("\n\n")[0], truncated: true }
+          : healthyReply(args),
+      ),
+    );
+    const subdirectory = checkById(report, "subdirectory");
+    expect(subdirectory.status).toBe("warn");
+    expect(subdirectory.summary).toContain("at least 2 file(s)");
+    const freeSpace = checkById(report, "free_space");
+    expect(freeSpace.status).toBe("skipped");
+    expect(freeSpace.summary).toContain("too long");
   });
 
   test("a share root that will not list is not a failure when a subfolder was given", async () => {

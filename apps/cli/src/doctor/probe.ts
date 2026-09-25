@@ -199,10 +199,18 @@ export function countEntries(listing: string): number {
 /**
  * The subdirectory check over the folder the exchange will run in, including
  * the advisory a folder earns when it already holds more entries than the
- * transport will list.
+ * transport will list. A listing the output cap cut holds more than that, since
+ * the cap holds a listing past the bound.
  */
-function entryCountCheck(summary: string, entries: number): DoctorCheckRecord {
-  if (entries <= MAX_DIRECTORY_ENTRIES) return ok("subdirectory", summary);
+function entryCountCheck(
+  where: string,
+  listing: CommandResult,
+): DoctorCheckRecord {
+  const entries = countEntries(listing.output);
+  const cut = listing.truncated === true;
+  const summary = `${where} ${cut ? "at least " : ""}${entries} file(s) in it.`;
+  if (entries <= MAX_DIRECTORY_ENTRIES && !cut)
+    return ok("subdirectory", summary);
   return warn(
     "subdirectory",
     summary,
@@ -486,8 +494,14 @@ function subdirectoryCheck(
 }
 
 /** Read the free-space verdict off whichever listing the run ended up with. */
-function freeSpaceCheck(listing: string): DoctorCheckRecord {
-  const freeMb = freeMegabytes(listing);
+function freeSpaceCheck(listing: CommandResult): DoctorCheckRecord {
+  const freeMb = freeMegabytes(listing.output);
+  if (freeMb === undefined && listing.truncated === true)
+    return skipped("free_space", "the listing was too long to read in full.", {
+      meaning:
+        "the free-space figure comes after the last entry, and the listing " +
+        "was cut before it, so nothing was established about it.",
+    });
   if (freeMb === undefined)
     return skipped("free_space", "the server did not report free space.", {
       meaning:
@@ -753,7 +767,6 @@ export async function runProbe(
       );
     }
 
-    let listing = "";
     const shareList = await smb("ls");
     if (transportFailed(shareList)) {
       checks.push(transportFailureCheck("share_open", input.server, shareList));
@@ -762,21 +775,15 @@ export async function runProbe(
     const shareStatus = statusOf(shareList.output);
     if (shareStatus === undefined) {
       checks.push(ok("share_open", "share opened."));
-      listing = shareList.output;
     } else {
       const check = shareOpenCheck(input, shareStatus, shareList);
       checks.push(check);
       if (check.status === "fail") return finish();
     }
 
+    let listing = shareList;
     if (input.subdirectory === "") {
-      const entries = countEntries(listing);
-      checks.push(
-        entryCountCheck(
-          `using the share root; ${entries} file(s) in it.`,
-          entries,
-        ),
-      );
+      checks.push(entryCountCheck("using the share root;", listing));
     } else {
       const subdirectoryList = await deps.runner.run(
         "smbclient",
@@ -796,12 +803,9 @@ export async function runProbe(
         );
         return finish();
       }
-      const entries = countEntries(subdirectoryList.output);
-      checks.push(
-        entryCountCheck(`directory listed, ${entries} file(s) in it.`, entries),
-      );
+      checks.push(entryCountCheck("directory listed,", subdirectoryList));
       target = input.subdirectory;
-      listing = subdirectoryList.output;
+      listing = subdirectoryList;
     }
 
     checks.push(freeSpaceCheck(listing));

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { nodeCommandRunner } from "../../../src/doctor/runner";
+import { MAX_DIRECTORY_ENTRIES } from "../../../src/connection/listingGuard";
+import { countEntries, freeMegabytes } from "../../../src/doctor/probe";
+import {
+  MAX_CAPTURED_OUTPUT,
+  nodeCommandRunner,
+} from "../../../src/doctor/runner";
 
 // Driven against a real child process rather than a mock: the properties that
 // make this boundary safe -- no shell, a bounded wait, and a child environment
@@ -92,10 +97,36 @@ describe("the process runner", () => {
     const result = await nodeCommandRunner.run(
       NODE,
       evaluate(
-        "for (let i = 0; i < 4000; i++) process.stdout.write('x'.repeat(1000))",
+        `for (let i = 0; i < ${Math.ceil(MAX_CAPTURED_OUTPUT / 1000) + 100}; i++) process.stdout.write('x'.repeat(1000))`,
       ),
       { timeoutMs: RUN_TIMEOUT_MS },
     );
-    expect(result.output.length).toBeLessThanOrEqual(256 * 1024);
+    expect(result.output.length).toBe(MAX_CAPTURED_OUTPUT);
+    expect(result.truncated).toBe(true);
+  });
+
+  test("holds a listing one entry past the directory-listing bound in full", async () => {
+    // Every entry at the longest smbclient prints: a 255-character name, the
+    // attributes, a 20-digit size, and the date. Modeled on smbclient's `ls`
+    // line format, not captured from it.
+    const entries = MAX_DIRECTORY_ENTRIES + 1;
+    const result = await nodeCommandRunner.run(
+      NODE,
+      evaluate(
+        [
+          "const date = 'Mon Jan  1 00:00:00 2024';",
+          `for (let i = 0; i < ${entries}; i++) {`,
+          "  const name = String(i).padStart(255, 'n');",
+          "  process.stdout.write('  ' + name + 'AHSRDNT'.padStart(7) + ' ' +",
+          "    '18446744073709551615'.padStart(8) + '  ' + date + '\\n');",
+          "}",
+          "process.stdout.write('\\n\\t\\t1024 blocks of size 1048576. 512 blocks available\\n');",
+        ].join("\n"),
+      ),
+      { timeoutMs: RUN_TIMEOUT_MS },
+    );
+    expect(result.truncated).toBe(false);
+    expect(countEntries(result.output)).toBe(entries);
+    expect(freeMegabytes(result.output)).toBe(512);
   });
 });
