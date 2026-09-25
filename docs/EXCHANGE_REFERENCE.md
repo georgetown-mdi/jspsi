@@ -1157,7 +1157,7 @@ This is a local path, not an [`@`-file reference](CLI.md#configuration). A leadi
 
 The file is created owner-read-only by [`alcove fingerprint --identity-file`](CLI.md#where-the-signing-identity-lives), which is the one command that writes it; an exchange and [`alcove verify-receipt`](CLI.md#a-verified-verdict-needs-both-certificates-anchored) only read it, and write nothing beside it, so the directory can be mounted read-only for everything but that creating run. Regenerate the identity with `alcove fingerprint --force`, which invalidates any fingerprint a partner has pinned.
 
-Certificate mode with no `identity_file` is refused as a configuration error before the exchange runs (exit 64), naming both spellings of the path and `mode: none` as the way to run unsigned meanwhile. Like the partner-fingerprint requirement below, it is a cross-field rule rather than part of the `signing` block's schema, so a partially-authored config still parses. `alcove verify-receipt` refuses nothing: with no path configured it leaves this party's own certificate slot unanchored and grades the verdict `INCOMPLETE` at exit 0.
+Certificate mode with no `identity_file` is refused as a configuration error before the exchange runs (exit 64), naming both spellings of the path and `mode: none` as the way to run unsigned meanwhile. Like the partner-fingerprint requirement below, it is a cross-field rule rather than part of the `signing` block's schema, so a partially-authored config still parses. `alcove verify-receipt` refuses nothing: with no path configured it leaves this party's own certificate slot unanchored and grades the verdict `INCOMPLETE` (exit 66).
 
 ### `signing.partner_fingerprint`
 

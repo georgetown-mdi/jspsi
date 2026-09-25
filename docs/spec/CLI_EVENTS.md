@@ -203,7 +203,12 @@ The `output` category covers the whole stage, so it is broader than the exit cod
 
 ### The security marker
 
-The process exit code cannot distinguish a `security` failure from an ordinary one: a `security`-kind `ConnectionError` is not a `UsageError`, so it exits 69 (EX_UNAVAILABLE) -- the same code a plain transport drop yields. A supervisor that must treat a trust failure differently (a wrong secret is not a retryable transport blip, and a host presenting an unexpected key must not be silently reconnected to) therefore cannot rely on the exit code; the `error` event's `category: "security"` is the only place the distinction is observable. This covers the handshake cases (a failed key-exchange authentication: wrong secret, tampered or malformed handshake frames) and the host-identity cases (an SFTP host-key mismatch against the pinned fingerprint, or the unpinned fail-closed refusal) alike. Reading the terminal event, not the exit code, is the supported way to detect a trust-boundary failure.
+The `error` event's `category: "security"` marks every trust-boundary failure; the exit code marks only the authentication subset of them.
+
+- **Authentication failures exit 77 (`EX_NOPERM`).** Core raises them as an `AuthenticationError`, a `security`-kind `ConnectionError` the CLI's error-to-exit boundary maps to 77. This covers the handshake cases (a failed key-exchange authentication: wrong secret, tampered or malformed handshake frames) and the host-identity cases (an SFTP host-key mismatch against the pinned fingerprint, or the unpinned fail-closed refusal) alike: a retry reaches the same refusal, so a wrong secret must not be retried as a transport blip, and a host presenting an unexpected key must not be silently reconnected to.
+- **The other `security` failures exit 69 (`EX_UNAVAILABLE`)**, the code a plain transport drop yields: a frame on the authenticated channel that fails its integrity or ordering check, and a partner receipt that does not verify. For these the category is the only place the distinction is observable, so reading the terminal event is the supported way to detect them.
+
+A rotated secret this party could not save also exits 77, under `category: "exchange"`: the failure is a local write rather than a trust-boundary check, but it leaves the next key exchange to fail the same way.
 
 ### The internal-fault code
 

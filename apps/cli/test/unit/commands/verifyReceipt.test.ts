@@ -51,7 +51,11 @@ import {
   readVerificationKeysFile,
   toRetainedResult,
 } from "../../../src/commands/verifyReceipt";
-import { RECEIPT_VERIFICATION_FAILED_EXIT_CODE } from "../../../src/util/exit";
+import {
+  RECEIPT_VERIFICATION_FAILED_EXIT_CODE,
+  RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE,
+  worseReceiptVerdictExitCode,
+} from "../../../src/util/exit";
 import {
   argv,
   captureStdio,
@@ -185,13 +189,13 @@ describe("formatVerificationReport", () => {
     expect(exitCode).toBe(0);
   });
 
-  test("incomplete is not a failure (exit 0) but is labelled distinctly", () => {
+  test("incomplete exits its own code, not the failure code, and is labelled distinctly", () => {
     const { lines, exitCode } = formatVerificationReport(
       report("incomplete"),
       [],
     );
     expect(lines[0]).toMatch(/^INCOMPLETE/);
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("failed exits 65 and does not assert tamper", () => {
@@ -289,7 +293,7 @@ describe("formatVerificationReport: the recorded result size", () => {
     expect(lines.join("\n")).toContain(
       "result size: not checked (re-supply the result file",
     );
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a size with no pairing behind it is not checked, never verified", () => {
@@ -304,7 +308,7 @@ describe("formatVerificationReport: the recorded result size", () => {
     expect(out).toContain("the matched-pairs line above names the cause");
     expect(out).toContain("is not shaped as a pairing has no count");
     expect(out).toContain("count-only exchange records no such table at all");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   // The recorded figure alone at fault is the one failure the record's own
@@ -442,8 +446,8 @@ describe("formatSignedRecordReport", () => {
         "which is what holds the verdict short of VERIFIED",
     );
     expect(out).toContain("--identity-file");
-    // Short of verified is not a failure: the exit code stays 0.
-    expect(exitCode).toBe(0);
+    // Short of verified is not a failure: the incomplete code, not 65.
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("an unanchored slot a pinned value does match is not reported as matching none", () => {
@@ -570,7 +574,7 @@ describe("formatSignedRecordReport", () => {
         "anchors nothing",
     );
     expect(out).not.toContain("neither certificate in this record:");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("the binder is reported as covered but never recomputed", () => {
@@ -636,7 +640,7 @@ describe("formatSignedRecordReport", () => {
     // accused of anything.
     expect(lines[0]).toMatch(/^SIGNED RECEIPT INCOMPLETE/);
     expect(out).not.toContain("so pair them by that stamp");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a run anchoring neither certificate is incomplete and says trust is not established", () => {
@@ -654,7 +658,7 @@ describe("formatSignedRecordReport", () => {
     expect(lines.join("\n")).toContain(
       "certificate fingerprint trust not established (no pinned value supplied)",
     );
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("each failure class is named distinctly and exits 65", () => {
@@ -1200,7 +1204,7 @@ describe("handler", () => {
     });
     expect(exits).toEqual([]);
     expect(stdout).toContain("agreed-terms hash: re-derives and matches");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a --config-file holding only the pin is accepted for it", async () => {
@@ -1225,7 +1229,7 @@ describe("handler", () => {
     // The same config names this party's signing identity, so its own slot is
     // anchored without a second value on the command line.
     expect(stdout).toContain("is your own signing identity's certificate");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a configured identity file that does not exist warns instead of vanishing", async () => {
@@ -1246,7 +1250,26 @@ describe("handler", () => {
     expect(exits).toEqual([]);
     expect(stderr).toContain("does not exist, so it anchors no certificate");
     expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
+  });
+
+  test("a configured identity file that cannot be read leaves the verdict incomplete", async () => {
+    const { recordPath, signedPath, pin } = await exchangeArtifacts();
+    const unreadable = join(tmp(), "identity.json");
+    writeFileSync(unreadable, "not an identity");
+    const { stdout, stderr, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "signed-record": signedPath,
+      "log-level": "warn",
+      "config-file": writeYaml(
+        `signing:\n  mode: certificate\n  partner_fingerprint: ${pin}\n` +
+          `  identity_file: ${unreadable}\n`,
+      ),
+    });
+    expect(exits).toEqual([]);
+    expect(stderr).toContain("could not be read, so it anchors no certificate");
+    expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("both parties' terms re-derive the agreed-terms hash", async () => {
@@ -1264,7 +1287,7 @@ describe("handler", () => {
     expect(exits).toEqual([]);
     expect(stdout).toContain("agreed-terms hash: re-derives and matches");
     expect(stdout).not.toContain("note:");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a --config-file defining no linkage_terms says so beside the line it explains", async () => {
@@ -1333,7 +1356,7 @@ describe("handler", () => {
     expect(stdout).toContain("commitment localPayloadSent:");
     expect(stdout).toContain("partner receipt signatures are not checked here");
     expect(stdout).not.toContain("SIGNED RECEIPT");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a received null the result wrote as an empty cell is named as the cause", async () => {
@@ -1414,9 +1437,8 @@ describe("handler", () => {
   });
 
   test("a failing record report and a passing signed report still roll up to the failure code", async () => {
-    // The handler folds the two renderers' codes with Math.max, so a record
-    // verdict that already failed must survive a signed-record verdict that
-    // passes after it, not be overwritten back to 0.
+    // A record verdict that already failed must survive a signed-record
+    // verdict that passes after it, not be overwritten back to 0.
     const { recordPath, signedPath, identityPath, pin } =
       await exchangeArtifacts({
         associationTable: [[0], [0]],
@@ -1442,6 +1464,47 @@ describe("handler", () => {
     expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
   });
 
+  test("a failing record report and an incomplete signed report roll up to the failure code", async () => {
+    // The incomplete code is the larger number, so a numeric maximum would
+    // report the lesser verdict; the failure must win.
+    const { recordPath, signedPath, identityPath } = await exchangeArtifacts({
+      associationTable: [[0], [0]],
+      partnerPayloadReceived: { columns: ["status"], rows: [["active"]] },
+    });
+    const dir = tmp();
+    const inputPath = join(dir, "input.csv");
+    writeFileSync(inputPath, "pid,dose\nP0,10mg\n");
+    const resultPath = join(dir, "result.csv");
+    writeFileSync(resultPath, "pid,row_id,status\nP0,0,inactive\n");
+
+    const { stdout, exits, exitCode } = await runVerify({
+      record: recordPath,
+      "input-file": inputPath,
+      "result-file": resultPath,
+      "signed-record": signedPath,
+      "identity-file": identityPath,
+    });
+    expect(exits).toEqual([]);
+    expect(stdout).toContain("VERIFICATION FAILED");
+    expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_FAILED_EXIT_CODE);
+  });
+
+  test("the verdict rollup ranks failed over incomplete over verified, in either order", () => {
+    const failed = RECEIPT_VERIFICATION_FAILED_EXIT_CODE;
+    const incomplete = RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE;
+    const cases: Array<[number, number, number]> = [
+      [0, 0, 0],
+      [0, incomplete, incomplete],
+      [incomplete, 0, incomplete],
+      [incomplete, failed, failed],
+      [failed, incomplete, failed],
+      [failed, 0, failed],
+    ];
+    for (const [a, b, worse] of cases)
+      expect(worseReceiptVerdictExitCode(a, b), `${a}, ${b}`).toBe(worse);
+  });
+
   test("a dual-signed record positional verifies the signatures alone", async () => {
     const { signedPath, identityPath, pin } = await exchangeArtifacts();
     const { stdout, exits, exitCode } = await runVerify({
@@ -1454,7 +1517,7 @@ describe("handler", () => {
     expect(stdout).toContain("matches a fingerprint you pinned out-of-band");
     // No exchange record was named, so no commitment is opened or reported.
     expect(stdout).not.toContain("commitment");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("the terms the receipt holds are enough for both verdicts", async () => {
@@ -1634,7 +1697,7 @@ describe("handler", () => {
     expect(stdout).toContain("receipt signature: verifies over this receipt's");
     expect(stdout).toContain("agreed-terms hash: not checked");
     expect(stdout).toContain("--partner-terms");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a dual-signed record of another format is refused naming the remedy", async () => {
@@ -1681,7 +1744,7 @@ describe("handler", () => {
       "receipt-record pairing: this receipt and this exchange record are the " +
         "same run",
     );
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a pair naming only one party leaves BOTH identity checks unperformed", async () => {
@@ -1737,7 +1800,7 @@ describe("handler", () => {
       // Short of verified, and nobody is accused: an unperformed check is not a
       // failure.
       expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
-      expect(exitCode).toBe(0);
+      expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
     }
 
     // The other cause of an unperformed identity check, so the two are told
@@ -1807,7 +1870,7 @@ describe("handler", () => {
     expect(exits).toEqual([]);
     expect(stdout).toContain("receipt-record pairing: not checked");
     expect(stdout).toContain("SIGNED RECEIPT INCOMPLETE");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("the partner's pin alone leaves this party's own slot unanchored", async () => {
@@ -1826,8 +1889,8 @@ describe("handler", () => {
       "Nothing outside the record anchors the initiator's certificate.",
     );
     expect(stdout).not.toContain("SIGNED RECEIPT VERIFIED");
-    // Short of verified, not contradicted: the run still exits 0.
-    expect(exitCode).toBe(0);
+    // Short of verified, not contradicted: the incomplete code, not 65.
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a verifier that was party to neither exchange pins both signers", async () => {
@@ -1842,7 +1905,7 @@ describe("handler", () => {
     // hash stay unchecked; what both pins settle is the anchoring.
     expect(stdout).not.toContain("Nothing outside the record anchors");
     expect(stdout).not.toContain("trust not established");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("a third pinned value is refused rather than quietly dropped", async () => {
@@ -1929,7 +1992,7 @@ describe("handler", () => {
     });
     expect(exits).toEqual([]);
     expect(stdout).toContain("is your own signing identity's certificate");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test.skipIf(process.platform === "win32")(
@@ -1951,7 +2014,7 @@ describe("handler", () => {
     },
   );
 
-  test("with no identity path named, the own slot is unanchored at exit 0", async () => {
+  test("with no identity path named, the own slot is unanchored and the verdict incomplete", async () => {
     // No --identity-file and no config, so nothing names this party's identity
     // and Alcove looks nowhere on its own. The verdict grades INCOMPLETE and
     // names the slot; it is not a refusal, since a verification run reaches a
@@ -1969,7 +2032,7 @@ describe("handler", () => {
     );
     expect(stdout).toContain("name your own signing identity with");
     expect(stderr).toBe("");
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
   });
 
   test("with no identity path named, no signing identity file is read at all", async () => {
@@ -2028,7 +2091,7 @@ describe("handler", () => {
           "Nothing outside the record anchors the initiator's certificate",
         );
         expect(stderr).toBe("");
-        expect(exitCode).toBe(0);
+        expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
       } finally {
         if (previousHome === undefined) delete process.env["HOME"];
         else process.env["HOME"] = previousHome;
@@ -2060,7 +2123,7 @@ describe("handler", () => {
         });
         expect(exits).toEqual([]);
         expect(stdout).toContain("is your own signing identity's certificate");
-        expect(exitCode).toBe(0);
+        expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
         expect(fs.readdirSync(readOnlyDir).sort()).toEqual(before);
         expect(fs.readFileSync(mounted, "utf8")).toBe(
           readFileSync(identityPath, "utf8"),
@@ -2093,7 +2156,7 @@ describe("handler", () => {
       expect(stderr).toContain(identityPath);
       expect(stderr).toContain("restrict to 0600");
       expect(stderr).toContain("signing private key");
-      expect(exitCode).toBe(0);
+      expect(exitCode).toBe(RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE);
     },
   );
 

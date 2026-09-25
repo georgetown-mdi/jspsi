@@ -239,11 +239,12 @@ export function assertSharedSecretReadyForHandshake(
  * @throws {Error} if `authentication.expires` is in the past before the
  *                 handshake, or if it expires during the key-exchange
  *                 round-trip (post-handshake check).
- * @throws {ConnectionError} of kind `"security"` (message `"key exchange
- *                 authentication failed"`, propagated unwrapped from
- *                 `runKex`) if the key exchange fails: a wrong shared secret
- *                 or tampered messages. The kind is the trust-boundary
- *                 marker consumers classify on; the message stays generic.
+ * @throws {AuthenticationError} (a `"security"`-kind ConnectionError,
+ *                 message `"key exchange authentication failed"`,
+ *                 propagated unwrapped from `runKex`) if the key exchange
+ *                 fails: a wrong shared secret or tampered messages. The
+ *                 class is the trust-boundary marker consumers classify on;
+ *                 the message stays generic.
  */
 export async function authenticateConnection(
   conn: MessageConnection,
