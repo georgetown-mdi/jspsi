@@ -67,7 +67,12 @@ export const TransmissionHandler = ({
       if (!ignoredTypes.includes(type) && dstId) {
         realm.addMessageToQueue(dstId, message);
       } else if (type === MessageType.LEAVE && !dstId) {
-        realm.removeClientById(srcId);
+        // A client that leaves the realm leaves with its socket, so no socket
+        // outlives its registration.
+        if (client) {
+          client.getSocket()?.terminate();
+          realm.removeClient(client);
+        }
       } else {
         // Unavailable destination specified with message LEAVE or EXPIRE
         // Ignore

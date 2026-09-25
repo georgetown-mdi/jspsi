@@ -320,3 +320,81 @@ describe("relay send-buffer bound", () => {
     );
   }, 30_000);
 });
+
+/** How many connections the broker's HTTP server still holds open. */
+function openConnections(server: http.Server): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.getConnections((error, count) => {
+      if (error) reject(error);
+      else resolve(count);
+    });
+  });
+}
+
+describe("leaving the realm", () => {
+  test("a client that leaves with no destination is disconnected along with its registration", async () => {
+    // Every socket the broker holds for a client is counted by the realm, so
+    // the sockets held stay within `concurrent_limit` however many clients
+    // register and leave.
+    const concurrentLimit = 2;
+    const broker = await startShippedBroker({
+      concurrent_limit: concurrentLimit,
+    });
+
+    const leaverCount = concurrentLimit * 2;
+    for (let index = 0; index < leaverCount; index += 1) {
+      const leaver = await connectCollecting(
+        broker.port,
+        `peer-leaver-${index}`,
+      );
+      const closed = new Promise<void>((resolve) =>
+        leaver.ws.once("close", () => resolve()),
+      );
+      leaver.ws.send(JSON.stringify({ type: "LEAVE" }));
+      expect(await settlesWithin(closed, 1_000)).toBe(true);
+      expect(broker.realm.getClientById(`peer-leaver-${index}`)).toBe(
+        undefined,
+      );
+    }
+
+    expect(broker.realm.getClientsIds()).toEqual([]);
+    const deadline = Date.now() + 3_000;
+    while ((await openConnections(broker.server)) > 0) {
+      if (Date.now() >= deadline) throw new Error("connections still held");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  });
+
+  test("a client that leaves no longer relays under its id", async () => {
+    const broker = await startShippedBroker();
+    const recipient = await connectCollecting(broker.port, RECIPIENT_ID);
+    const leaver = await connectCollecting(broker.port, SENDER_ID);
+
+    leaver.ws.send(JSON.stringify({ type: "LEAVE" }));
+    // Sent behind the LEAVE on the same socket, so it would reach the relay if
+    // the socket were still being read.
+    leaver.ws.send(
+      JSON.stringify({ type: "OFFER", dst: RECIPIENT_ID, payload: "late" }),
+      () => {},
+    );
+    await waitFor(() => leaver.ws.readyState === WebSocket.CLOSED);
+
+    // A client registering the id afresh is relayed as usual.
+    const successor = await connectCollecting(
+      broker.port,
+      SENDER_ID,
+      "another-token",
+    );
+    successor.ws.send(
+      JSON.stringify({ type: "OFFER", dst: RECIPIENT_ID, payload: "fresh" }),
+    );
+    await waitFor(() =>
+      recipient.frames.some((received) => received.type === "OFFER"),
+    );
+    expect(
+      recipient.frames
+        .filter((received) => received.type === "OFFER")
+        .map((received) => received.payload),
+    ).toEqual(["fresh"]);
+  });
+});
