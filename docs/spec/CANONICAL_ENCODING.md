@@ -50,8 +50,9 @@ are platform-independent.
 
 ## Scope
 
-This encoding is the single canonicalization primitive for everything that is
-hashed, committed, or signed: the agreed-terms object embedded in a receipt, the
+This encoding is the single canonicalization primitive for everything that a
+party or a verifier re-encodes to check a hash, commitment, or signature: the
+agreed-terms object embedded in a receipt, the
 commitments and agreed-terms hash of the
 [self-attested record](EXCHANGE_RECORD.md), the receipt itself, and the signing
 certificate. The record's own serialized form is ordinary pretty-printed JSON
@@ -67,6 +68,12 @@ linkage-terms comparison in `validateCompatibility` -- use it too, so that
 
 It is **not** the wire format for exchange messages or configuration files;
 those remain ordinary JSON/YAML.
+
+Two hashed values are computed over ordinary `JSON.stringify` bytes instead,
+because each is checked over the exact bytes received rather than re-encoded:
+the invitation checksum (a truncated SHA-256 of the token's JSON bytes) and the
+terms-update MAC (over the update body's JSON bytes, see
+[EXCHANGE_FILE.md](EXCHANGE_FILE.md#wire-format)).
 
 ## Value domain
 
@@ -105,6 +112,9 @@ because silent coercion is the classic way two implementations diverge:
   and a symbol-keyed property on an array or an object. Only the elements
   `[0, length)` and an object's string keys are encoded, so such a property
   would be dropped without a trace.
+- A non-enumerable string-keyed property of an object, which an encoder
+  enumerating keys would drop, and an accessor (getter or setter) property,
+  which can yield a different value on each read.
 - A string -- a value or an object key -- holding a lone UTF-16 surrogate. It is
   not a Unicode scalar value and has no UTF-8 encoding (see
   [Strings](#strings)).
@@ -121,8 +131,11 @@ every level of nesting. Keys are compared **by UTF-16 code unit**: each key is
 viewed as the sequence of 16-bit code units of its UTF-16 encoding, and keys are
 ordered by the first position at which they differ, by numeric code-unit value.
 This is the ordering produced by ECMAScript `Array.prototype.sort` with no
-comparator, and is the ordering RFC 8785 specifies. Duplicate keys cannot occur
-(the input is a set of members).
+comparator, and is the ordering RFC 8785 specifies. The encoder's input holds
+each key once. Two keys of a parsed document can still become one before
+encoding, when the key fold below maps both to the same name (`my_param` and
+`myParam`): a parse of the operator's own linkage terms refuses such a
+document, while a parse of a partner's terms keeps the member written later.
 
 Array element order is **significant** and is preserved as given.
 
@@ -131,9 +144,11 @@ keys differ only in snake_case-vs-camelCase form (`{"input_format": ...}` vs
 `{"inputFormat": ...}`) encode to different bytes. This matters for the
 partner-controlled `transform.params` keys, the only linkage-terms keys whose
 form could vary. They are normalized to camelCase at **every** parse path that
-produces a `LinkageTerms` -- config load and the post-handshake wire path (via
-`camelizeKeys` in `parseLinkageTerms`), and the invitation decode path (via the
-same `camelizeKeys` pre-pass before validating). So by the time terms reach a
+produces a `LinkageTerms`, each by a `camelizeKeys` pass before validating: the
+post-handshake wire path (`parseLinkageTerms`), config load (`parseExchangeSpec`
+over the whole exchange file, and `safeParseLinkageTermsTheReaderWrote` over
+the `linkage_terms` block `alcove verify-receipt` re-reads), and the invitation
+decode path. So by the time terms reach a
 canonical encoding they are already camelCase on both sides: a casing fold is a
 parse-layer invariant, not something the consumers re-do. The agreed-terms hash
 (`computeTermsHash`) and the cross-party `validateCompatibility` comparison
@@ -238,9 +253,10 @@ string, which is what RFC 8785 requires:
   `alcove verify-receipt` reaches a verdict: its `--config-file` and
   `--partner-terms` inputs both load their document through the linkage terms
   parse, which refuses it and reports the CLI's own invalid-linkage-terms
-  usage error (`config file <path> has invalid linkage_terms: a linkage
-  terms text value must not contain an unpaired UTF-16 surrogate`) rather
-  than a terms-hash mismatch. The partner's terms a dual-signed record
+  usage error, naming the field that holds the value (`config file <path> has
+  invalid linkage_terms: legal_agreement.reference: a linkage terms text value
+  must not contain an unpaired UTF-16 surrogate`) rather than a terms-hash
+  mismatch. The partner's terms a dual-signed record
   retains in its envelope are read under that same parse, so a record
   holding such a document is refused as an unreadable artifact rather than
   verified against terms the encoder cannot reproduce.
@@ -362,7 +378,9 @@ scheme author's reference implementation -- behind a strict pre-validation pass
 that rejects every out-of-domain value listed above rather than letting the
 underlying serializer coerce it. `canonicalString(value)` returns the canonical
 character string and `canonicalBytes(value)` returns its UTF-8 bytes. Numeric
-schema fields use `safeIntegerSchema`. None of this is required to reproduce the
+schema fields use `safeIntegerSchema`. `canonicalize` calls the ES2024
+`String.prototype.isWellFormed`; where an engine lacks it, `canonicalString`
+installs one built on the same lone-surrogate scan the pre-validation uses. None of this is required to reproduce the
 bytes; the normative definition is RFC 8785 over the value domain above.
 
 The `canonicalize` package is inlined into `@alcove/core`'s built artifacts
