@@ -15,8 +15,9 @@ caller.
 
 - Refute, do not confirm. Approach each claim looking for the counterexample.
 - Run the evidence yourself; do not take a claim's own justification on faith.
-- Wait on a long command as `CLAUDE.md`'s one-shot wait rule says (Agent
-  conventions, Spawns and reports).
+- You run inside a `Workflow` `agent()` call, so under `CLAUDE.md`'s one-shot
+  wait rule (Agent conventions, Spawns and reports) you wait in the foreground
+  only: run a long command with a raised `timeout`, never `run_in_background`.
 - Return a verdict per claim: HOLDS, REFUTED, or COULD-NOT-VERIFY.
 - COULD-NOT-VERIFY gates the loop exactly like REFUTED -- an unverifiable claim is
   not a passing claim.

@@ -21,7 +21,8 @@ be continued -- every response you produce is your final message to the caller.
   reliably the branch under review. Widen only if the brief says to.
 - Verify every finding in the code before you report it. Speculation is not a
   finding.
-- Wait on a long command as `CLAUDE.md`'s one-shot wait rule says (Agent
-  conventions, Spawns and reports).
+- You run inside a `Workflow` `agent()` call, so under `CLAUDE.md`'s one-shot
+  wait rule (Agent conventions, Spawns and reports) you wait in the foreground
+  only: run a long command with a raised `timeout`, never `run_in_background`.
 - "No findings" is an accurate result; report it plainly when the diff earns it.
 - You are read-only: you inspect, you do not edit.
