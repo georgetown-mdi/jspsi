@@ -6,13 +6,11 @@ import type { IMessage } from "../../../models/message.ts";
 import type { IRealm } from "../../../models/realm.ts";
 
 // Bound on the bytes the relay leaves queued toward one destination socket
-// that has not yet taken them. A destination that stops reading is dropped
-// once a relayed frame would take its socket's `bufferedAmount` past this: its
-// socket is terminated, its registration removed, and the sender told it left.
-// One inbound frame is at most MAX_SIGNALING_PAYLOAD_BYTES, and decoding it can
-// triple its size (an invalid UTF-8 byte becomes a three-byte U+FFFD), so 1 MiB
-// holds any single relayed frame on an idle socket. See
-// docs/spec/CHANNEL_SECURITY.md.
+// that has not yet taken them; past this the socket is terminated, its
+// registration removed, and the sender told it left. One inbound frame is at
+// most the 256 KiB MAX_SIGNALING_PAYLOAD_BYTES, and decoding can triple that
+// (an invalid UTF-8 byte becomes a three-byte U+FFFD), so 1 MiB holds any
+// single relayed frame. See docs/spec/CHANNEL_SECURITY.md.
 export const MAX_RELAY_BUFFERED_BYTES = 1024 * 1024;
 
 export const TransmissionHandler = ({

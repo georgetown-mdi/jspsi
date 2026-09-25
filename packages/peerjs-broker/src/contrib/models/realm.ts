@@ -13,8 +13,6 @@ export interface IRealm {
 
   setClient(client: IClient, id: string): void;
 
-  removeClientById(id: string): boolean;
-
   /** Remove `client`'s registration only if the realm still maps its id to
    * that same client, so a stale holder of an id never removes the client that
    * registered it since. */
@@ -91,16 +89,6 @@ export class Realm implements IRealm {
 
   public setClient(client: IClient, id: string): void {
     this.clients.set(id, client);
-  }
-
-  public removeClientById(id: string): boolean {
-    const client = this.getClientById(id);
-
-    if (!client) return false;
-
-    this.clients.delete(id);
-
-    return true;
   }
 
   public removeClient(client: IClient): boolean {
