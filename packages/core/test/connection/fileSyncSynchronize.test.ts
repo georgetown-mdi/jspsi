@@ -1,7 +1,7 @@
 // Scenario tests for FileSyncConnection.synchronize(), which delegates its
 // rendezvous work to FileSyncRendezvous.
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { FileSyncConnection } from "../../src/connection/fileSyncConnection";
 import type { FileTransportClient } from "../../src/connection/fileSyncConnection";
@@ -1710,6 +1710,8 @@ test("peerIdLengthRefusal admits ids whose derived names fit in 255 bytes and re
   );
 });
 
+const shortId = "0".repeat(36);
+const longId = "p".repeat(200);
 for (const mode of [
   {
     name: "retain",
@@ -1721,31 +1723,40 @@ for (const mode of [
   },
   { name: "lock", opts: {} },
 ]) {
-  test(`synchronize() (${mode.name}) refuses a partner id too long for the names derived from it, on both sides`, async () => {
-    const { connA, connB } = makeRendezvousPair(
-      "0".repeat(36),
-      mode.opts,
-      "p".repeat(200),
-      mode.opts,
-      { timeToLiveMs: 5_000, pollingFrequency: 5 },
-    );
-    const results = await Promise.allSettled([
-      connA.synchronize(),
-      connB.synchronize(),
-    ]);
-    const refusals = results.filter(
-      (r) =>
-        r.status === "rejected" &&
-        r.reason instanceof UsageError &&
-        (r.reason as Error).message.includes("ids are too long together"),
-    );
-    // Both parties read each other's hello in lockless mode; on the lock path
-    // the party that reads the other's hello first refuses.
-    expect(refusals.length).toBeGreaterThanOrEqual(
-      mode.name === "retain" ? 2 : 1,
-    );
-    await Promise.all([connA.close(), connB.close()]);
-  });
+  for (const arrival of [
+    { name: "together", first: undefined },
+    { name: "long id first", first: longId },
+    { name: "short id first", first: shortId },
+  ]) {
+    test(`synchronize() (${mode.name}, ${arrival.name}) refuses a partner id too long for the names derived from it, on both sides`, async () => {
+      const { connA, connB, files } = makeRendezvousPair(
+        shortId,
+        mode.opts,
+        longId,
+        mode.opts,
+        { timeToLiveMs: 5_000, pollingFrequency: 5 },
+      );
+      const [first, second] =
+        arrival.first === longId ? [connB, connA] : [connA, connB];
+      const firstRun = first.synchronize();
+      if (arrival.first !== undefined)
+        await vi.waitFor(() =>
+          expect(files.has(`${first.path}/${first.id}-hello.json`)).toBe(true),
+        );
+      const results = await Promise.allSettled([
+        firstRun,
+        second.synchronize(),
+      ]);
+      const refusals = results.filter(
+        (r) =>
+          r.status === "rejected" &&
+          r.reason instanceof UsageError &&
+          (r.reason as Error).message.includes("ids are too long together"),
+      );
+      expect(refusals.length).toBe(2);
+      await Promise.all([connA.close(), connB.close()]);
+    });
+  }
 }
 
 // --- synchronize(): lockless mode ---------------------------------------------
