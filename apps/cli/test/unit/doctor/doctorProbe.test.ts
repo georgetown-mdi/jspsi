@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { MAX_DIRECTORY_ENTRIES } from "../../../src/connection/listingGuard";
+import { OutputCapture } from "../../../src/doctor/runner";
 import type { CommandResult, CommandRunner } from "../../../src/doctor/runner";
 import {
   PROBE_CHECK_IDS,
@@ -12,10 +13,16 @@ import {
   runProbe,
   statusOf,
   transportFailed,
+  withoutListingEntries,
 } from "../../../src/doctor/probe";
 import type { ProbeDeps } from "../../../src/doctor/probe";
 import type { SmbProbeInput } from "../../../src/doctor/smbEnvironment";
-import { overallOf, verdictOf } from "../../../src/doctor/verdict";
+import {
+  overallOf,
+  verdictJson,
+  verdictLines,
+  verdictOf,
+} from "../../../src/doctor/verdict";
 import type { DoctorReport } from "../../../src/doctor/verdict";
 import { currentWindowsUser, isOwnerOnly } from "../../windowsAcl";
 
@@ -45,6 +52,42 @@ const DIRECTORY_LISTING = [
   "  .                                   D        0  Mon Jan  1 00:00:00 2024",
   "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
   "  january.csv                         A      100  Mon Jan  1 00:00:00 2024",
+  "",
+  "\t\t10485760 blocks of size 1024. 5242880 blocks available",
+  "",
+].join("\n");
+
+/** A listing holding a file named like an smbclient error status. */
+const STATUS_NAMED_LISTING = [
+  "  .                                   D        0  Mon Jan  1 00:00:00 2024",
+  "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
+  "  NT_STATUS_ACCESS_DENIED.csv         A      100  Mon Jan  1 00:00:00 2024",
+  "  secret-client-list.csv              A      100  Mon Jan  1 00:00:00 2024",
+  "",
+  "\t\t10485760 blocks of size 1024. 5242880 blocks available",
+  "",
+].join("\n");
+
+/**
+ * A listing on a full share holding a file named like the free-space line,
+ * ahead of the real one.
+ */
+const SPACE_NAMED_LISTING = [
+  "  .                                   D        0  Mon Jan  1 00:00:00 2024",
+  "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
+  "  blocks of size 1048576. 999999 blocks available      A      100  Mon Jan  1 00:00:00 2024",
+  "",
+  "\t\t1024 blocks of size 1024. 0 blocks available",
+  "",
+].join("\n");
+
+/** A listing holding names that start with one space and with several. */
+const LEADING_SPACE_LISTING = [
+  "  .                                   D        0  Mon Jan  1 00:00:00 2024",
+  "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
+  "   secret-client-list.csv             A      100  Mon Jan  1 00:00:00 2024",
+  "      q3-payroll.csv                  A      100  Mon Jan  1 00:00:00 2024",
+  "   .                                  A      100  Mon Jan  1 00:00:00 2024",
   "",
   "\t\t10485760 blocks of size 1024. 5242880 blocks available",
   "",
@@ -98,6 +141,7 @@ function authPathOf(args: string[]): string | undefined {
  * A runner that answers from `reply` and records every invocation, including a
  * snapshot of the credentials file as it stood at the time -- the file is
  * removed when the run ends, so it can only be inspected from inside a call.
+ * The reply's output passes through the real runner's output cap.
  */
 function fakeRunner(reply: (args: string[]) => Partial<CommandResult>): {
   runner: CommandRunner;
@@ -120,11 +164,18 @@ function fakeRunner(reply: (args: string[]) => Partial<CommandResult>): {
               : {}),
           };
         calls.push(call);
-        return Promise.resolve({
+        const result: CommandResult = {
           code: 0,
           output: "",
           timedOut: false,
           ...reply(args),
+        };
+        const capture = new OutputCapture();
+        capture.append(result.output);
+        return Promise.resolve({
+          ...result,
+          output: capture.text,
+          truncated: capture.truncated || result.truncated === true,
         });
       },
     },
@@ -480,7 +531,10 @@ describe("inputs that change the shape of the run", () => {
     );
     const check = checkById(report, "subdirectory");
     expect(check.status).toBe("warn");
-    expect(check.action).toContain("dedicated to the exchange");
+    expect(check.meaning).toContain(
+      `holding more than ${MAX_DIRECTORY_ENTRIES} entries, so an exchange here will fail`,
+    );
+    expect(check.action).toBe("use a folder dedicated to the exchange.");
     expect(overallOf(report)).toBe("ok");
   });
 
@@ -499,6 +553,29 @@ describe("inputs that change the shape of the run", () => {
     expect(overallOf(report)).toBe("ok");
   });
 
+  test("a listing the output cap cut short of the bound leaves the count open and has no free-space figure", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args) === "ls" && args.includes("-D")
+          ? { output: STATUS_NAMED_LISTING.split("\n\n")[0], truncated: true }
+          : healthyReply(args),
+      ),
+    );
+    const subdirectory = checkById(report, "subdirectory");
+    expect(subdirectory.status).toBe("warn");
+    expect(subdirectory.summary).toContain("at least 2 file(s)");
+    expect(subdirectory.meaning).toContain("too long to capture in full");
+    expect(subdirectory.meaning).not.toContain("will fail");
+    expect(subdirectory.action).toBe(
+      `confirm the folder holds no more than ${MAX_DIRECTORY_ENTRIES} ` +
+        "entries, or use a folder dedicated to the exchange.",
+    );
+    const freeSpace = checkById(report, "free_space");
+    expect(freeSpace.status).toBe("skipped");
+    expect(freeSpace.summary).toContain("too long");
+  });
+
   test("a share root that will not list is not a failure when a subfolder was given", async () => {
     const report = await runProbe(
       INPUT,
@@ -512,6 +589,69 @@ describe("inputs that change the shape of the run", () => {
     expect(check.status).toBe("ok");
     expect(check.meaning).toContain("granted rights to your own folder");
     expect(overallOf(report)).toBe("ok");
+  });
+
+  test("a file named like an error status does not fail the subdirectory", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args) === "ls" && args.includes("-D")
+          ? { output: STATUS_NAMED_LISTING }
+          : healthyReply(args),
+      ),
+    );
+    expect(checkById(report, "subdirectory").summary).toContain("2 file(s)");
+    expect(overallOf(report)).toBe("ok");
+    for (const check of report.checks) expect(check.status).toBe("ok");
+  });
+
+  test("a file named like an error status does not fail the share root", async () => {
+    const report = await runProbe(
+      { ...INPUT, subdirectory: "" },
+      deps((args) =>
+        commandOf(args) === "ls"
+          ? { output: STATUS_NAMED_LISTING }
+          : healthyReply(args),
+      ),
+    );
+    expect(checkById(report, "share_open").status).toBe("ok");
+    expect(checkById(report, "subdirectory").summary).toContain("2 file(s)");
+    expect(overallOf(report)).toBe("ok");
+  });
+
+  test("a refused listing keeps its entries out of the human verdict", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args) === "ls" && args.includes("-D")
+          ? {
+              code: 1,
+              output: `${STATUS_NAMED_LISTING}NT_STATUS_ACCESS_DENIED listing \\dropbox\\*`,
+            }
+          : healthyReply(args),
+      ),
+    );
+    const check = checkById(report, "subdirectory");
+    expect(check.status).toBe("fail");
+    expect(check.summary).toBe("NT_STATUS_ACCESS_DENIED");
+    const rendered = verdictLines(report).join("\n");
+    expect(rendered).toContain("listing \\dropbox\\*");
+    expect(rendered).not.toContain("secret-client-list");
+    expect(rendered).not.toContain("NT_STATUS_ACCESS_DENIED.csv");
+  });
+
+  test("a filename shaped like the free-space line does not set the figure", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args) === "ls"
+          ? { output: SPACE_NAMED_LISTING }
+          : healthyReply(args),
+      ),
+    );
+    const check = checkById(report, "free_space");
+    expect(check.status).toBe("warn");
+    expect(check.summary).toBe("the share reports no free space.");
   });
 
   test("no marker requested leaves nothing behind and skips the check", async () => {
@@ -563,6 +703,22 @@ describe("smbclient output parsing", () => {
       ),
     ).toBe(5120);
     expect(freeMegabytes("no space line here")).toBeUndefined();
+  });
+
+  test("statusOf does not read a status out of a listing entry", () => {
+    expect(statusOf(STATUS_NAMED_LISTING)).toBeUndefined();
+    expect(
+      statusOf(`${STATUS_NAMED_LISTING}\nNT_STATUS_IO_TIMEOUT listing \\*`),
+    ).toBe("NT_STATUS_IO_TIMEOUT");
+  });
+
+  test("freeMegabytes reads the trailer line, not a filename shaped like it", () => {
+    expect(freeMegabytes(SPACE_NAMED_LISTING)).toBe(0);
+    expect(
+      freeMegabytes(
+        "  1 blocks of size 1048576. 999999 blocks available   A  0  Mon Jan  1 00:00:00 2024",
+      ),
+    ).toBeUndefined();
   });
 
   test("countEntries excludes the dot entries", () => {
@@ -657,5 +813,234 @@ describe("local cleanup does not depend on the remote", () => {
     expect(during).toBe(before + 1);
     expect(process.listenerCount("SIGINT")).toBe(before);
     expect(process.listenerCount("SIGTERM")).toBe(beforeTerm);
+  });
+});
+
+describe("a local fault is raised rather than reported as a verdict", () => {
+  // The doctor handler maps the raised error to exit 69, pinned in
+  // exitBoundaryMapping.test.ts.
+  test("a work directory that cannot be created stops the run with no report", async () => {
+    const before = process.listenerCount("SIGINT");
+    const mkdtemp = vi.spyOn(fs, "mkdtempSync").mockImplementation(() => {
+      throw Object.assign(new Error("no temporary directory"), {
+        code: "ENOENT",
+      });
+    });
+    try {
+      const probeDeps = deps(healthyReply);
+      await expect(runProbe(INPUT, probeDeps)).rejects.toThrow(
+        "no temporary directory",
+      );
+      expect(probeDeps.calls.map((call) => call.args)).toEqual([["--version"]]);
+      expect(process.listenerCount("SIGINT")).toBe(before);
+    } finally {
+      mkdtemp.mockRestore();
+    }
+  });
+});
+
+describe("an interrupt sweeps the share before it re-raises", () => {
+  const RESULT: CommandResult = { code: 0, output: "", timedOut: false };
+
+  /**
+   * The listeners registered since `before` was taken. The probe registers
+   * each of its listeners for both signals, so reading one list finds them.
+   */
+  function addedListeners(
+    before: Set<unknown>,
+  ): ((signal: NodeJS.Signals) => void)[] {
+    return (
+      process.listeners("SIGINT") as ((signal: NodeJS.Signals) => void)[]
+    ).filter((l) => !before.has(l));
+  }
+
+  /**
+   * A runner answering like a healthy share whose share list, subdirectory
+   * listing, and put of the probe file each settle on the next turn after
+   * `during` runs, so a signal delivered there arrives while that command is
+   * still in flight; the delete of the probe file settles a turn late as well.
+   * Each landing records whether the credentials file was still there when the
+   * command finished.
+   */
+  function interruptingRunner(
+    events: string[],
+    during: {
+      list?: () => void;
+      subdirectory?: () => void;
+      put?: () => void;
+    },
+  ): { runner: CommandRunner; authDir: () => string | undefined } {
+    let authDir: string | undefined;
+    const settleAfter = (
+      hook: (() => void) | undefined,
+      landed: string,
+      args: string[],
+    ): Promise<CommandResult> =>
+      new Promise((resolve) =>
+        setImmediate(() => {
+          hook?.();
+          setImmediate(() => {
+            events.push(landed);
+            const authPath = authPathOf(args);
+            if (authPath !== undefined && fs.existsSync(authPath))
+              events.push(`${landed} with credentials`);
+            resolve({ ...RESULT, ...healthyReply(args) });
+          });
+        }),
+      );
+    return {
+      authDir: () => authDir,
+      runner: {
+        run(_file, args): Promise<CommandResult> {
+          const authPath = authPathOf(args);
+          if (authPath !== undefined) authDir = path.dirname(authPath);
+          if (args.includes("-L")) {
+            events.push("list");
+            return settleAfter(during.list, "list landed", args);
+          }
+          const command = commandOf(args) ?? "";
+          events.push(command);
+          if (command === "ls" && args.includes("-D"))
+            return settleAfter(
+              during.subdirectory,
+              "subdirectory landed",
+              args,
+            );
+          if (command === "put alcove-probe-abc123.tmp alcove-probe-abc123.tmp")
+            return settleAfter(during.put, "put landed", args);
+          if (command === "del alcove-probe-abc123.tmp")
+            return settleAfter(undefined, "del landed", args);
+          return Promise.resolve({ ...RESULT, ...healthyReply(args) });
+        },
+      },
+    };
+  }
+
+  test.each([
+    ["the share list", "list", "list landed"],
+    ["the subdirectory listing", "subdirectory", "subdirectory landed"],
+  ] as const)(
+    "an interrupt during %s removes the credentials file only once it finishes",
+    async (_name, stage, landed) => {
+      const before = new Set<unknown>(process.listeners("SIGINT"));
+      const events: string[] = [];
+      const kill = vi
+        .spyOn(process, "kill")
+        .mockImplementation((_pid, signal) => {
+          events.push(`kill ${String(signal)}`);
+          return true;
+        });
+      try {
+        const { runner, authDir } = interruptingRunner(events, {
+          [stage]: () => {
+            for (const listener of addedListeners(before)) listener("SIGINT");
+          },
+        });
+        await expect(
+          runProbe(INPUT, deps(healthyReply, { runner })),
+        ).rejects.toThrow("interrupted");
+        await vi.waitFor(() => expect(events).toContain("kill SIGINT"));
+
+        expect(events).toContain(`${landed} with credentials`);
+        expect(events.indexOf("kill SIGINT")).toBeGreaterThan(
+          events.indexOf(landed),
+        );
+        expect(events.some((event) => event.startsWith("put "))).toBe(false);
+        expect(fs.existsSync(authDir() as string)).toBe(false);
+        expect(addedListeners(before)).toEqual([]);
+      } finally {
+        kill.mockRestore();
+      }
+    },
+  );
+
+  test("an interrupt during the put deletes the probe file once the put lands", async () => {
+    const before = new Set<unknown>(process.listeners("SIGINT"));
+    const beforeTerm = process.listenerCount("SIGTERM");
+    const events: string[] = [];
+    const kill = vi
+      .spyOn(process, "kill")
+      .mockImplementation((_pid, signal) => {
+        events.push(`kill ${String(signal)}`);
+        return true;
+      });
+    try {
+      const { runner, authDir } = interruptingRunner(events, {
+        put: () => {
+          for (const listener of addedListeners(before)) listener("SIGINT");
+        },
+      });
+      await expect(
+        runProbe(INPUT, deps(healthyReply, { runner })),
+      ).rejects.toThrow("interrupted");
+      await vi.waitFor(() => expect(events).toContain("kill SIGINT"));
+
+      const del = events.indexOf("del alcove-probe-abc123.tmp");
+      expect(del).toBeGreaterThan(events.indexOf("put landed"));
+      expect(events.indexOf("kill SIGINT")).toBeGreaterThan(
+        events.indexOf("del landed"),
+      );
+      expect(events.some((event) => event.startsWith("rename "))).toBe(false);
+      expect(fs.existsSync(authDir() as string)).toBe(false);
+      expect(addedListeners(before)).toEqual([]);
+      expect(process.listenerCount("SIGTERM")).toBe(beforeTerm);
+    } finally {
+      kill.mockRestore();
+    }
+  });
+});
+
+describe("a failing listing keeps the operator's filenames out of the output", () => {
+  // A listing the wait cut short: entries streamed before the kill, the last
+  // one partial, and no free-space trailer.
+  const TRUNCATED_LISTING = [
+    "  .                                   D        0  Mon Jan  1 00:00:00 2024",
+    "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
+    "  secret-client-list.csv              A      100  Mon Jan  1 00:00:00 2024",
+    "  q3-payroll-na",
+  ].join("\n");
+
+  function timedOutListing(output: string) {
+    return deps((args) =>
+      commandOf(args) === "ls" && args.includes("-D")
+        ? { code: null, output, timedOut: true }
+        : healthyReply(args),
+    );
+  }
+
+  test("a timed-out subdirectory listing prints no entry in the human verdict", async () => {
+    const report = await runProbe(INPUT, timedOutListing(TRUNCATED_LISTING));
+    const check = checkById(report, "subdirectory");
+    expect(check.status).toBe("fail");
+    expect(check.summary).toContain("stopped responding");
+    const rendered = verdictLines(report).join("\n");
+    expect(rendered).not.toContain("secret-client-list");
+    expect(rendered).not.toContain("q3-payroll");
+  });
+
+  test("the JSON verdict is the same as for a listing that printed nothing", async () => {
+    const withEntries = await runProbe(
+      INPUT,
+      timedOutListing(TRUNCATED_LISTING),
+    );
+    const empty = await runProbe(INPUT, timedOutListing(""));
+    expect(verdictJson(withEntries)).toBe(verdictJson(empty));
+  });
+
+  test("an entry whose name starts with a space is dropped from the excerpt and counted", () => {
+    const excerpt = withoutListingEntries(LEADING_SPACE_LISTING);
+    expect(excerpt).not.toContain("secret-client-list");
+    expect(excerpt).not.toContain("q3-payroll");
+    expect(excerpt).toContain("blocks available");
+    expect(countEntries(LEADING_SPACE_LISTING)).toBe(3);
+    expect(freeMegabytes(LEADING_SPACE_LISTING)).toBe(5120);
+  });
+
+  test("smbclient's own lines stay in the excerpt", () => {
+    expect(
+      withoutListingEntries(
+        `${TRUNCATED_LISTING}\nNT_STATUS_IO_TIMEOUT listing \\dropbox\\*`,
+      ),
+    ).toBe("NT_STATUS_IO_TIMEOUT listing \\dropbox\\*");
   });
 });

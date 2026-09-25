@@ -110,12 +110,21 @@ const IPV4_LITERAL = /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/;
 
 /**
  * The NT_STATUS token smbclient reported, if any. `NT_STATUS_OK` appears in
- * ordinary successful output and is not one.
+ * ordinary successful output and is not one. Only smbclient's own messages,
+ * which start at the first column, are read: an indented line is a listing
+ * entry, a share-list row, or the free-space line, and a filename or comment in
+ * one is text the server supplied.
  * @internal exported for testing
  */
 export function statusOf(output: string): string | undefined {
-  const matches = output.match(/NT_STATUS_[A-Z_]+/g) ?? [];
-  return matches.find((status) => status !== "NT_STATUS_OK");
+  for (const line of output.split("\n")) {
+    if (!/^\S/.test(line)) continue;
+    const status = (line.match(/NT_STATUS_[A-Z_]+/g) ?? []).find(
+      (token) => token !== "NT_STATUS_OK",
+    );
+    if (status !== undefined) return status;
+  }
+  return undefined;
 }
 
 /**
@@ -133,13 +142,44 @@ export function transportFailed(result: CommandResult): boolean {
 
 /**
  * Free megabytes as reported in an smbclient listing, or `undefined` when the
- * server reported none.
+ * server reported none. Read from the last whole line of the tab-indented shape
+ * smbclient prints after the entries, never from a substring: a listing entry
+ * is indented with spaces, and a filename can hold the same words.
  * @internal exported for testing
  */
 export function freeMegabytes(listing: string): number | undefined {
-  const match = listing.match(/blocks of size (\d+)\. (\d+) blocks available/);
-  if (match === null) return undefined;
+  const figures = listing
+    .split("\n")
+    .map((line) =>
+      /^\t+\d+ blocks of size (\d+)\. (\d+) blocks available$/.exec(line),
+    )
+    .filter((match) => match !== null);
+  const match = figures.at(-1);
+  if (match === undefined) return undefined;
   return Math.floor((Number(match[1]) * Number(match[2])) / 1_048_576);
+}
+
+/**
+ * Whether a line of smbclient output is a directory-listing entry. smbclient
+ * indents every entry by two spaces, a name that starts with a space included,
+ * tab-indents its free-space line, and starts its own messages at the first
+ * column.
+ */
+function isListingEntry(line: string): boolean {
+  return /^ {2}.*\S/.test(line);
+}
+
+/**
+ * smbclient output with the directory-listing entries removed, for the excerpt
+ * a failing check keeps: the entries are the operator's own filenames, and a
+ * listing cut short by a timeout still has them.
+ * @internal exported for testing
+ */
+export function withoutListingEntries(output: string): string {
+  return output
+    .split("\n")
+    .filter((line) => !isListingEntry(line))
+    .join("\n");
 }
 
 /**
@@ -152,26 +192,45 @@ export function freeMegabytes(listing: string): number | undefined {
 export function countEntries(listing: string): number {
   return listing
     .split("\n")
-    .filter((line) => /^ {2}\S/.test(line))
-    .map((line) => line.trim().split(/\s+/)[0])
+    .filter(isListingEntry)
+    .map((line) => line.slice(2).split(/\s+/)[0])
     .filter((name) => name !== "." && name !== "..").length;
 }
 
 /**
  * The subdirectory check over the folder the exchange will run in, including
  * the advisory a folder earns when it already holds more entries than the
- * transport will list.
+ * transport will list. A listing the output cap cut short of that bound leaves
+ * the count unknown rather than over it: lines longer than the cap allows for
+ * fill it with fewer entries.
  */
-function entryCountCheck(summary: string, entries: number): DoctorCheckRecord {
-  if (entries <= MAX_DIRECTORY_ENTRIES) return ok("subdirectory", summary);
-  return warn(
-    "subdirectory",
-    summary,
-    `Alcove will not read a rendezvous folder holding more than ` +
-      `${MAX_DIRECTORY_ENTRIES} entries, so an exchange here will ` +
-      "fail however the permissions come out.",
-    "use a folder dedicated to the exchange.",
-  );
+function entryCountCheck(
+  where: string,
+  listing: CommandResult,
+): DoctorCheckRecord {
+  const entries = countEntries(listing.output);
+  const cut = listing.truncated === true;
+  const summary = `${where} ${cut ? "at least " : ""}${entries} file(s) in it.`;
+  if (entries > MAX_DIRECTORY_ENTRIES)
+    return warn(
+      "subdirectory",
+      summary,
+      `Alcove will not read a rendezvous folder holding more than ` +
+        `${MAX_DIRECTORY_ENTRIES} entries, so an exchange here will ` +
+        "fail however the permissions come out.",
+      "use a folder dedicated to the exchange.",
+    );
+  if (cut)
+    return warn(
+      "subdirectory",
+      summary,
+      "the folder's listing was too long to capture in full, so how many " +
+        "entries it holds was not established. Alcove will not read a " +
+        `rendezvous folder holding more than ${MAX_DIRECTORY_ENTRIES} entries.`,
+      `confirm the folder holds no more than ${MAX_DIRECTORY_ENTRIES} ` +
+        "entries, or use a folder dedicated to the exchange.",
+    );
+  return ok("subdirectory", summary);
 }
 
 /**
@@ -259,7 +318,7 @@ function transportFailureCheck(
     "see the troubleshooting page, 'The container cannot reach the server'. A " +
       "firewall or VPN that allows the connection and then drops the traffic " +
       "behaves exactly like this.",
-    { detail: result.output },
+    { detail: withoutListingEntries(result.output) },
   );
 }
 
@@ -353,7 +412,7 @@ function shareOpenCheck(
   status: string,
   result: CommandResult,
 ): DoctorCheckRecord {
-  const detail = { detail: result.output };
+  const detail = { detail: withoutListingEntries(result.output) };
   switch (status) {
     case "NT_STATUS_BAD_NETWORK_NAME":
     case "NT_STATUS_OBJECT_NAME_NOT_FOUND":
@@ -442,13 +501,19 @@ function subdirectoryCheck(
                 "Ask for rights on this folder specifically.",
             ];
   return fail("subdirectory", status, meaning, action, {
-    detail: result.output,
+    detail: withoutListingEntries(result.output),
   });
 }
 
 /** Read the free-space verdict off whichever listing the run ended up with. */
-function freeSpaceCheck(listing: string): DoctorCheckRecord {
-  const freeMb = freeMegabytes(listing);
+function freeSpaceCheck(listing: CommandResult): DoctorCheckRecord {
+  const freeMb = freeMegabytes(listing.output);
+  if (freeMb === undefined && listing.truncated === true)
+    return skipped("free_space", "the listing was too long to read in full.", {
+      meaning:
+        "the free-space figure comes after the last entry, and the listing " +
+        "was cut before it, so nothing was established about it.",
+    });
   if (freeMb === undefined)
     return skipped("free_space", "the server did not report free space.", {
       meaning:
@@ -577,37 +642,91 @@ export async function runProbe(
     throw err;
   }
 
-  // Ctrl-C is the likely operator response to the very hang this command
-  // exists to diagnose, and it must not leave the credentials file behind.
-  // The signal is re-raised after cleanup so the exit still reports it.
-  const onSignal = (signal: NodeJS.Signals): void => {
+  const removeWorkDir = (): void =>
     fs.rmSync(workDir, { recursive: true, force: true });
-    process.kill(process.pid, signal);
-  };
-  process.once("SIGINT", onSignal);
-  process.once("SIGTERM", onSignal);
 
   // Names this run can leave on the share. The share belongs to someone else and
   // their partner can see it, so anything still there when the run ends -- on a
   // failure, a timeout, or an interrupt -- is swept before returning.
   const litter = new Set<string>();
   let target = "";
+  let interrupted = false;
+  let inFlight: Promise<unknown> = Promise.resolve();
 
   // Every smbclient invocation runs from the work directory so the local side of
   // a `put` is a bare filename: the local path would otherwise be interpolated
   // into the `-c` command string, where a space or a semicolon anywhere in the
   // temporary directory's path would split the command.
-  const smb = (command: string): Promise<CommandResult> =>
-    deps.runner.run("smbclient", shareArgs(input, authFile, target, command), {
+  const runSmbclient = (args: string[]): Promise<CommandResult> =>
+    deps.runner.run("smbclient", args, {
       cwd: workDir,
       timeoutMs: SMBCLIENT_TIMEOUT_MS,
     });
+  // Every call reading the credentials file outside the sweep goes through
+  // here, so the sweep can wait for whichever one is running.
+  const smbclient = (args: string[]): Promise<CommandResult> => {
+    if (interrupted)
+      return Promise.reject(new Error("the checks were interrupted."));
+    const pending = runSmbclient(args);
+    inFlight = pending.catch(() => undefined);
+    return pending;
+  };
+  const smb = (command: string): Promise<CommandResult> =>
+    smbclient(shareArgs(input, authFile, target, command));
+
+  // One sweep per run, shared by the ordinary exit and an interrupt. It waits
+  // for the command in flight, so a put the signal arrived during is deleted
+  // after it lands rather than before, and the credentials file the deletes
+  // need is removed only once they are done.
+  let swept: Promise<void> | undefined;
+  const sweep = (): Promise<void> =>
+    (swept ??= (async () => {
+      try {
+        await inFlight;
+        for (const leftover of litter)
+          await runSmbclient(
+            shareArgs(input, authFile, target, `del ${leftover}`),
+          );
+      } finally {
+        removeWorkDir();
+      }
+    })());
+
+  const listen = (listener: (signal: NodeJS.Signals) => void): void => {
+    process.on("SIGINT", listener);
+    process.on("SIGTERM", listener);
+  };
+  const stopListening = (listener: (signal: NodeJS.Signals) => void): void => {
+    process.removeListener("SIGINT", listener);
+    process.removeListener("SIGTERM", listener);
+  };
+
+  // Ctrl-C is the likely operator response to the very hang this command
+  // exists to diagnose. The share is swept before the signal is re-raised, so
+  // the exit still reports it; a second signal abandons the sweep but still
+  // removes the credentials file.
+  const onSignal = (signal: NodeJS.Signals): void => {
+    interrupted = true;
+    stopListening(onSignal);
+    const abandon = (again: NodeJS.Signals): void => {
+      stopListening(abandon);
+      try {
+        removeWorkDir();
+      } finally {
+        process.kill(process.pid, again);
+      }
+    };
+    listen(abandon);
+    const reraise = (): void => {
+      stopListening(abandon);
+      process.kill(process.pid, signal);
+    };
+    void sweep().then(reraise, reraise);
+  };
+  listen(onSignal);
 
   try {
-    const list = await deps.runner.run("smbclient", listArgs(input, authFile), {
-      cwd: workDir,
-      timeoutMs: SMBCLIENT_TIMEOUT_MS,
-    });
+    const list = await smbclient(listArgs(input, authFile));
     if (transportFailed(list)) {
       checks.push(transportFailureCheck("authentication", input.server, list));
       return finish();
@@ -668,7 +787,6 @@ export async function runProbe(
       );
     }
 
-    let listing = "";
     const shareList = await smb("ls");
     if (transportFailed(shareList)) {
       checks.push(transportFailureCheck("share_open", input.server, shareList));
@@ -677,26 +795,18 @@ export async function runProbe(
     const shareStatus = statusOf(shareList.output);
     if (shareStatus === undefined) {
       checks.push(ok("share_open", "share opened."));
-      listing = shareList.output;
     } else {
       const check = shareOpenCheck(input, shareStatus, shareList);
       checks.push(check);
       if (check.status === "fail") return finish();
     }
 
+    let listing = shareList;
     if (input.subdirectory === "") {
-      const entries = countEntries(listing);
-      checks.push(
-        entryCountCheck(
-          `using the share root; ${entries} file(s) in it.`,
-          entries,
-        ),
-      );
+      checks.push(entryCountCheck("using the share root;", listing));
     } else {
-      const subdirectoryList = await deps.runner.run(
-        "smbclient",
+      const subdirectoryList = await smbclient(
         shareArgs(input, authFile, input.subdirectory, "ls"),
-        { cwd: workDir, timeoutMs: SMBCLIENT_TIMEOUT_MS },
       );
       if (transportFailed(subdirectoryList)) {
         checks.push(
@@ -711,12 +821,9 @@ export async function runProbe(
         );
         return finish();
       }
-      const entries = countEntries(subdirectoryList.output);
-      checks.push(
-        entryCountCheck(`directory listed, ${entries} file(s) in it.`, entries),
-      );
+      checks.push(entryCountCheck("directory listed,", subdirectoryList));
       target = input.subdirectory;
-      listing = subdirectoryList.output;
+      listing = subdirectoryList;
     }
 
     checks.push(freeSpaceCheck(listing));
@@ -860,11 +967,9 @@ export async function runProbe(
     return finish();
   } finally {
     try {
-      for (const leftover of litter) await smb(`del ${leftover}`);
+      await sweep();
     } finally {
-      fs.rmSync(workDir, { recursive: true, force: true });
-      process.removeListener("SIGINT", onSignal);
-      process.removeListener("SIGTERM", onSignal);
+      stopListening(onSignal);
     }
   }
 }

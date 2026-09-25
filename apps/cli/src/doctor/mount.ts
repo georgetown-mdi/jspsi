@@ -270,45 +270,47 @@ export function runMountChecks(
   return { mode: "mount", checks };
 
   function runExclusiveCreate(): void {
+    const untestable = (summary: string): DoctorCheckRecord =>
+      skipped("exclusive_create", summary, {
+        meaning:
+          "the check was attempted and could not be completed: Alcove " +
+          "uses an exclusive create to decide which side goes first, and " +
+          "this share would not stage one.",
+        action:
+          "if the exchange hangs at the start, pass --lockless-rendezvous on " +
+          "both sides.",
+      });
     let created = false;
     try {
       mountFs.createExclusive(at(EXCLUSIVE_NAME));
       created = true;
     } catch {
-      checks.push(
-        skipped(
-          "exclusive_create",
-          "could not test exclusive create on this share.",
-          {
-            meaning:
-              "the check was attempted and could not be completed: Alcove " +
-              "uses an exclusive create to decide which side goes first, and " +
-              "this share would not stage one.",
-            action:
-              "if the exchange hangs at the start, pass --lockless-rendezvous on " +
-              "both sides.",
-          },
-        ),
-      );
+      checks.push(untestable("could not test exclusive create on this share."));
     }
     if (created) {
-      let refused = true;
+      // Only EEXIST is the refusal under test; any other error on the second
+      // create (EIO, ESTALE, EACCES) says nothing about it.
+      let secondCreateError: string | undefined;
       try {
         mountFs.createExclusive(at(EXCLUSIVE_NAME));
-        refused = false;
-      } catch {
-        refused = true;
+      } catch (err) {
+        secondCreateError = errorCode(err);
       }
       checks.push(
-        refused
+        secondCreateError === "EEXIST"
           ? ok("exclusive_create", "the share refuses to create a file twice.")
-          : warn(
-              "exclusive_create",
-              "this share does not refuse to create a file that already exists.",
-              "Alcove uses that refusal to decide which side goes first, so " +
-                "without it both sides can believe they did.",
-              "pass --lockless-rendezvous on BOTH sides of the exchange.",
-            ),
+          : secondCreateError !== undefined
+            ? untestable(
+                `the second create failed with ${secondCreateError} rather ` +
+                  "than as a file that already exists.",
+              )
+            : warn(
+                "exclusive_create",
+                "this share does not refuse to create a file that already exists.",
+                "Alcove uses that refusal to decide which side goes first, so " +
+                  "without it both sides can believe they did.",
+                "pass --lockless-rendezvous on BOTH sides of the exchange.",
+              ),
       );
       clearName(EXCLUSIVE_NAME);
     }

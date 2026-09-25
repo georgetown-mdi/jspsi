@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+import { MAX_DIRECTORY_ENTRIES } from "../connection/listingGuard";
+
 // The one process boundary `alcove doctor probe` crosses, through
 // `CommandRunner`, so the checks stay unit-testable against a recorded
 // transcript. Two rules make it safe: an argv ARRAY, never a shell string --
@@ -15,6 +17,8 @@ export interface CommandResult {
   output: string;
   /** True when the wait ran out and the child was killed. */
   timedOut: boolean;
+  /** True when the output reached {@link MAX_CAPTURED_OUTPUT} and was cut. */
+  truncated?: boolean;
   /**
    * `errno` code when the child could not be spawned at all -- `ENOENT` when the
    * binary is not installed. Distinct from a nonzero exit: nothing ran.
@@ -32,12 +36,39 @@ export interface CommandRunner {
 }
 
 /**
- * Cap on captured child output. smbclient can answer with a whole share listing,
- * and the server on the other end is not this operator's, so the buffer a
- * hostile or merely enormous answer can grow is bounded here rather than left to
- * available memory.
+ * Room allowed per line of an smbclient listing. Its longest entry line -- a
+ * 255-character name, the attributes, a 20-digit size, and the date -- is
+ * about 310 characters.
  */
-const MAX_OUTPUT_BYTES = 256 * 1024;
+const LISTING_LINE_ALLOWANCE = 512;
+
+/**
+ * Cap on captured child output, in UTF-16 code units. smbclient can answer with
+ * a whole share listing, and the server on the other end is not this
+ * operator's, so the buffer a hostile or merely enormous answer can grow is
+ * bounded here rather than left to available memory. It holds a listing past
+ * the transport's directory-listing bound, so the probe counts such a folder in
+ * full rather than a prefix of it.
+ * @internal exported for testing
+ */
+export const MAX_CAPTURED_OUTPUT =
+  (MAX_DIRECTORY_ENTRIES + 64) * LISTING_LINE_ALLOWANCE;
+
+/**
+ * Child output accumulated up to {@link MAX_CAPTURED_OUTPUT}, recording whether
+ * anything was cut.
+ * @internal exported so a test runner applies the same cap
+ */
+export class OutputCapture {
+  text = "";
+  truncated = false;
+
+  append(chunk: string): void {
+    const room = MAX_CAPTURED_OUTPUT - this.text.length;
+    if (chunk.length > room) this.truncated = true;
+    if (room > 0) this.text += chunk.slice(0, room);
+  }
+}
 
 /** Grace period between the timeout's SIGTERM and the SIGKILL behind it. */
 const KILL_GRACE_MS = 2000;
@@ -79,14 +110,10 @@ export const nodeCommandRunner: CommandRunner = {
         return;
       }
 
-      let output = "";
+      const output = new OutputCapture();
       let timedOut = false;
-      const capture = (chunk: Buffer): void => {
-        if (output.length >= MAX_OUTPUT_BYTES) return;
-        output += chunk
-          .toString("utf8")
-          .slice(0, MAX_OUTPUT_BYTES - output.length);
-      };
+      const capture = (chunk: Buffer): void =>
+        output.append(chunk.toString("utf8"));
       child.stdout?.on("data", capture);
       child.stderr?.on("data", capture);
 
@@ -108,13 +135,19 @@ export const nodeCommandRunner: CommandRunner = {
       child.on("error", (err: NodeJS.ErrnoException) => {
         settle({
           code: null,
-          output,
+          output: output.text,
           timedOut,
+          truncated: output.truncated,
           spawnErrorCode: err.code ?? "ESPAWN",
         });
       });
       child.on("close", (code) => {
-        settle({ code, output, timedOut });
+        settle({
+          code,
+          output: output.text,
+          timedOut,
+          truncated: output.truncated,
+        });
       });
     });
   },
