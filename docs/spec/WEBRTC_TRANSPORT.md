@@ -230,8 +230,9 @@ its own. Each datagram is a BinaryPack-packed object; a truthy `__peerData`
 marks it as either a chunk envelope or the close sentinel.
 
 - A chunk envelope holds the message id (`__peerData`, starting at 1 and
-  incrementing per logical message), the chunk index, the chunk bytes, and the
-  total chunk count. Chunks accumulate by id until the count matches the total.
+  incremented for each message sent in chunks; a message sent whole takes no
+  id), the chunk index, the chunk bytes, and the total chunk count. Chunks
+  accumulate by id until the count matches the total.
 - The chunking threshold is 16300 bytes, well under the SCTP ceiling.
 - The browser delivers an assembled chunked frame as a `Uint8Array` and an
   unchunked one as an `ArrayBuffer`; a consumer must normalize both.
@@ -370,14 +371,12 @@ it itself ends the connection -- reading the peer's close sentinel, this side's
 own close call, or its own cleanup on a signaling leave naming this peer, an
 inbound OFFER echoing the live connection, ICE reaching failed or closed, or a
 send error. So a cleared flag at `closing` means a PeerJS-mediated end and
-is treated as the peer's close, exactly as every close read before this
-discrimination existed. Only an end that bypasses PeerJS -- this side's raw
-peer-connection teardown -- reports the loss. A partner who ends the link
+is treated as the peer's close. Only an end that bypasses PeerJS -- this side's
+raw peer-connection teardown -- reports the loss. A partner who ends the link
 through signaling (a relayed leave) mid-drain is therefore also treated as the
-receipt, the same behavior staging had before this discrimination existed; the
-close remains no proof of delivery. So the no-live-peer exit is taken for a
-channel that starts closing on a link already gone with no peer close in hand; a
-link the peer's own close ended is the peer's receipt.
+receipt; the close remains no proof of delivery. So the no-live-peer exit is
+taken for a channel that starts closing on a link already gone with no peer
+close in hand; a link the peer's own close ended is the peer's receipt.
 
 A CLI partner reaches the same reading by the other route. It closes the data
 channel rather than ending the link through signaling, so the channel starts
@@ -534,13 +533,17 @@ Every run states the policy it applied as it opens the rendezvous: the
 configured value, or the transport's own default where the connection sets
 none.
 
-A rendezvous that ends with no data channel reports the candidate types this
-side gathered, the types the partner sent, and how many candidate pairs were
-tried, each on a labelled cause link of its own, so a relay that was never
-gathered is distinguishable from one that was and still found no path. Where
-the policy is `relay` and no relay candidate was gathered, the first link names
-the policy: that run had no direct path to fall back on, so the policy is part
-of the diagnosis rather than context the operator supplies. What an operator
+A CLI rendezvous that fails with both parties present -- the peer connection
+reporting `failed`, or the channel-open budget running out -- reports the
+candidate types this side gathered, the types the partner sent, and how many
+candidate pairs were tried, each on a labelled cause link of its own, so a
+relay that was never gathered is distinguishable from one that was and still
+found no path. A rendezvous that ends on the rendezvous budget, on the
+partner's `LEAVE`, or on the data channel closing before it opened reports no
+candidate detail. Where the policy is `relay` and no relay candidate was
+gathered, the first link names the policy: that run had no direct path to fall
+back on, so the policy is part of the diagnosis rather than context the
+operator supplies. What an operator
 does with that answer is in [CLI.md](../CLI.md#webrtc-exchanges).
 
 `connection.provider_options` is inert on this channel: no transport on either
