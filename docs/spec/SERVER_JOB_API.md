@@ -710,7 +710,7 @@ Every `warning` event on this stream holds a `source` naming which notice raised
 | `relayRendezvousPreflight` | The filedrop rendezvous preflight at job start: a mount that is missing, is not a directory, is not writable, cannot be listed, is not empty, overlaps the data root or the work-input directory, or could not be resolved to a real path. One value for the whole preflight, whose notices name the leg and the condition in their text ([`JOB_RENDEZVOUS_DIR`](#environment-variables)). |
 | `relayOpenedConfigurationChanged` | A run of the opened configuration found the mounted `alcove.yaml` differing from the one the open read, or found no open on record. The run composes from the document as opened; the notice names the file and says to open it again (see [The recurring-run hand-off](#the-recurring-run-hand-off)). |
 | `relayStreamUnavailable` | fd 3 was not wired on the spawned child, so the relay has no event stream to read and the run's events are its exit alone. |
-| `relayStreamOversizedLine` | An fd-3 line grew past the reader's buffer cap; the partial line was discarded. |
+| `relayStreamOversizedLine` | An fd-3 line grew past the reader's per-line cap; that line was discarded. |
 | `relayStreamReadError` | The fd-3 stream reported a read error. |
 | `relayUnparsableEvent` | An fd-3 line was not JSON the bounded parser accepts; the line was dropped. |
 | `relayUnknownEvent` | An fd-3 line parsed but fell outside the v1 vocabulary; the line was dropped. |
@@ -730,12 +730,12 @@ Each of core's five terms-time pin refusals takes the console's own remedy copy 
 
 **The pre-connection refusal is not rebuilt.** The CLI's other refusal of an unrecordable pin is the check on the configuration directory's writability, made before the run connects: it exits 64 on stderr before the fd-3 stream is open (pinned against the command by `apps/cli/test/unit/commands/exchangePinPreflight.test.ts`), so the relay has no event to rewrite and the run reaches the browser as the stream-broke terminal the manager synthesizes ([Exit-code reconciliation](#exit-code-reconciliation)), of category `exchange`, whose stderr cause link holds the end of what the CLI printed, fitted to that link's display budget. The console's own copy is not stated on that path, and a container path the tail still holds crosses with it. A console run reaches that check only if the mounted working directory turns read-only between the job's creation and the child's spawn: the server creates the workdir and writes the configuration into it, so the directory is writable by the user the child runs as whenever the check is reached on the ordinary path.
 
-That depth bound governs the chain field and nothing else. Every other field is escaped per value -- recursively, each string of an array or nested object at the per-value cap -- and has no entry-count bound of its own, so an array field arrives at whatever length the child sent it, escaped entry by entry. What bounds a field the relay does not derive is the line the child wrote -- the fd-3 reader discards a partial line past 1,048,576 UTF-16 code units -- not this pass.
+That depth bound governs the chain field and nothing else. Every other field is escaped per value -- recursively, each string of an array or nested object at the per-value cap -- and has no entry-count bound of its own, so an array field arrives at whatever length the child sent it, escaped entry by entry. What bounds a field the relay does not derive is the line the child wrote -- the fd-3 reader discards a line past 1,048,576 UTF-16 code units -- not this pass.
 
 Degradation is fail-safe, never a crash:
 
 - A non-JSON line (`relayUnparsableEvent`), or one outside the known schema (`relayUnknownEvent`), is reported as a synthesized `warning` event with `degraded: true` and dropped -- the relay continues.
-- An oversized fd-3 line (the reader buffers up to 1,048,576 UTF-16 code units before discarding the partial line) is reported as a degradation warning under `relayStreamOversizedLine` and the partial buffer discarded.
+- An oversized fd-3 line (longer than 1,048,576 UTF-16 code units) is reported once as a degradation warning under `relayStreamOversizedLine` and discarded up to its newline. The cap applies to each line on its own: the lines before and after it are read as usual, and the reader never buffers more than the cap of an unterminated line.
 - fd 3 being unavailable (`relayStreamUnavailable`), or a read error on it (`relayStreamReadError`), is reported as a degradation warning.
 - A child that could not be spawned, or that died abnormally, is reported as a degradation warning under `relayProcessError` before the run is classified as a failure.
 

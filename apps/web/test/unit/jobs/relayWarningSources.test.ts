@@ -295,3 +295,71 @@ describe("the stamped source reaches the job's event stream", () => {
     expect(warnings[0].degraded).toBeUndefined();
   });
 });
+
+describe("the fd-3 size cap applies to each line", () => {
+  const RESULT_LINE =
+    JSON.stringify({ v: 1, type: "result", resultWritten: true }) + "\n";
+
+  /** The events and degradations the reader delivers for `chunks`, in order. */
+  async function readChunks(
+    chunks: Array<string>,
+  ): Promise<{ events: Array<RelayEvent>; degradations: Array<Degradation> }> {
+    const events: Array<RelayEvent> = [];
+    const degradations: Array<Degradation> = [];
+    const stream = new PassThrough();
+    const child = {
+      stdio: [null, null, null, stream],
+    } as unknown as ChildProcess;
+    attachFd3Reader(child, {
+      ...collectingHandlers(degradations),
+      onEvent: (event) => events.push(event),
+    });
+    for (const chunk of chunks) {
+      stream.write(chunk);
+      await settle();
+    }
+    stream.end();
+    await settle();
+    return { events, degradations };
+  }
+
+  test("a line under the cap and the lines after it survive a chunk that crosses the cap", async () => {
+    const warning = JSON.stringify({
+      v: 1,
+      type: "warning",
+      message: "m".repeat(FD3_LINE_CAP - 100),
+    });
+    expect(warning.length).toBeLessThan(FD3_LINE_CAP);
+    const split = warning.length - 10;
+    const { events, degradations } = await readChunks([
+      warning.slice(0, split),
+      warning.slice(split) + "\n" + "p".repeat(200) + "\n" + RESULT_LINE,
+    ]);
+    expect(events.map((event) => event.type)).toEqual(["warning", "result"]);
+    expect(degradations.map((entry) => entry.source)).toEqual([
+      "relayUnparsableEvent",
+    ]);
+  });
+
+  test("an oversized line is dropped whole and the line after it is read", async () => {
+    const { events, degradations } = await readChunks([
+      "x".repeat(FD3_LINE_CAP),
+      "x".repeat(100),
+      "x".repeat(100) + "\n" + RESULT_LINE,
+    ]);
+    expect(events.map((event) => event.type)).toEqual(["result"]);
+    expect(degradations.map((entry) => entry.source)).toEqual([
+      "relayStreamOversizedLine",
+    ]);
+  });
+
+  test("an oversized line arriving whole in one chunk is dropped alone", async () => {
+    const { events, degradations } = await readChunks([
+      "x".repeat(FD3_LINE_CAP + 1) + "\n" + RESULT_LINE,
+    ]);
+    expect(events.map((event) => event.type)).toEqual(["result"]);
+    expect(degradations.map((entry) => entry.source)).toEqual([
+      "relayStreamOversizedLine",
+    ]);
+  });
+});
