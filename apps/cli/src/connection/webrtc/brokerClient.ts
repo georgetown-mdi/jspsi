@@ -77,10 +77,10 @@ export const BROKER_HEARTBEAT_INTERVAL_MS = 5_000;
 export const BROKER_OPEN_TIMEOUT_MS = 30_000;
 
 /**
- * Largest inbound signaling frame accepted, before it is parsed. A signaling
- * frame is an SDP or a single ICE candidate -- kilobytes, even with every
- * interface's candidates inlined -- so this is orders of magnitude of headroom
- * and cannot reject a real one.
+ * Largest inbound signaling frame accepted, in UTF-8 bytes, before it is
+ * parsed. A signaling frame is an SDP or a single ICE candidate -- kilobytes,
+ * even with every interface's candidates inlined -- so this is orders of
+ * magnitude of headroom and cannot reject a real one.
  *
  * Its limit, stated rather than glossed: Node's built-in `WebSocket` exposes no
  * per-socket maximum payload, so the frame has already been read into memory by
@@ -476,9 +476,7 @@ function registrationToken(): string {
 function parseSignalingFrame(raw: unknown): BrokerMessage | undefined {
   const text = typeof raw === "string" ? raw : undefined;
   if (text === undefined) return undefined;
-  // The cap is on UTF-16 units rather than encoded bytes: it is a memory bound,
-  // and a unit is the unit the string already occupies.
-  if (text.length > MAX_SIGNALING_FRAME_BYTES) {
+  if (Buffer.byteLength(text, "utf8") > MAX_SIGNALING_FRAME_BYTES) {
     throw new ConnectionError(
       `the signaling server sent a frame larger than the ` +
         `${MAX_SIGNALING_FRAME_BYTES}-byte limit`,

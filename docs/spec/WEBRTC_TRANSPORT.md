@@ -614,9 +614,11 @@ a budget this transport sets; the measurement, and the release paths that were
 driven against it, are in
 [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md#the-behavioural-assumptions).
 
-Two bounds are memory rather than time, both on inbound signaling: a signaling
-frame is refused above 256 KiB before it is parsed, and at most 128 remote
-candidates are held while this side's description is not yet applied.
+Two CLI bounds are memory rather than time, both on inbound signaling: a
+signaling frame is refused above 256 KiB of UTF-8 before it is parsed, and at
+most 128 remote candidates are held per connection while that connection's
+remote description is not yet applied -- during a renewal overlap the
+replaced connection and its replacement each hold their own.
 
 ## See also
 
