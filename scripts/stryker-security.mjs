@@ -320,9 +320,10 @@ async function runCheck() {
     console.error("");
     for (const failure of failures)
       console.error(`stryker-security: ${failure}`);
-    console.error(
-      "\nA floor is raised when tests raise the score, never lowered to make this leg green: a drop means a test that used to distinguish the mutated behavior no longer does.",
-    );
+    if (rows.some((row) => row.verdict === "BELOW FLOOR"))
+      console.error(
+        "\nA floor is raised when tests raise the score, never lowered to make this leg green: a drop means a test that used to distinguish the mutated behavior no longer does.",
+      );
     process.exit(1);
   }
 }
