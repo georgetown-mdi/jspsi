@@ -329,6 +329,53 @@ describe("the browser-CSRF gate rejects a cross-origin browser request", () => {
     expect(response.status).toBe(403);
   });
 
+  // A console served over TLS, directly or behind a TLS front, sees an https
+  // Origin on every browser write while the server itself cannot tell which
+  // scheme the browser used.
+  test.each([
+    { host: "localhost", origin: "https://localhost" },
+    { host: "localhost:8443", origin: "https://localhost:8443" },
+    { host: "localhost:443", origin: "https://localhost" },
+    { host: "[::1]:3000", origin: "https://[::1]:3000" },
+    { host: "localhost:3000", origin: "http://localhost:3000" },
+  ])("Origin $origin passes for Host $host", async ({ host, origin }) => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { host, origin }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test("an https Origin passes for an allowlisted Host behind a TLS front", async () => {
+    enableJobApi();
+    vi.stubEnv("JOB_ALLOWED_HOSTS", "console.lan");
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), {
+        host: "console.lan",
+        origin: "https://console.lan",
+      }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
+  });
+
+  test.each([
+    { host: "localhost:3000", origin: "https://localhost:3001" },
+    { host: "localhost", origin: "https://localhost:8443" },
+    { host: "localhost:80", origin: "https://localhost" },
+    { host: "localhost", origin: "https://127.0.0.1" },
+    { host: "localhost", origin: "ftp://localhost" },
+    { host: "localhost", origin: "null" },
+  ])("Origin $origin is 403 for Host $host", async ({ host, origin }) => {
+    enableJobApi();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent(), { host, origin }),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(403);
+  });
+
   test("the gate runs on the probe route too (shared gate)", async () => {
     seedManagerWithProbe({ STUB_PROBE_STDOUT: okProbeLine() });
     const rejected = (await handlersOf(SftpProbeRoute).POST({
