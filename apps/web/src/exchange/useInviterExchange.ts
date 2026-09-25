@@ -5,6 +5,8 @@ import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
   LinkageTermsUnsatisfiableError,
+  WebRtcFrameLimitError,
+  assertFirstRoundFitsWebRtcFrame,
   getLogger,
   joinErrorCauseChain,
   loadPsiBackend,
@@ -338,6 +340,20 @@ export function failureFor(
       ...(consoleReported ? reportedCauseFields(cause) : {}),
     };
   }
+  // A set too large for one WebRTC message, refused before it was sent: at the
+  // start, from this party's own rows, or at a round, from the frame the round
+  // built. Its message is composed from counts and fixed constants alone and
+  // states the remedy, so it is shown as it is. Classified `config`: the same
+  // input refuses identically however many times it runs.
+  if (error instanceof WebRtcFrameLimitError)
+    return {
+      category: "config",
+      title:
+        error.setOwner === "local"
+          ? "Your file is too large for a browser exchange"
+          : "Your partner's file is too large for a browser exchange",
+      message: sanitizedFailureMessage(error),
+    };
   if (error instanceof LinkageTermsUnsatisfiableError) {
     // The pre-connection refusal for a file that cannot supply every linkage key
     // the agreed terms declare. Fixed and non-oracular: the refusal enumerates
@@ -786,6 +802,7 @@ export function useInviterExchange({
         minted.rawRows,
         minted.columns,
       );
+      assertFirstRoundFitsWebRtcFrame(prepared);
       onStages(stagesFor(prepared));
 
       onStage(WAITING_STAGE_ID);
