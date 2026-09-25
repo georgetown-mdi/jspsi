@@ -13,11 +13,20 @@ import type { ManagedImportGrantNotice } from "./managedImportGrantNotice";
 /** The file extension that marks a chosen file as the key file. */
 const KEY_FILE_EXTENSION = ".key";
 
+/** Why chosen files are refused unopened: a key file without its
+ * configuration, two files that are not one of each, or more than two. */
+export type ManagedImportFileRefusalCause =
+  "key-file-alone" | "not-a-pair" | "too-many-files";
+
 /** What a control's chosen files are, or why they are refused unopened. */
 export type ManagedImportFileChoice<TFile> =
   | { kind: "one"; file: TFile }
   | { kind: "pair"; configurationFile: TFile; keyFile: TFile }
-  | { kind: "refused"; reason: string };
+  | {
+      kind: "refused";
+      cause: ManagedImportFileRefusalCause;
+      reason: string;
+    };
 
 /** A key file chosen without the configuration it belongs beside. */
 export const KEY_FILE_ALONE_REASON =
@@ -61,17 +70,25 @@ export function managedImportFileChoice<TFile extends { name: string }>(
 ): ManagedImportFileChoice<TFile> | undefined {
   if (files.length === 0) return undefined;
   if (files.length > 2)
-    return { kind: "refused", reason: TOO_MANY_FILES_REASON };
+    return {
+      kind: "refused",
+      cause: "too-many-files",
+      reason: TOO_MANY_FILES_REASON,
+    };
   if (files.length === 1) {
     const [file] = files;
     return isKeyFileName(file.name)
-      ? { kind: "refused", reason: KEY_FILE_ALONE_REASON }
+      ? {
+          kind: "refused",
+          cause: "key-file-alone",
+          reason: KEY_FILE_ALONE_REASON,
+        }
       : { kind: "one", file };
   }
   const keys = files.filter((file) => isKeyFileName(file.name));
   const configurations = files.filter((file) => !isKeyFileName(file.name));
   if (keys.length !== 1 || configurations.length !== 1)
-    return { kind: "refused", reason: NOT_A_PAIR_REASON };
+    return { kind: "refused", cause: "not-a-pair", reason: NOT_A_PAIR_REASON };
   return {
     kind: "pair",
     configurationFile: configurations[0],

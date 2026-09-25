@@ -119,10 +119,10 @@ import {
   RETAKE_CONFIRM_LABEL,
   RETAKE_KEY_FILE_NOTE,
   RETAKE_LEAD,
-  RETAKE_NOT_A_PAIR,
   RETAKE_NO_KEY_FILE_NOTE,
   RETAKE_STORE_FAILED,
   managedRetakeRefusal,
+  retakeFileChoiceRefusal,
 } from "./managedRetakeModel";
 import {
   STANDING_CONDITION_CLEAR_LABEL,
@@ -2066,7 +2066,7 @@ function RetakeControl({
   function confirmRetake() {
     const choice = managedImportFileChoice(chosenFiles);
     if (choice !== undefined && choice.kind !== "pair") {
-      setRefusal(RETAKE_NOT_A_PAIR);
+      setRefusal(retakeFileChoiceRefusal(choice));
       return;
     }
     setRetaking(true);

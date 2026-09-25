@@ -17,6 +17,10 @@
 
 import { RUN_IN_FLIGHT_HANDOFF_TITLE } from "./managedHandoffGate";
 
+import type {
+  ManagedImportFileChoice,
+  ManagedImportFileRefusalCause,
+} from "./managedImportFiles";
 import type { ManagedRetakeResult } from "@psi/managed/managedRetake";
 
 /** The label of the control that opens the confirmation, and of the confirmation
@@ -59,16 +63,43 @@ export const RETAKE_NO_KEY_FILE_NOTE =
   "you cannot get them, take the exchange back without them and create a " +
   "fresh invitation for your partner from this page.";
 
-/** The files the confirmation was given are not an `alcove.yaml` and the
- * `.alcove.key` beside it: one file, more than two, or two that are not one of
- * each. Refused before either is read. */
-export const RETAKE_NOT_A_PAIR: ManagedRetakeRefusal = {
-  title: "Choose both files",
-  reason:
-    "Choose the alcove.yaml and the .alcove.key beside it, both in the same " +
-    "file chooser. The .alcove.key alone cannot show which exchange it " +
-    "belongs to. Nothing changed here.",
+/** What each way of choosing other than an `alcove.yaml` with the
+ * `.alcove.key` beside it is refused with. A take-back reads only the pair, so
+ * unlike an import it has no use for one file on its own. */
+const RETAKE_FILE_CHOICE_REASONS: Record<
+  "one-file" | ManagedImportFileRefusalCause,
+  string
+> = {
+  "one-file":
+    "You chose one file without the .alcove.key beside it. Choose the " +
+    "alcove.yaml and the .alcove.key together, in the same file chooser. " +
+    "Nothing changed here.",
+  "key-file-alone":
+    "You chose the .alcove.key on its own, which cannot show which exchange " +
+    "it belongs to. Choose it together with the alcove.yaml beside it, in the " +
+    "same file chooser. Nothing changed here.",
+  "not-a-pair":
+    "The two files you chose are not an alcove.yaml and a .alcove.key: " +
+    "exactly one of them must have a name ending in .key. Choose the " +
+    "alcove.yaml and the .alcove.key beside it. Nothing changed here.",
+  "too-many-files":
+    "You chose more than two files. Choose only the alcove.yaml and the " +
+    ".alcove.key beside it. Nothing changed here.",
 };
+
+/** The refusal for chosen files that are not an `alcove.yaml` and the
+ * `.alcove.key` beside it, given before either is read. */
+export function retakeFileChoiceRefusal<TFile>(
+  choice: Exclude<ManagedImportFileChoice<TFile>, { kind: "pair" }>,
+): ManagedRetakeRefusal {
+  return {
+    title: "Choose both files",
+    reason:
+      RETAKE_FILE_CHOICE_REASONS[
+        choice.kind === "one" ? "one-file" : choice.cause
+      ],
+  };
+}
 
 /** The confirmation's own button: what pressing it does, in the words of the
  * action. */

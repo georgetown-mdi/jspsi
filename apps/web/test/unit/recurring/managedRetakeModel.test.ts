@@ -4,12 +4,13 @@ import {
   RETAKE_ACTION_LABEL,
   RETAKE_KEY_FILE_NOTE,
   RETAKE_LEAD,
-  RETAKE_NOT_A_PAIR,
   RETAKE_NO_KEY_FILE_NOTE,
   RETAKE_STORE_FAILED,
   managedRetakeRefusal,
+  retakeFileChoiceRefusal,
 } from "@recurring/managedRetakeModel";
 import { handedOffImportReason } from "@recurring/managedHandoffGate";
+import { managedImportFileChoice } from "@recurring/managedImportFiles";
 
 // The words the re-take is offered and refused in. The action is attested, so the
 // confirmation has to state the one thing the operator must already have done and
@@ -64,7 +65,6 @@ describe("a take-back that wrote nothing", () => {
         /Nothing changed|nothing was taken back|nothing here to take back/i,
       );
     expect(RETAKE_STORE_FAILED.reason).toMatch(/Nothing changed here/);
-    expect(RETAKE_NOT_A_PAIR.reason).toMatch(/Nothing changed here/);
   });
 
   test("tells a run in flight from files this app will not read", () => {
@@ -86,11 +86,23 @@ describe("a take-back that wrote nothing", () => {
     ).toMatch(/other side/);
   });
 
-  test("a key file chosen alone is asked for with its alcove.yaml", () => {
-    expect(RETAKE_NOT_A_PAIR.reason).toMatch(
-      /alcove\.yaml and the \.alcove\.key/,
-    );
-  });
+  test.each([
+    [["alcove.yaml"], /one file without the \.alcove\.key/],
+    [[".alcove.key"], /\.alcove\.key on its own/],
+    [["alcove.yaml", "other.yaml"], /exactly one of them must have a name/],
+    [["alcove.yaml", ".alcove.key", "backup.json"], /more than two files/],
+  ])(
+    "files that are not the pair (%o) are refused with what was chosen",
+    (names, chosen) => {
+      const choice = managedImportFileChoice(names.map((name) => ({ name })));
+      if (choice === undefined || choice.kind === "pair")
+        throw new Error(`expected ${names.join(", ")} not to be a pair`);
+      const { reason } = retakeFileChoiceRefusal(choice);
+      expect(reason).toMatch(chosen);
+      expect(reason).toMatch(/Choose .*alcove\.yaml/);
+      expect(reason).toMatch(/Nothing changed here/);
+    },
+  );
 
   test("a record no longer here points at the files, not at a retry", () => {
     const reason = managedRetakeRefusal({ kind: "gone" }).reason;
