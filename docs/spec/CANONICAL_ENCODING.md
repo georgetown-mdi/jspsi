@@ -114,7 +114,10 @@ because silent coercion is the classic way two implementations diverge:
   would be dropped without a trace.
 - A non-enumerable string-keyed property of an object, which an encoder
   enumerating keys would drop, and an accessor (getter or setter) property,
-  which can yield a different value on each read.
+  which can yield a different value on each read. These checks cover the
+  properties of plain objects and arrays; an exotic object such as a Proxy,
+  whose reads need not match its property descriptors, is outside the domain
+  the encoder is given.
 - A string -- a value or an object key -- holding a lone UTF-16 surrogate. It is
   not a Unicode scalar value and has no UTF-8 encoding (see
   [Strings](#strings)).

@@ -116,10 +116,14 @@ function dataPropertyValue(value: object, key: string, path: string): unknown {
  * enumerates keys, so it would serialize `toJSON()`'s return instead of the
  * array or object actually passed -- a silent coercion, undetectable by an
  * element/property walk (the method may be non-enumerable, and on an array is
- * never an indexed element). The pre-validator mirrors that precedence.
+ * never an indexed element). The pre-validator mirrors that precedence. An
+ * own `toJSON` accessor is refused without running its getter.
  */
 function assertNoToJson(value: object, path: string): void {
-  if (typeof (value as { toJSON?: unknown }).toJSON === "function")
+  const toJson = Object.hasOwn(value, "toJSON")
+    ? dataPropertyValue(value, "toJSON", `${path}.toJSON`)
+    : (value as { toJSON?: unknown }).toJSON;
+  if (typeof toJson === "function")
     fail(
       "value defines a toJSON method, which would replace it during encoding; " +
         "convert it to plain data first",

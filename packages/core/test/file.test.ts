@@ -5,6 +5,7 @@ import { expect, test, vi } from "vitest";
 import {
   assertLeadingLineWithinByteCeiling,
   CSV_LINE_BYTE_CEILING,
+  CsvLineByteCeilingError,
   CsvRowParseError,
   guardStreamLineByteCeiling,
   loadCSVColumnSample,
@@ -12,6 +13,7 @@ import {
   streamCSVRows,
 } from "../src/file";
 import { UsageError } from "../src/errors";
+import { inferDateInputFormatFromSource } from "../src/inferDateInputFormat";
 import { inferDateFormat, columnValues } from "../src/utils/date";
 import type { CSVRow } from "../src/file";
 
@@ -509,6 +511,17 @@ test("assertLeadingLineWithinByteCeiling: a terminator within the ceiling resolv
   await expect(
     assertLeadingLineWithinByteCeiling(file, ceiling),
   ).resolves.toBeUndefined();
+});
+
+test("loadCSVColumnSample and inferDateInputFormatFromSource refuse a terminator-free File over the ceiling", async () => {
+  const ceiling = 1024;
+  const file = new File(["x".repeat(4 * 1024 * 1024)], "huge.csv");
+  await expect(
+    loadCSVColumnSample(file, pickDob, 1000, ceiling),
+  ).rejects.toBeInstanceOf(CsvLineByteCeilingError);
+  await expect(
+    inferDateInputFormatFromSource(file, ceiling),
+  ).rejects.toBeInstanceOf(CsvLineByteCeilingError);
 });
 
 test("assertLeadingLineWithinByteCeiling: a File no larger than the ceiling is not read", async () => {

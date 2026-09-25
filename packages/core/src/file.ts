@@ -690,7 +690,9 @@ export async function streamCSVRows(
  * For a well-formed CSV this holds peak memory to the header plus one parse
  * chunk. Two bounds enforce that: `sampleLimit` caps the retained rows, and
  * `byteCeiling` bounds a single logical line, enforced by
- * {@link guardStreamLineByteCeiling}; see {@link CSV_LINE_BYTE_CEILING}.
+ * {@link guardStreamLineByteCeiling} for a Node stream and by
+ * {@link assertLeadingLineWithinByteCeiling} for a browser `File`; see
+ * {@link CSV_LINE_BYTE_CEILING}.
  *
  * `selectColumn` is invoked with the header field list and returns the name
  * of the column to sample (the DOB column, for date-format inference) or
@@ -725,12 +727,35 @@ export function loadCSVColumnSample(
   sampleLimit: number,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
   delimiter?: string,
-): Promise<{
+): Promise<CSVColumnSample> {
+  const read = (): Promise<CSVColumnSample> =>
+    readCSVColumnSample(
+      file,
+      selectColumn,
+      sampleLimit,
+      byteCeiling,
+      delimiter,
+    );
+  // A Node stream is opened synchronously so the parse's listeners attach
+  // before the stream can emit an error; a File's leading line is bounded first.
+  if (typeof (file as StreamSource).on === "function") return read();
+  return assertLeadingLineWithinByteCeiling(file, byteCeiling).then(read);
+}
+
+type CSVColumnSample = {
   columns: Array<string>;
   sanitizedColumnPositions: Array<number>;
   sampledColumn: string | undefined;
   sample: Array<string>;
-}> {
+};
+
+function readCSVColumnSample(
+  file: LocalFile,
+  selectColumn: (columns: Array<string>) => string | undefined,
+  sampleLimit: number,
+  byteCeiling: number,
+  delimiter: string | undefined,
+): Promise<CSVColumnSample> {
   return new Promise((resolve, reject) => {
     let columns: Array<string> | undefined;
     let target: string | undefined;
@@ -742,7 +767,7 @@ export function loadCSVColumnSample(
     // and PapaParse's public `error` contract (see
     // {@link guardStreamLineByteCeiling}). The `sampleLimit` / no-column
     // `parser.abort()` below is a separate, public-API early stop. Inert for
-    // a non-stream LocalFile -- no current caller passes one.
+    // a non-stream LocalFile, whose leading line the pre-read above bounds.
     const { input, release } = openCSVSource(file, byteCeiling);
 
     Papa.parse(input, {

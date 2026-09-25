@@ -369,6 +369,23 @@ describe("values the encoder would read differently from the validator", () => {
     expect(reads).toBe(0);
   });
 
+  test("a toJSON getter is rejected without being read", () => {
+    let reads = 0;
+    const toJsonGetter = {
+      get: (): unknown => {
+        reads += 1;
+        return undefined;
+      },
+    };
+    const obj = {};
+    Object.defineProperty(obj, "toJSON", { ...toJsonGetter, enumerable: true });
+    const arr: unknown[] = [1];
+    Object.defineProperty(arr, "toJSON", toJsonGetter);
+    expect(() => canonicalString(obj)).toThrow(/\$\.toJSON: accessor property/);
+    expect(() => canonicalString(arr)).toThrow(/\$\.toJSON: accessor property/);
+    expect(reads).toBe(0);
+  });
+
   test("a getter on an array element is rejected", () => {
     const arr: unknown[] = [1, 2];
     Object.defineProperty(arr, 1, { get: () => 2, enumerable: true });
