@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import {
   ExchangeBusyError,
+  JobIntentUncomposableError,
   JobRendezvousRetainRequiredError,
   JobRendezvousUnavailableError,
   JobSigningIdentityExposedError,
@@ -69,6 +70,10 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
  * unconverted signing paths answers
  * `{ "reason": "mounted-signing-paths-unconverted" }`. Each is about console state
  * rather than the intent, so the browser cannot otherwise say what to fix.
+ *
+ * A schema-valid intent that core refuses while the CLI configuration or the
+ * hand-off is composed from it is a 400 `{ "error": "<field>: <reason>" }`,
+ * the field naming the composed configuration's.
  */
 export const Route = createFileRoute("/api/jobs/")({
   server: {
@@ -130,6 +135,10 @@ export const Route = createFileRoute("/api/jobs/")({
               { reason: MOUNTED_SIGNING_PATHS_UNCONVERTED_REFUSAL },
               400,
             );
+          // Core refused the configuration or hand-off composed from the
+          // intent; the body names the composed field and the rule it broke.
+          if (error instanceof JobIntentUncomposableError)
+            return jobJsonResponse({ error: error.detail }, 400);
           // A mounted input that names no regular file, a filedrop intent with no
           // rendezvous directory configured, a filedrop intent on a
           // split-provisioned console without retain mode, an sftp intent with

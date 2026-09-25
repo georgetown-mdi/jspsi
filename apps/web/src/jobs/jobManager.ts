@@ -1,7 +1,10 @@
 import path from "node:path";
 
+import { ZodError } from "zod";
+
 import {
   MAX_ERROR_CAUSE_DEPTH,
+  UsageError,
   errorWithPartnerCauseLinks,
   sanitizeForDisplay,
 } from "@alcove/core";
@@ -68,6 +71,7 @@ import {
 } from "./signingIdentity";
 import { buildJobHandoff } from "./handoff";
 import { checkedMountedKeyFilePath } from "./mountedKeyFile";
+import { formatFirstIssue } from "./schemaIssueMessage";
 import { probeSftpHostKey } from "./sftpProbe";
 import { removeSftpCredentialFile } from "./sftpScratch";
 import { validateAuthoredSftpServer } from "./sftpServer";
@@ -219,6 +223,48 @@ export class MountedSigningPathsUnconvertedError extends Error {
       "the opened configuration states signing paths of its own and was not converted to the console's",
     );
     this.name = "MountedSigningPathsUnconvertedError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.createJob} when core refuses the configuration or
+ * the hand-off composed from a schema-valid intent: a cross-field rule the
+ * intent schema does not restate (a split sftp connection run without retain
+ * mode), or a composed document past core's size bounds. The route maps it to a
+ * 400 whose body is {@link JobIntentUncomposableError.detail}.
+ */
+export class JobIntentUncomposableError extends Error {
+  /** The refusal as `<field>: <reason>`, `<field>` naming a field of the
+   * composed configuration, or core's fixed message when it names none. */
+  readonly detail: string;
+
+  constructor(detail: string, options?: ErrorOptions) {
+    super(
+      `the intent could not be composed into a configuration: ${detail}`,
+      options,
+    );
+    this.detail = detail;
+    this.name = "JobIntentUncomposableError";
+  }
+}
+
+/**
+ * Run one composition step, turning core's refusal of what it composed into a
+ * {@link JobIntentUncomposableError}. A schema issue is described through the
+ * shared formatter, and a {@link UsageError}'s message is core's fixed text,
+ * so neither detail repeats a value the intent supplied.
+ */
+function composedFromIntent<TComposed>(compose: () => TComposed): TComposed {
+  try {
+    return compose();
+  } catch (error) {
+    if (error instanceof ZodError)
+      throw new JobIntentUncomposableError(formatFirstIssue(error.issues), {
+        cause: error,
+      });
+    if (error instanceof UsageError)
+      throw new JobIntentUncomposableError(error.message, { cause: error });
+    throw error;
   }
 }
 
@@ -1051,19 +1097,21 @@ export class JobManager {
     const openedConfigurationNotice = runsOpenedConfiguration
       ? openedConfigurationWarning(this.dataRoot, opened)
       : undefined;
-    const handoff = buildJobHandoff(intent, serverEntry, {
-      credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
-      filedropSplit: this.jobRendezvousOutboundDir !== undefined,
-      keyFileBesideConfiguration: mountedKeyPath !== undefined,
-      ...(mountedDocument !== undefined
-        ? {
-            mountedDocument,
-            mountedDocumentConverted:
-              intent.mode !== "zeroSetup" &&
-              intent.mountedConfigurationConverted === true,
-          }
-        : {}),
-    });
+    const handoff = composedFromIntent(() =>
+      buildJobHandoff(intent, serverEntry, {
+        credentialPasted: this.authoredMaterializedCredentialPath !== undefined,
+        filedropSplit: this.jobRendezvousOutboundDir !== undefined,
+        keyFileBesideConfiguration: mountedKeyPath !== undefined,
+        ...(mountedDocument !== undefined
+          ? {
+              mountedDocument,
+              mountedDocumentConverted:
+                intent.mode !== "zeroSetup" &&
+                intent.mountedConfigurationConverted === true,
+            }
+          : {}),
+      }),
+    );
 
     const record: JobRecord = {
       id,
@@ -1169,12 +1217,14 @@ export class JobManager {
     identityPath: string,
     mountedKeyPath: string | undefined,
   ): Promise<{ configPath: string; keyPath: string }> {
-    const configDocument = composeDocumentByChannel(
-      intent,
-      this.jobRendezvousDir,
-      this.jobRendezvousOutboundDir,
-      serverEntry,
-      this.signingPathsFor(workdir, identityPath),
+    const configDocument = composedFromIntent(() =>
+      composeDocumentByChannel(
+        intent,
+        this.jobRendezvousDir,
+        this.jobRendezvousOutboundDir,
+        serverEntry,
+        this.signingPathsFor(workdir, identityPath),
+      ),
     );
     const configPath = await writeJobFile(
       workdir,

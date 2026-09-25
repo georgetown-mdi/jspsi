@@ -1230,6 +1230,43 @@ describe("POST /api/jobs and the authored sftp connection", () => {
     expect(await response.text()).toBe("");
   });
 
+  test("an intent core refuses at compose is a 400 naming the rule, with nothing left behind", async () => {
+    const root = tempDataRoot("routes-sftp-split");
+    roots.push(root);
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    const manager = new JobManager({
+      dataRoot: root,
+      binaryPath: STUB_CLI_PATH,
+      childEnv: { STUB_FD3_EVENTS: JSON.stringify([]), STUB_DELAY_MS: "5000" },
+    });
+    (globalThis as { jobManagerInstance?: JobManager }).jobManagerInstance =
+      manager;
+    const secretDir = tempDataRoot("routes-secret");
+    roots.push(secretDir);
+    fs.mkdirSync(secretDir, { recursive: true });
+    const secretPath = path.join(secretDir, "password");
+    fs.writeFileSync(secretPath, "s3cret\n");
+    manager.authorSftpServer({
+      host: "sftp.example.org",
+      port: 2222,
+      username: "linkage",
+      inboundPath: "/exchange/in",
+      outboundPath: "/exchange/out",
+      hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+      credential: { kind: "ref", ref: `@${secretPath}`, credType: "password" },
+    });
+
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validSftpIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/^connection: .*requires retain_files: true$/);
+    expect(fs.readdirSync(root)).toEqual([]);
+    expect(manager.occupiedSlotId()).toBeNull();
+  });
+
   test("the create path composes the authored connection into the job config", async () => {
     // The connection material comes only from the authored entry: the composed
     // alcove.yaml has its host and @path credential ref, and nothing
