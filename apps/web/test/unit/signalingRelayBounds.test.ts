@@ -6,9 +6,14 @@ import { randomBytes } from "node:crypto";
 import { afterEach, describe, expect, test } from "vitest";
 import WebSocket from "ws";
 
+import {
+  MAX_OUTSTANDING_QUEUES,
+  MAX_QUEUED_DESTINATIONS_PER_SENDER,
+} from "@alcove/peerjs-broker/models/realm";
 import { CreatePeerServerWSOnly } from "@alcove/peerjs-broker";
 import { MAX_RELAY_BUFFERED_BYTES } from "@alcove/peerjs-broker/messageHandler/handlers/transmission/index";
 import { MAX_SIGNALING_PAYLOAD_BYTES } from "@alcove/peerjs-broker/services/webSocketServer/index";
+import { MessageType } from "@alcove/peerjs-broker/enums";
 
 import { KEY } from "../utils/signalingHarness";
 
@@ -396,5 +401,113 @@ describe("leaving the realm", () => {
         .filter((received) => received.type === "OFFER")
         .map((received) => received.payload),
     ).toEqual(["fresh"]);
+  });
+});
+
+/** Every EXPIRE a peer has been sent, by the destination it names. */
+function expiredDestinations(peer: PeerSocket): Array<unknown> {
+  return peer.frames
+    .filter((received) => received.type === "EXPIRE")
+    .map((received) => received.src);
+}
+
+describe("relay queue refusals", () => {
+  // Well inside the expiry sweep's own window (`expire_timeout`, 5 seconds by
+  // default), so an EXPIRE seen by then was sent for the refusal rather than
+  // by the sweep.
+  const PROMPT_ANSWER_MS = 1_000;
+
+  test("a sender past its destination budget is answered EXPIRE at once", async () => {
+    const broker = await startShippedBroker();
+    const sender = await connectCollecting(broker.port, SENDER_ID);
+
+    const absentIds = Array.from(
+      { length: MAX_QUEUED_DESTINATIONS_PER_SENDER + 1 },
+      (_, index) => `peer-absent-${index}`,
+    );
+    for (const absentId of absentIds) {
+      sender.ws.send(
+        JSON.stringify({ type: "OFFER", dst: absentId, payload: "offer" }),
+      );
+    }
+
+    const refusedId = absentIds[absentIds.length - 1];
+    await waitFor(
+      () => expiredDestinations(sender).includes(refusedId),
+      PROMPT_ANSWER_MS,
+    );
+    expect(expiredDestinations(sender)).toEqual([refusedId]);
+    expect(broker.realm.getMessageQueueById(refusedId)).toBeUndefined();
+    expect(broker.realm.getClientsIdsWithQueue()).toHaveLength(
+      MAX_QUEUED_DESTINATIONS_PER_SENDER,
+    );
+  });
+
+  test("one sender at its budget leaves another sender's hold in place", async () => {
+    const broker = await startShippedBroker();
+    const busy = await connectCollecting(broker.port, "peer-busy");
+    for (
+      let index = 0;
+      index <= MAX_QUEUED_DESTINATIONS_PER_SENDER;
+      index += 1
+    ) {
+      busy.ws.send(
+        JSON.stringify({
+          type: "OFFER",
+          dst: `peer-absent-${index}`,
+          payload: "x",
+        }),
+      );
+    }
+    await waitFor(
+      () => expiredDestinations(busy).length === 1,
+      PROMPT_ANSWER_MS,
+    );
+
+    const sender = await connectCollecting(broker.port, SENDER_ID);
+    sender.ws.send(
+      JSON.stringify({ type: "OFFER", dst: RECIPIENT_ID, payload: "held" }),
+    );
+    await waitFor(
+      () => broker.realm.getMessageQueueById(RECIPIENT_ID)?.size() === 1,
+    );
+
+    const recipient = await connectCollecting(broker.port, RECIPIENT_ID);
+    await waitFor(() =>
+      recipient.frames.some((received) => received.type === "OFFER"),
+    );
+    const offer = recipient.frames.find(
+      (received) => received.type === "OFFER",
+    )!;
+    expect(offer.src).toBe(SENDER_ID);
+    expect(offer.payload).toBe("held");
+    expect(expiredDestinations(sender)).toEqual([]);
+  });
+
+  test("a frame refused by the shared queue cap is answered EXPIRE at once", async () => {
+    const broker = await startShippedBroker();
+    // Fill the shared cap from as many senders as it takes, each within its
+    // own budget.
+    for (let index = 0; index < MAX_OUTSTANDING_QUEUES; index += 1) {
+      const filler = `peer-filler-${Math.floor(index / MAX_QUEUED_DESTINATIONS_PER_SENDER)}`;
+      expect(
+        broker.realm.addMessageToQueue(`peer-absent-${index}`, {
+          type: MessageType.OFFER,
+          src: filler,
+          dst: `peer-absent-${index}`,
+        }),
+      ).toBe(true);
+    }
+
+    const sender = await connectCollecting(broker.port, SENDER_ID);
+    sender.ws.send(
+      JSON.stringify({ type: "OFFER", dst: RECIPIENT_ID, payload: "offer" }),
+    );
+    await waitFor(
+      () => expiredDestinations(sender).includes(RECIPIENT_ID),
+      PROMPT_ANSWER_MS,
+    );
+    expect(broker.realm.getMessageQueueById(RECIPIENT_ID)).toBeUndefined();
+    expect(sender.ws.readyState).toBe(WebSocket.OPEN);
   });
 });

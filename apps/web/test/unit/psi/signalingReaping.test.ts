@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   MAX_MESSAGES_PER_QUEUE,
   MAX_OUTSTANDING_QUEUES,
+  MAX_QUEUED_DESTINATIONS_PER_SENDER,
   MAX_QUEUE_BYTES,
   Realm,
 } from "@alcove/peerjs-broker/models/realm";
@@ -166,8 +167,8 @@ describe("two-tier liveness reaper", () => {
 });
 
 describe("relay message-queue bounds", () => {
-  function offerTo(dst: string): IMessage {
-    return { type: MessageType.OFFER, src: "spammer", dst };
+  function offerTo(dst: string, src = "spammer"): IMessage {
+    return { type: MessageType.OFFER, src, dst };
   }
 
   // A near-full-size signaling frame: a 64 K-character payload, so MAX_QUEUE_BYTES
@@ -200,21 +201,79 @@ describe("relay message-queue bounds", () => {
 
   test("caps the number of distinct queued destinations", () => {
     const realm = new Realm();
-    // Spray more distinct unregistered destinations than the bound allows.
+    // Spray more distinct unregistered destinations than the bound allows,
+    // from enough senders that no one of them reaches its own budget.
+    const held: Array<boolean> = [];
     for (let i = 0; i < MAX_OUTSTANDING_QUEUES + 500; i += 1) {
-      realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`));
+      const sender = `sender-${Math.floor(i / MAX_QUEUED_DESTINATIONS_PER_SENDER)}`;
+      held.push(
+        realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`, sender)),
+      );
     }
     expect(realm.getClientsIdsWithQueue().length).toBe(MAX_OUTSTANDING_QUEUES);
+    expect(held.filter(Boolean)).toHaveLength(MAX_OUTSTANDING_QUEUES);
+    expect(held.slice(MAX_OUTSTANDING_QUEUES)).not.toContain(true);
+  });
+
+  test("caps the destinations one sender holds frames for", () => {
+    const realm = new Realm();
+    const held: Array<boolean> = [];
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER + 5; i += 1) {
+      held.push(realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`)));
+    }
+    expect(held.slice(0, MAX_QUEUED_DESTINATIONS_PER_SENDER)).not.toContain(
+      false,
+    );
+    expect(held.slice(MAX_QUEUED_DESTINATIONS_PER_SENDER)).not.toContain(true);
+    expect(realm.getClientsIdsWithQueue()).toHaveLength(
+      MAX_QUEUED_DESTINATIONS_PER_SENDER,
+    );
+
+    // The sender still adds to a destination it already holds frames for,
+    // and another sender is unaffected by this one's budget.
+    expect(realm.addMessageToQueue("dst-0", offerTo("dst-0"))).toBe(true);
+    expect(realm.getMessageQueueById("dst-0")?.size()).toBe(2);
+    expect(
+      realm.addMessageToQueue("dst-other", offerTo("dst-other", "other")),
+    ).toBe(true);
+
+    // A queue cleared -- drained by its destination or expired -- returns
+    // its slot to every sender that held frames in it.
+    realm.clearMessageQueue("dst-0");
+    expect(realm.addMessageToQueue("dst-new", offerTo("dst-new"))).toBe(true);
+    expect(realm.addMessageToQueue("dst-newer", offerTo("dst-newer"))).toBe(
+      false,
+    );
   });
 
   test("caps the depth of a single queue", () => {
     const realm = new Realm();
+    const held: Array<boolean> = [];
     for (let i = 0; i < MAX_MESSAGES_PER_QUEUE + 50; i += 1) {
-      realm.addMessageToQueue("dst", offerTo("dst"));
+      held.push(realm.addMessageToQueue("dst", offerTo("dst")));
     }
     expect(realm.getMessageQueueById("dst")?.size()).toBe(
       MAX_MESSAGES_PER_QUEUE,
     );
+    expect(held.slice(MAX_MESSAGES_PER_QUEUE)).not.toContain(true);
+  });
+
+  test("a frame refused by the byte cap leaves no empty queue behind", () => {
+    const realm = new Realm();
+    const oversized: IMessage = {
+      type: MessageType.OFFER,
+      src: "s",
+      dst: "d",
+      payload: "x".repeat(MAX_QUEUE_BYTES),
+    };
+    expect(realm.addMessageToQueue("d", oversized)).toBe(false);
+    expect(realm.getClientsIdsWithQueue()).toEqual([]);
+    // Nor does it spend the sender's budget.
+    for (let i = 0; i < MAX_QUEUED_DESTINATIONS_PER_SENDER; i += 1) {
+      expect(
+        realm.addMessageToQueue(`dst-${i}`, offerTo(`dst-${i}`, "s")),
+      ).toBe(true);
+    }
   });
 
   test("caps the resident bytes of a single queue", () => {

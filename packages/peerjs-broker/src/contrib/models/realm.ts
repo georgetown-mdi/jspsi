@@ -22,7 +22,9 @@ export interface IRealm {
 
   getMessageQueueById(id: string): IMessageQueue | undefined;
 
-  addMessageToQueue(id: string, message: IMessage): void;
+  /** Hold `message` for the unregistered destination `id`, answering whether
+   * it was held; a frame past any queue bound is not. */
+  addMessageToQueue(id: string, message: IMessage): boolean;
 
   clearMessageQueue(id: string): void;
 
@@ -35,9 +37,9 @@ export interface IRealm {
 // number of distinct queued destinations, the depth of any one queue, and the
 // total buffered bytes of any one queue, so an unconnected-destination spray
 // cannot exhaust memory. All three are far above any legitimate rendezvous (a
-// handful of queued frames for a momentarily-absent peer); a message dropped
-// past any bound is a no-op for the spammer and only loses a frame for a real
-// peer that is itself far past needing a reconnect hold.
+// handful of queued frames for a momentarily-absent peer). A message past any
+// bound is not held, and the relay answers its sender EXPIRE at once, as the
+// expiry sweep would have for a held one.
 export const MAX_OUTSTANDING_QUEUES = 1000;
 export const MAX_MESSAGES_PER_QUEUE = 100;
 // The message-count cap alone leaves a queue's resident ceiling at
@@ -60,10 +62,20 @@ export const MAX_MESSAGES_PER_QUEUE = 100;
 // frames are KB-scale, so a queue still holds dozens of them and the drop costs
 // only that sender's own reconnect hold. See docs/spec/CHANNEL_SECURITY.md.
 export const MAX_QUEUE_BYTES = 512 * 1024;
+// The number of distinct destinations one sender may hold frames for at once,
+// so no one sender takes more than this share of MAX_OUTSTANDING_QUEUES. A
+// rendezvous addresses the one partner it is waiting for. A destination
+// stops counting against its senders when its queue is drained or expires.
+// See docs/spec/CHANNEL_SECURITY.md.
+export const MAX_QUEUED_DESTINATIONS_PER_SENDER = 8;
 
 export class Realm implements IRealm {
   private readonly clients = new Map<string, IClient>();
   private readonly messageQueues = new Map<string, IMessageQueue>();
+  // The senders holding frames in each queue, and the number of queues each
+  // sender holds frames in, released together when a queue is cleared.
+  private readonly queueSenders = new Map<string, Set<string>>();
+  private readonly queuedDestinationCounts = new Map<string, number>();
 
   public getClientsIds(): string[] {
     return [...this.clients.keys()];
@@ -101,34 +113,60 @@ export class Realm implements IRealm {
     return this.messageQueues.get(id);
   }
 
-  public addMessageToQueue(id: string, message: IMessage): void {
+  public addMessageToQueue(id: string, message: IMessage): boolean {
     // Serialize the frame before allocating anything: the queue holds this
-    // form, so the bytes checked against the cap below are the bytes it goes on
-    // to retain. A frame carrying a non-string id field, or a payload with no
-    // JSON form, throws here (and is dropped upstream) so it never keys a queue
-    // or consumes a slot in one.
+    // form, so the bytes checked against the caps below are the bytes it goes
+    // on to retain. A frame carrying a non-string id field, or a payload with
+    // no JSON form, throws here (and is dropped upstream) so it never keys a
+    // queue or consumes a slot in one.
     const frame = serializeFrame(message);
+    const sender = frame.message.src;
 
-    let queue = this.getMessageQueueById(id);
+    const queue = this.getMessageQueueById(id);
+    const senders = this.queueSenders.get(id);
+    const senderIsNew = senders?.has(sender) !== true;
 
-    if (!queue) {
-      // Refuse a new queue past the global cap so a spray to many distinct
-      // unregistered destinations cannot allocate queues without bound.
-      if (this.messageQueues.size >= MAX_OUTSTANDING_QUEUES) return;
-      queue = new MessageQueue();
-      this.messageQueues.set(id, queue);
+    if (
+      senderIsNew &&
+      (this.queuedDestinationCounts.get(sender) ?? 0) >=
+        MAX_QUEUED_DESTINATIONS_PER_SENDER
+    ) {
+      return false;
+    }
+    if (!queue && this.messageQueues.size >= MAX_OUTSTANDING_QUEUES) {
+      return false;
+    }
+    // Cap the depth of any one queue by message count and by total buffered
+    // bytes -- the byte check keeps the resident ceiling far below the count
+    // cap times the max frame size.
+    if ((queue?.size() ?? 0) >= MAX_MESSAGES_PER_QUEUE) return false;
+    if ((queue?.byteSize() ?? 0) + frame.byteSize > MAX_QUEUE_BYTES) {
+      return false;
     }
 
-    // Cap the depth of any one queue for the same reason, by message count and
-    // by total buffered bytes -- the byte check keeps the resident ceiling far
-    // below the count cap times the max frame size.
-    if (queue.size() >= MAX_MESSAGES_PER_QUEUE) return;
-    if (queue.byteSize() + frame.byteSize > MAX_QUEUE_BYTES) return;
+    const heldBy = queue ?? new MessageQueue();
+    heldBy.addMessage(frame);
+    if (!queue) this.messageQueues.set(id, heldBy);
 
-    queue.addMessage(frame);
+    if (senderIsNew) {
+      if (senders) senders.add(sender);
+      else this.queueSenders.set(id, new Set([sender]));
+      this.queuedDestinationCounts.set(
+        sender,
+        (this.queuedDestinationCounts.get(sender) ?? 0) + 1,
+      );
+    }
+
+    return true;
   }
 
   public clearMessageQueue(id: string): void {
+    for (const sender of this.queueSenders.get(id) ?? []) {
+      const remaining = (this.queuedDestinationCounts.get(sender) ?? 1) - 1;
+      if (remaining > 0) this.queuedDestinationCounts.set(sender, remaining);
+      else this.queuedDestinationCounts.delete(sender);
+    }
+    this.queueSenders.delete(id);
     this.messageQueues.delete(id);
   }
 

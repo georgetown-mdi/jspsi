@@ -65,7 +65,15 @@ export const TransmissionHandler = ({
       const ignoredTypes = [MessageType.LEAVE, MessageType.EXPIRE];
 
       if (!ignoredTypes.includes(type) && dstId) {
-        realm.addMessageToQueue(dstId, message);
+        // A frame the realm will not hold gets the answer a held frame gets
+        // when its destination never arrives, without the wait for expiry.
+        if (!realm.addMessageToQueue(dstId, message)) {
+          handle(client, {
+            type: MessageType.EXPIRE,
+            src: dstId,
+            dst: srcId,
+          });
+        }
       } else if (type === MessageType.LEAVE && !dstId) {
         // A client that leaves the realm leaves with its socket, so no socket
         // outlives its registration.
