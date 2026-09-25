@@ -38,10 +38,11 @@ import type {
  *   mapped to an error naming that cause rather than left to become a timeout.
  * - A wrong `key` is answered `ERROR` with an "Invalid key provided" payload and
  *   closed.
- * - A message addressed to an id that is not registered is NOT delivered when
- *   that peer registers later, and no `EXPIRE` comes back. So an offer to a peer
- *   that has not arrived yet is simply lost, which is why the dialer in
- *   `weriftPeer.ts` re-sends rather than waiting on a signal.
+ * - A message addressed to an id that is not registered is held and delivered,
+ *   with every other frame held for that id, when the peer registers. Frames
+ *   still held about five seconds after the first was queued are dropped, and
+ *   each sender is sent one `EXPIRE` whose `src` is the absent id. The dialer
+ *   in `weriftPeer.ts` offers again on that `EXPIRE` rather than on a timer.
  * - A registered socket that sends nothing is closed by the broker's reaper
  *   about twenty seconds in; any traffic, heartbeat or not, resets that. Hence
  *   {@link BROKER_HEARTBEAT_INTERVAL_MS}, which is also the cadence the web

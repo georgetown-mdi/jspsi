@@ -33,7 +33,7 @@ The two parties take fixed, asymmetric roles, named by `connection.role`:
 
 | `role` | Rendezvous | Handshake role |
 | ------ | ---------- | -------------- |
-| `acceptor` | Dials: creates the data channel, sends the `OFFER`, and re-offers until answered | `initiator` |
+| `acceptor` | Dials: creates the data channel, sends the `OFFER`, and offers again on each `EXPIRE` until answered | `initiator` |
 | `inviter` | Listens: waits for an `OFFER`, answers it, and takes the channel the remote created | `responder` |
 
 Each party registers with the broker under the id its own role derives and
@@ -154,11 +154,31 @@ mapped host, so the two consumers agree on the server a locator names.
 
 The server stamps `src` itself from the connecting client's id, so an outbound
 frame contains only `type`, `payload`, and `dst`. Heartbeats (`HEARTBEAT`, no
-payload) go up every 5 s. The broker does not report an undeliverable `OFFER`
-for a peer that has not registered yet: the vendored broker holds such frames
-for about 5 s and delivers them if the peer registers in that time, and drops
-them otherwise. The dialer therefore re-offers on a timer until it is answered
-rather than waiting for a signal that never comes.
+payload) go up every 5 s.
+
+The vendored broker holds frames addressed to a peer that has not registered.
+It delivers every held frame at once if the peer registers within about 5 s of
+the first being queued. Otherwise it drops them and sends each sender one
+`EXPIRE` whose `src` is the absent peer, 5 to 6 s after that first frame.
+
+- The CLI acceptor sends its `OFFER` once, and sends it again, with the
+  candidates already sent, each time an `EXPIRE` arrives before it is answered,
+  or once the unreported-offer re-send budget (table below) passes with neither
+  an `EXPIRE` nor an answer: the vendored broker drops a frame without an
+  `EXPIRE` when its table of held queues is full. It never repeats an offer
+  the broker may still hold: PeerJS 1.5.5, given a second `OFFER` for a
+  `connectionId` it already holds, closes that connection -- emitting no
+  `close` while it is not yet open -- and builds a new one. A browser
+  inviter's app has already taken the first, so the data channel would open on
+  a connection the app never reads.
+- An `EXPIRE` after the acceptor's offer is answered is ignored; the
+  channel-open budget bounds a partner that left after answering.
+- A CLI inviter takes no action on an `EXPIRE`. It sends only in reply to an
+  `OFFER`, so an `EXPIRE` means the acceptor it answered has left the broker.
+  An acceptor that returns offers under a new `connectionId`, which the inviter
+  follows under the rule below.
+- A browser acceptor dials again, after a delay, when PeerJS reports the
+  `EXPIRE` as `peer-unavailable`, under a new `connectionId` each time.
 
 A CLI run presenting a TURN credential it minted replaces its peer connection
 each relay-credential renewal interval (table below) the partner has not yet
@@ -167,7 +187,7 @@ credential, so a rendezvous longer than the credential's lifetime still
 gathers a relay candidate. A partner that has sent its description keeps the
 connection it was negotiating with.
 
-- The acceptor's rebuilt connection offers under a new `connectionId`. The replaced connection stays open for the renewal overlap (table below), which starts when the new offer is first sent: during it the acceptor holds two live `connectionId`s, and the first one answered wins -- that connection proceeds and the other is closed and its id forgotten. When the overlap ends unanswered the replaced connection is closed and the new id is the only one. The overlap covers the broker's hold of frames for a late registrant plus one offer retry, since a browser inviter answers the first offer it receives and ignores later ones, and the replaced offer can reach it after the new one is sent.
+- The acceptor's rebuilt connection offers under a new `connectionId`. The replaced connection stays open for the renewal overlap (table below), which starts when the new offer is first sent: during it the acceptor holds two live `connectionId`s, and the first one answered wins -- that connection proceeds and the other is closed and its id forgotten. When the overlap ends unanswered the replaced connection is closed and the new id is the only one. The overlap covers the broker's hold of frames for a late registrant: a browser inviter's app takes the first connection PeerJS hands it, PeerJS answering later offers under other ids automatically, and a registrant can be handed the replaced offer and the new one together.
 - The inviter has sent nothing before the partner's `OFFER`, so its replacement is not visible on the wire.
 - Each side drops an `ANSWER` or `CANDIDATE` naming a `connectionId` it does not hold -- the acceptor's live ids, the inviter's the one of the `OFFER` it answered plus, during its own overlap, the one it answered before -- and routes a `CANDIDATE` to the connection its id names. One naming none, or reaching an inviter that has not answered yet, is taken as current. A connection that is closed drops the candidates queued for it.
 - An inviter that has answered and receives an `OFFER` naming a new `connectionId` treats it as the acceptor's rebuilt connection, since its answer can cross that rebuild in flight: it builds a new peer connection (with a freshly minted credential when the run mints one) and answers the new offer, keeping the connection it answered before open for the renewal overlap, since the acceptor may take that earlier answer instead. Whichever connection the acceptor's data channel arrives on is kept and the other closed. It follows one new `connectionId` at any time and at most one more per renewal interval, an unused interval not carrying over, and drops a surplus `OFFER`. An `OFFER` repeating the current `connectionId` is re-answered.
@@ -175,10 +195,10 @@ connection it was negotiating with.
 - The renewal line an operator sees is printed once the rebuilt connection replaces the old one, and not for a rebuild abandoned because the partner sent its description meanwhile.
 
 Message types acted on: `OPEN`, `OFFER`, `ANSWER`, `CANDIDATE`, `LEAVE`,
-`EXPIRE`, `ERROR`, `ID-TAKEN`, `INVALID-KEY`. Two of them hold operator
-meaning: `ID-TAKEN` is the symmetric-role misconfiguration (both parties set the
-same `role`), and an `ERROR` whose payload names an invalid key is the wrong
-`server.key`.
+`EXPIRE` (by the acceptor, as above), `ERROR`, `ID-TAKEN`, `INVALID-KEY`. Two
+of them hold operator meaning: `ID-TAKEN` is the symmetric-role
+misconfiguration (both parties set the same `role`), and an `ERROR` whose
+payload names an invalid key is the wrong `server.key`.
 
 ## Negotiation envelope
 
@@ -552,9 +572,9 @@ condition holds.
 | ------ | ------- | -------------- |
 | Broker registration | 30 s | Opening the signaling socket and receiving `OPEN` |
 | Rendezvous | 10 min | Both parties finding each other; human-timescale, because one operator may start well before the other |
-| Offer retry interval | 1 s | How often the dialer re-offers while unanswered |
+| Unreported offer re-send | 30 s | How long the CLI acceptor waits after sending its offer for an answer or an `EXPIRE` before sending it again; far above the broker's 5 to 6 s report of an undelivered frame, so the copy it replaces is no longer held |
 | Relay credential renewal | 30 min | How long a CLI run presenting a minted TURN credential waits for the partner's session description before it rebuilds the peer connection with a new one; half the credential's one-hour lifetime |
-| Renewal overlap | 15 s | How long a connection replaced by a relay-credential renewal, or by an inviter following a new offer, stays open and answerable; above the broker's roughly 5 s hold of frames for a late registrant plus one offer retry |
+| Renewal overlap | 15 s | How long a connection replaced by a relay-credential renewal, or by an inviter following a new offer, stays open and answerable; above the broker's roughly 5 s hold of frames for a late registrant |
 | Channel open | 30 s | The data channel opening once both descriptions are exchanged; reaching it means the peer is present but no candidate pair worked |
 | Parked receive | 1 h | Peer silence on an open channel; it bounds the peer's single-threaded PSI compute, which sends no keepalive while it runs |
 | Close drain | 5 min | The clean close's wait above -- the CLI's acknowledgement drain, the web's wait for the peer's close -- sized from the largest admissible frame and the measured send rate |

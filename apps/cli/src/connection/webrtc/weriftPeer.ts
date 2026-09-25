@@ -46,17 +46,19 @@ import type {
  *
  * The two roles are asymmetric and fixed by what the web app already does, so a
  * CLI peer can meet a browser one. The ACCEPTOR dials: it creates the data
- * channel, offers, and re-offers until it is answered. The INVITER listens: it
- * waits for an offer, answers it, and takes the channel the remote created.
+ * channel, offers, and offers again each time the broker reports the offer
+ * expired undelivered, until it is answered. The INVITER listens: it waits for
+ * an offer, answers it, and takes the channel the remote created.
  * Both derive the same pair of rendezvous ids from the shared secret
  * (`deriveRendezvousPeerId`), so neither has to be told the other's address.
  *
- * Three measured werift behaviours shape this module -- local candidates are
- * queued until this side's description is sent to the broker, a configured
+ * Two measured werift behaviours shape this module -- local candidates are
+ * queued until this side's description is sent to the broker, and a configured
  * `iceServers` list replaces rather than extends werift's built-in STUN
- * default, and the broker drops an undeliverable offer silently, so the
- * dialer re-offers on a timer -- each with its assumptions and
- * re-verification in docs/spec/DEPENDENCY_PINS.md.
+ * default -- each with its assumptions and re-verification in
+ * docs/spec/DEPENDENCY_PINS.md. The broker's hold and expiry of frames for an
+ * unregistered peer, which decides when the dialer offers again, is in
+ * docs/spec/WEBRTC_TRANSPORT.md.
  */
 
 const log = getLogger("webrtc");
@@ -88,17 +90,23 @@ export const MAX_CONNECTION_ID_LENGTH = 64;
  */
 export const MAX_PENDING_REMOTE_CANDIDATES = 128;
 
-/** How often the dialer re-sends its offer while the peer has not answered. */
-export const DEFAULT_OFFER_RETRY_INTERVAL_MS = 1_000;
+/**
+ * How long the acceptor waits after sending its offer for an answer or the
+ * broker's `EXPIRE` before sending it again anyway. The vendored broker reports
+ * an undelivered offer within about 6 s, but drops a frame without reporting it
+ * once its table of held queues is full. This is far enough past that report
+ * that the copy it replaces is no longer held.
+ */
+export const DEFAULT_UNREPORTED_OFFER_RESEND_MS = 30_000;
 
 /**
  * How long a connection replaced by a renewal, or by an inviter following a new
  * offer, stays open and negotiable after its replacement is offered or built.
  * A browser inviter adopts the first offer it receives; its client still
  * answers later ones, but the app never uses those connections. The vendored
- * broker replays frames it held for a late registrant (about 5 s), so an
- * answer to the old offer can arrive after the new one is sent. The window
- * covers that replay plus one offer retry, with margin.
+ * broker holds frames for a late registrant for about 5 s and delivers them
+ * all when it registers, so an answer to the old offer can arrive after the
+ * new one is sent. The window covers that hold, with margin.
  */
 export const RENEWAL_OVERLAP_MS = 15_000;
 
@@ -297,9 +305,10 @@ export interface WebRtcPeerOptions {
    * built from `iceServers` is kept for the whole wait.
    */
   iceServerRenewal?: IceServerRenewal;
-  offerRetryIntervalMs?: number;
   rendezvousTimeoutMs?: number;
   channelOpenTimeoutMs?: number;
+  /** See {@link DEFAULT_UNREPORTED_OFFER_RESEND_MS}. */
+  unreportedOfferResendMs?: number;
   /** How long a replaced connection stays negotiable; see {@link RENEWAL_OVERLAP_MS}. */
   renewalOverlapMs?: number;
   signal?: AbortSignal;
@@ -754,9 +763,9 @@ export async function openWebRtcPeerSession(
     iceServers,
     iceTransportPolicy,
     iceServerRenewal,
-    offerRetryIntervalMs = DEFAULT_OFFER_RETRY_INTERVAL_MS,
     rendezvousTimeoutMs = DEFAULT_RENDEZVOUS_TIMEOUT_MS,
     channelOpenTimeoutMs = DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
+    unreportedOfferResendMs = DEFAULT_UNREPORTED_OFFER_RESEND_MS,
     renewalOverlapMs = RENEWAL_OVERLAP_MS,
     signal,
     peerConnectionFactory,
@@ -800,9 +809,9 @@ export async function openWebRtcPeerSession(
     peer: await buildPeer(iceServers),
     role,
     remoteId,
-    offerRetryIntervalMs,
     rendezvousTimeoutMs,
     channelOpenTimeoutMs,
+    unreportedOfferResendMs,
     renewalOverlapMs,
     iceTransportPolicy,
     rebuildPeer,
@@ -905,9 +914,9 @@ interface NegotiationOptions {
   peer: RTCPeerConnection;
   role: RendezvousRole;
   remoteId: string;
-  offerRetryIntervalMs: number;
   rendezvousTimeoutMs: number;
   channelOpenTimeoutMs: number;
+  unreportedOfferResendMs: number;
   renewalOverlapMs: number;
   /** The policy the peer connection was built with; named in a failure. */
   iceTransportPolicy?: IceTransportPolicy;
@@ -986,7 +995,7 @@ class Negotiation {
   private startedAt = 0;
   /** Local candidates gathered before this side's description reached the broker. */
   private readonly pendingLocalCandidates: Array<Record<string, unknown>> = [];
-  /** Every local candidate sent so far, re-sent with each retried offer. */
+  /** Every local candidate sent so far, re-sent with each re-sent offer. */
   private readonly sentLocalCandidates: Array<Record<string, unknown>> = [];
   /** Remote candidates that arrived before a remote description could apply them. */
   private readonly pendingRemoteCandidates: Array<Record<string, unknown>> = [];
@@ -1259,10 +1268,7 @@ class Negotiation {
     // unhandled.
     opened.catch(() => {});
 
-    if (role === "acceptor") {
-      await this.openAndOffer();
-      this.startOfferRetries();
-    }
+    if (role === "acceptor") await this.openAndOffer();
     if (renewalAfterMs !== undefined)
       this.renewalTimer = setInterval(() => void this.renew(), renewalAfterMs);
 
@@ -1302,7 +1308,7 @@ class Negotiation {
       clearInterval(this.renewalTimer);
       this.dropRetired();
       this.stopChannelOpenDeadline();
-      this.stopOfferRetries();
+      this.stopUnreportedOfferResend();
       signal?.removeEventListener("abort", abort);
     }
   }
@@ -1345,6 +1351,9 @@ class Negotiation {
       case BROKER_MESSAGE.candidate:
         await this.onCandidate(message);
         return;
+      case BROKER_MESSAGE.expire:
+        this.resendOffer();
+        return;
       case BROKER_MESSAGE.leave:
         this.fail(
           new ConnectionError(
@@ -1370,9 +1379,8 @@ class Negotiation {
       this.answered = true;
       if (offeredId !== undefined) this.connectionId = offeredId;
     } else if (offeredId === undefined || offeredId === this.connectionId) {
-      // The dialer re-offers until it is answered, so a repeat means its answer
-      // did not land yet; re-send rather than rebuild, which would discard the
-      // connection already forming.
+      // A repeat means the dialer has not seen this answer yet; re-send rather
+      // than rebuild, which would discard the connection already forming.
       if (this.localDescriptionSent) this.resendAnswer();
       return;
     } else {
@@ -1463,7 +1471,7 @@ class Negotiation {
     // second is caught as a terminal failure, letting a counterparty fail the
     // acceptor's rendezvous by answering twice.
     this.answerAccepted = true;
-    this.stopOfferRetries();
+    this.stopUnreportedOfferResend();
     if (retired === undefined) this.dropRetired();
     else this.promoteRetired(retired);
     await this.currentPeer.setRemoteDescription({
@@ -1539,6 +1547,10 @@ class Negotiation {
         "transport",
       );
     }
+    this.sendOffer(local);
+  }
+
+  private sendOffer(local: { type: string; sdp: string }): void {
     this.broker?.send({
       type: BROKER_MESSAGE.offer,
       dst: this.options.remoteId,
@@ -1553,6 +1565,12 @@ class Negotiation {
       },
     });
     this.flushLocalCandidates();
+    this.stopUnreportedOfferResend();
+    if (this.finished) return;
+    this.unreportedOfferResendTimer = setTimeout(
+      () => this.resendOffer(),
+      this.options.unreportedOfferResendMs,
+    );
   }
 
   private sendAnswer(): void {
@@ -1577,40 +1595,36 @@ class Negotiation {
     }
   }
 
-  private offerRetryTimer: ReturnType<typeof setInterval> | undefined;
+  private unreportedOfferResendTimer: ReturnType<typeof setTimeout> | undefined;
 
   /**
-   * Re-send the offer, and every candidate already gathered, on a timer. The
-   * broker drops a message addressed to a peer that is not registered and says
-   * nothing about it, so a dialer that offered before its partner arrived has no
-   * signal to wait on -- only a repeat that lands once the partner is there. A
-   * repeat has the same connection id, which a browser PeerJS peer that
-   * already has the connection ignores.
+   * Send the offer and its candidates again, on the broker's `EXPIRE` or once
+   * {@link DEFAULT_UNREPORTED_OFFER_RESEND_MS} passes with neither it nor an
+   * answer. Never while the broker may still hold the last copy: a browser
+   * PeerJS peer handed two copies of one connection id closes the connection
+   * its app already took and builds another. An inviter's `EXPIRE` means the
+   * acceptor it answered has left, and it waits for that partner's next offer.
    */
-  private startOfferRetries(): void {
-    this.offerRetryTimer = setInterval(() => {
-      if (this.remoteDescriptionSet || this.failure !== undefined) return;
-      void this.offer().catch((err: unknown) =>
-        this.fail(
-          err instanceof ConnectionError
-            ? err
-            : new ConnectionError(
-                "the WebRTC offer could not be re-sent to the exchange partner",
-                "transport",
-                { cause: err },
-              ),
-        ),
-      );
-      for (const candidate of this.sentLocalCandidates) {
-        this.sendCandidate(candidate);
-      }
-    }, this.options.offerRetryIntervalMs);
+  private resendOffer(): void {
+    if (
+      this.options.role !== "acceptor" ||
+      this.answerAccepted ||
+      this.finished ||
+      !this.localDescriptionSent
+    )
+      return;
+    const local = this.currentPeer.localDescription;
+    if (local === undefined || local === null) return;
+    this.sendOffer(local);
+    for (const candidate of this.sentLocalCandidates) {
+      this.sendCandidate(candidate);
+    }
   }
 
-  private stopOfferRetries(): void {
-    if (this.offerRetryTimer === undefined) return;
-    clearInterval(this.offerRetryTimer);
-    this.offerRetryTimer = undefined;
+  private stopUnreportedOfferResend(): void {
+    if (this.unreportedOfferResendTimer === undefined) return;
+    clearTimeout(this.unreportedOfferResendTimer);
+    this.unreportedOfferResendTimer = undefined;
   }
 
   /**
@@ -1658,7 +1672,6 @@ class Negotiation {
     this.channel = channel;
     const settleOpen = (): void => {
       this.stopChannelOpenDeadline();
-      this.stopOfferRetries();
       this.settle?.resolve(channel);
     };
     if (channel.readyState === "open") {

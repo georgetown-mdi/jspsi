@@ -243,9 +243,9 @@ afterEach(async () => {
 async function startRendezvous(options: {
   role: "inviter" | "acceptor";
   candidatesDuringSetLocal?: Array<Record<string, unknown>>;
-  offerRetryIntervalMs?: number;
   rendezvousTimeoutMs?: number;
   channelOpenTimeoutMs?: number;
+  unreportedOfferResendMs?: number;
   renewalOverlapMs?: number;
   iceTransportPolicy?: "all" | "relay";
   signal?: AbortSignal;
@@ -291,9 +291,9 @@ async function startRendezvous(options: {
     role: options.role,
     sharedSecret,
     iceServers: [{ urls: "stun:127.0.0.1:3478" }],
-    offerRetryIntervalMs: options.offerRetryIntervalMs ?? 60_000,
     rendezvousTimeoutMs: options.rendezvousTimeoutMs ?? 10_000,
     channelOpenTimeoutMs: options.channelOpenTimeoutMs ?? 10_000,
+    unreportedOfferResendMs: options.unreportedOfferResendMs,
     renewalOverlapMs: options.renewalOverlapMs,
     iceTransportPolicy: options.iceTransportPolicy,
     signal:
@@ -418,51 +418,106 @@ test("an end-of-candidates event sends nothing", async () => {
   await session;
 });
 
-// --- the retry the broker's silence forces ----------------------------------
+// --- offering again after the broker's EXPIRE -----------------------------
 
-test("the offer is re-sent while the partner has not answered", async () => {
-  // The broker neither queues a message for an unregistered peer nor reports
-  // that it dropped one, so a repeat is the dialer's only route.
-  const { socket, peer, session } = await startRendezvous({
+test("the acceptor offers again on the broker's EXPIRE and not on a timer", async () => {
+  // A browser PeerJS peer handed two copies of one connection id closes the
+  // connection its app already took, so no copy is sent while the broker may
+  // still hold the last one.
+  holdRenewalClock();
+  const { socket, peer, session, inviterId } = await startRendezvous({
     role: "acceptor",
     candidatesDuringSetLocal: [CANDIDATE_A],
-    offerRetryIntervalMs: 20,
   });
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  expect(socket.ofType(BROKER_MESSAGE.offer).length).toBeGreaterThan(1);
-  // Each repeat includes the candidates again: the ones already sent were
-  // dropped along with the offer they belonged to.
-  expect(socket.ofType(BROKER_MESSAGE.candidate).length).toBeGreaterThan(1);
-  // Same connection id throughout, which a peer that already has the
-  // connection ignores rather than renegotiating.
-  const ids = new Set(
-    socket
-      .ofType(BROKER_MESSAGE.offer)
-      .map((frame) => (frame.payload as { connectionId: string }).connectionId),
-  );
-  expect(ids.size).toBe(1);
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(1);
+  expect(socket.ofType(BROKER_MESSAGE.candidate)).toHaveLength(1);
+
+  socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
+  const offers = socket.ofType(BROKER_MESSAGE.offer);
+  expect(offers).toHaveLength(2);
+  expect(offers[1].payload).toEqual(offers[0].payload);
+  // The broker dropped the candidates with the offer, so they go again after it.
+  const resent = socket.sent.slice(socket.sent.indexOf(offers[1]) + 1);
+  expect(
+    resent.map((frame) => (frame.payload as { candidate: unknown }).candidate),
+  ).toEqual([CANDIDATE_A]);
+  expect(peer.channels).toHaveLength(1);
   peer.channels[0].open();
   await session;
 });
 
-test("the retry stops once the answer lands", async () => {
+test("an offer neither answered nor reported expired is sent again after the fallback", async () => {
   const { socket, peer, session, inviterId } = await startRendezvous({
     role: "acceptor",
-    offerRetryIntervalMs: 20,
+    unreportedOfferResendMs: 200,
+  });
+  await until(() => socket.ofType(BROKER_MESSAGE.offer).length === 2);
+  // A re-send on EXPIRE restarts the wait rather than adding a second timer.
+  socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(3);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(3);
+  // The answer stops the fallback before its next turn.
+  socket.deliver({
+    type: BROKER_MESSAGE.answer,
+    src: inviterId,
+    payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(3);
+  peer.channels[0].open();
+  await session;
+});
+
+test("an EXPIRE from another id sends nothing", async () => {
+  const { socket, peer, session } = await startRendezvous({
+    role: "acceptor",
+  });
+  socket.deliver({ type: BROKER_MESSAGE.expire, src: "someone-else" });
+  socket.deliver({ type: BROKER_MESSAGE.expire });
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(1);
+  peer.channels[0].open();
+  await session;
+});
+
+test("an EXPIRE after the answer lands sends nothing", async () => {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
   });
   socket.deliver({
     type: BROKER_MESSAGE.answer,
     src: inviterId,
     payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
   });
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  const afterAnswer = socket.ofType(BROKER_MESSAGE.offer).length;
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(afterAnswer);
-  expect(peer.remoteDescriptions).toEqual([
-    { type: "answer", sdp: "v=0\r\nanswer\r\n" },
-  ]);
+  await until(() => peer.remoteDescriptions.length === 1);
+  socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(1);
   peer.channels[0].open();
+  await session;
+});
+
+test("an inviter sends nothing on an EXPIRE and keeps its connection", async () => {
+  const { socket, peers, session, acceptorId } = await startRendezvous({
+    role: "inviter",
+  });
+  socket.deliver({
+    type: BROKER_MESSAGE.offer,
+    src: acceptorId,
+    payload: {
+      sdp: { type: "offer", sdp: "v=0\r\noffer\r\n" },
+      connectionId: "dc_partner",
+    },
+  });
+  await until(() => answeredConnectionIds(socket).length === 1);
+  const sentBefore = socket.sent.length;
+  socket.deliver({ type: BROKER_MESSAGE.expire, src: acceptorId });
+  expect(socket.sent).toHaveLength(sentBefore);
+  expect(peers).toHaveLength(1);
+  expect(peers[0].closeCalls).toBe(0);
+  const channel = new FakeChannel("dc_partner");
+  peers[0].ondatachannel?.({ channel });
+  channel.open();
   await session;
 });
 
@@ -1231,11 +1286,11 @@ async function until(condition: () => boolean): Promise<void> {
 }
 
 /**
- * Put the renewal interval, the offer retries and the wait a renewal reports on
- * one clock the test advances, called before the rendezvous starts. A renewal
- * then fires only when the test moves time on, so a slow runner cannot land a
- * second one while the test works through the first, and the reported wait is
- * exact rather than a wall-clock reading a real timer can fire ahead of.
+ * Put the renewal interval and the wait a renewal reports on one clock the
+ * test advances, called before the rendezvous starts. A renewal then fires
+ * only when the test moves time on, so a slow runner cannot land a second one
+ * while the test works through the first, and the reported wait is exact
+ * rather than a wall-clock reading a real timer can fire ahead of.
  * `setTimeout` stays real for the polling helpers and the overlap.
  */
 function holdRenewalClock(): void {
@@ -1496,7 +1551,6 @@ test("an acceptor that renews while its first answer is in flight still connects
   const acceptor = await startRendezvous({
     role: "acceptor",
     sharedSecret,
-    offerRetryIntervalMs: 20,
     iceServerRenewal: { afterMs: 80, resolve: acceptorResolve },
   });
   const inviter = await startRendezvous({
@@ -1531,12 +1585,13 @@ test("an acceptor that renews while its first answer is in flight still connects
     (frame) => holdAnswers && frame.type === BROKER_MESSAGE.answer,
   );
 
-  // The first retry reaches the inviter through the relay; the renewal after.
-  await vi.advanceTimersByTimeAsync(20);
+  // The first offer went out before the relay existed; the broker's EXPIRE
+  // sends it again through the relay, and the renewal follows.
+  acceptor.socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
   await until(() => heldAnswers.length > 0);
   const [staleId] = offeredConnectionIds(acceptor.socket);
   expect(answeredConnectionIds(inviter.socket)[0]).toBe(staleId);
-  await vi.advanceTimersByTimeAsync(60);
+  await vi.advanceTimersByTimeAsync(80);
   await until(() => new Set(offeredConnectionIds(acceptor.socket)).size === 2);
   const freshId = [...new Set(offeredConnectionIds(acceptor.socket))][1];
 
