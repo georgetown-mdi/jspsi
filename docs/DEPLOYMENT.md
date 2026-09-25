@@ -436,7 +436,7 @@ Two folders on one share take **one** network-share volume, over the folder that
 
 **What a mis-owned mount looks like.** The failure names `EACCES` and the path it could not write. Those paths are relative -- the key file and config default to `./.alcove.key` and `./alcove.yaml`, resolved against the container's working directory -- and where the failure lands depends on the command:
 
-- `alcove exchange` stops up front, at the key-file preflight, with `keyFilePath parent directory . is not writable: EACCES: permission denied, open '.alcove-write-probe-<pid>-<hex>'. Restore write access ...`. It stops there by design, before any key exchange, so nothing is half-done.
+- `alcove exchange` stops up front, at the key-file preflight, with `key file parent directory . is not writable: EACCES: permission denied, open '.alcove-write-probe-<pid>-<hex>'. Restore write access ...`. It stops there by design, before any key exchange, so nothing is half-done.
 - `alcove accept` has no such preflight: the terms are displayed and confirmed, and the write that follows fails with `EACCES: permission denied, open './alcove.yaml.tmp.<pid>'` and exit 69. Nothing is spent -- the invitation is still good -- but the ownership has to be fixed and `accept` run again.
 - An existing `alcove.yaml` that the container cannot read fails earlier still, at config load: `config file ./alcove.yaml could not be read: EACCES: permission denied, open './alcove.yaml'`. A file owned by root rather than uid 1000 is what produces this, and the recursive `chown` above is what clears it.
 

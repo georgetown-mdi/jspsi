@@ -2,7 +2,31 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { getLogger } from "@alcove/core";
+import {
+  getLogger,
+  keepOperatorSuppliedText,
+  messageWithOperatorText,
+  operatorSuppliedText,
+} from "@alcove/core";
+
+import { ownerOnlyTempPath } from "./fileUtils";
+
+/** The consequence every pre-flight rejection states. */
+const FAILS_AFTER_KEY_EXCHANGE =
+  "otherwise saving the rotated key would fail after the key exchange and " +
+  "both parties would need to re-invite";
+
+/** Refuse a key path whose own name, or temp sibling `name`, is too long. */
+function nameTooLongError(keyFilePath: string, name: string): Error {
+  const which =
+    name === keyFilePath
+      ? messageWithOperatorText`its file name`
+      : messageWithOperatorText`the temporary file written beside it (${operatorSuppliedText(name)})`;
+  const message = messageWithOperatorText`key file path ${operatorSuppliedText(
+    keyFilePath,
+  )} is too long: ${which} exceeds the filesystem's name limit (ENAMETOOLONG). Choose a shorter key file name before running the exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`;
+  return keepOperatorSuppliedText(new Error(message.text), message);
+}
 
 /**
  * Pre-flight validation for an authenticated exchange's key-file path, run
@@ -19,6 +43,7 @@ import { getLogger } from "@alcove/core";
  * error strings -- when:
  *
  * - `keyFilePath` is missing or whitespace-only;
+ * - the path, or the temp name the write creates beside it, is too long;
  * - the path already exists but is a directory or other non-regular node;
  * - the parent exists but is not a directory, or cannot be created, written,
  *   or (on POSIX) read.
@@ -38,7 +63,10 @@ export function preflightKeyFilePath(
   // named " " in the current directory instead of failing clearly; trimming
   // matches what the caller must hand to saveKeyFile (see the JSDoc above).
   if (typeof keyFilePath !== "string" || keyFilePath.trim().length === 0)
-    throw new Error("authentication must include a non-empty keyFilePath");
+    throw new Error(
+      "the key file path is empty. Name the key file with --key-file " +
+        `before running the exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`,
+    );
   const kfp = keyFilePath.trim();
   // Accepted as-is if it is a regular file or a symlink (to anything,
   // including a directory): saveKeyFile writes a temp file and renames it
@@ -59,6 +87,7 @@ export function preflightKeyFilePath(
     // (above all ENAMETOOLONG, which those checks do not reproduce) is
     // rethrown, so pre-flight does not wrongly pass and leave saveKeyFile to
     // fail post-handshake, after the secret has rotated.
+    if (code === "ENAMETOOLONG") throw nameTooLongError(kfp, kfp);
     if (
       code !== "ENOENT" &&
       code !== "ENOTDIR" &&
@@ -67,6 +96,16 @@ export function preflightKeyFilePath(
     )
       throw err;
   }
+  // The write's first act is on `<name>.tmp.<pid>`, a longer final component
+  // than the key path's own, so a name within a few bytes of the limit passes
+  // the lstat above and fails there after the secret rotated.
+  const tempPath = ownerOnlyTempPath(kfp);
+  try {
+    fs.lstatSync(tempPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENAMETOOLONG")
+      throw nameTooLongError(kfp, tempPath);
+  }
   // The directory/special-node rejection runs outside the try because it
   // applies only when lstat SUCCEEDED and returned a stat (a non-file, non-
   // symlink node); gating it on targetStat being set keeps the "lstat threw"
@@ -74,13 +113,13 @@ export function preflightKeyFilePath(
   // concerns.
   if (targetStat && !targetStat.isFile() && !targetStat.isSymbolicLink())
     throw new Error(
-      `keyFilePath ${kfp} exists but is not a regular file (` +
+      `key file path ${kfp} exists but is not a regular file (` +
         `${
           targetStat.isDirectory()
             ? "directory"
             : "non-regular filesystem entry"
-        }); saveKeyFile would fail after a successful key exchange. ` +
-        "Remove or rename it before running the exchange.",
+        }). Remove or rename it before running the exchange; ` +
+        `${FAILS_AFTER_KEY_EXCHANGE}.`,
     );
   // Pre-validate the parent: create it if missing (mirroring saveKeyFile's
   // `mkdirSync({ recursive: true })`) and confirm it is a directory, so
@@ -97,16 +136,18 @@ export function preflightKeyFilePath(
     // misconfiguration and is reported with a clearer message.
     if ((err as NodeJS.ErrnoException).code !== "ENOENT")
       throw new Error(
-        `keyFilePath parent directory ${parent} is not accessible: ` +
-          (err instanceof Error ? err.message : String(err)),
+        `key file parent directory ${parent} is not accessible: ` +
+          (err instanceof Error ? err.message : String(err)) +
+          ". Make the directory reachable, or choose a key file path " +
+          `elsewhere, before running the exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`,
       );
     try {
       fs.mkdirSync(parent, { recursive: true });
       // Logged so a directory that appeared is explained even if the run
       // fails afterwards (see the JSDoc above).
       log.info(
-        `created keyFilePath parent directory ${parent} (mirrors ` +
-          "saveKeyFile's recursive mkdir; left in place on failure)",
+        `created key file parent directory ${parent} (left in place if the ` +
+          "exchange fails)",
       );
       parentStat = fs.statSync(parent);
     } catch (createErr) {
@@ -120,15 +161,19 @@ export function preflightKeyFilePath(
         /* lstat failure: parent truly absent; default message applies. */
       }
       throw new Error(
-        `keyFilePath parent directory ${parent} cannot be created${hint}: ` +
-          (createErr instanceof Error ? createErr.message : String(createErr)),
+        `key file parent directory ${parent} cannot be created${hint}: ` +
+          (createErr instanceof Error ? createErr.message : String(createErr)) +
+          ". Create the directory, or choose a key file path in an existing " +
+          `writable directory, before running the exchange; ` +
+          `${FAILS_AFTER_KEY_EXCHANGE}.`,
       );
     }
   }
   if (!parentStat.isDirectory())
     throw new Error(
-      `keyFilePath parent ${parent} exists but is not a directory; ` +
-        "saveKeyFile would fail after a successful key exchange",
+      `key file parent ${parent} exists but is not a directory. Choose a key ` +
+        "file path inside a directory before running the exchange; " +
+        `${FAILS_AFTER_KEY_EXCHANGE}.`,
     );
   // Best-effort writability check for the common case of a read-only parent
   // before the secret rotates: fs.accessSync(W_OK) is unreliable here
@@ -173,13 +218,12 @@ export function preflightKeyFilePath(
     );
   } catch (err) {
     throw new Error(
-      `keyFilePath parent directory ${parent} is not writable: ` +
+      `key file parent directory ${parent} is not writable: ` +
         (err instanceof Error ? err.message : String(err)) +
         ". Restore write access -- the directory's owner as well as its " +
         "permissions, since in a container Alcove runs as its own account " +
         "and a mounted directory keeps the owner it has outside -- before " +
-        "running the exchange, otherwise saveKeyFile would fail after a " +
-        "successful key exchange and both parties would need to re-invite.",
+        `running the exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`,
     );
   } finally {
     if (probeFd !== undefined) {
@@ -209,11 +253,10 @@ export function preflightKeyFilePath(
       parentReadFd = fs.openSync(parent, "r");
     } catch (err) {
       throw new Error(
-        `keyFilePath parent directory ${parent} is not readable: ` +
+        `key file parent directory ${parent} is not readable: ` +
           (err instanceof Error ? err.message : String(err)) +
-          ". Restore read permission before running the exchange, otherwise " +
-          "saveKeyFile's post-write directory fsync would fail after a " +
-          "successful key exchange and both parties would need to re-invite.",
+          ". Restore read permission on the directory before running the " +
+          `exchange; ${FAILS_AFTER_KEY_EXCHANGE}.`,
       );
     } finally {
       if (parentReadFd !== undefined) {

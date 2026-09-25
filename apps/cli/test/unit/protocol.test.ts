@@ -522,7 +522,7 @@ test("rejects before opening a connection when keyFilePath is whitespace-only", 
       verbosity: -1,
       loggerName: "test",
     }),
-  ).rejects.toThrow("non-empty keyFilePath");
+  ).rejects.toThrow("key file path is empty");
 });
 
 test("rejects before opening a connection when saveIntent is passed on an authenticated exchange", async () => {
@@ -3241,7 +3241,7 @@ test("signing with records off warns on both the log and the event stream", asyn
         undefined,
         true,
       ),
-    ).rejects.toThrow("non-empty keyFilePath");
+    ).rejects.toThrow("key file path is empty");
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
   }
@@ -3264,7 +3264,7 @@ test("a signing run that writes its record does not warn", async () => {
         recordFile: path.join(tmpDir, "rec.json"),
       },
     ),
-  ).rejects.toThrow("non-empty keyFilePath");
+  ).rejects.toThrow("key file path is empty");
 
   expect(mockState.warnings).not.toContain(SIGNING_WITHOUT_RECORD_WARNING);
 });
@@ -3272,7 +3272,7 @@ test("a signing run that writes its record does not warn", async () => {
 test("an unsigned run with records off does not warn", async () => {
   // --no-record alone is an ordinary choice: nothing is left unpairable by it.
   await expect(runThroughWarnGate(null)).rejects.toThrow(
-    "non-empty keyFilePath",
+    "key file path is empty",
   );
 
   expect(mockState.warnings).not.toContain(SIGNING_WITHOUT_RECORD_WARNING);

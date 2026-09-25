@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import type { getLogger } from "@alcove/core";
 
+import { writeFileOwnerOnly } from "../../src/fileUtils";
 import { preflightKeyFilePath } from "../../src/keyFilePreflight";
 
 // Minimal logger stub: the helper only calls log.info (the parent-created
@@ -37,18 +38,18 @@ test("rejects a missing (non-string) keyFilePath", () => {
   const { log } = makeLogger();
   expect(() =>
     preflightKeyFilePath(undefined as unknown as string, log),
-  ).toThrow("non-empty keyFilePath");
+  ).toThrow("key file path is empty");
 });
 
 test("rejects an empty keyFilePath", () => {
   const { log } = makeLogger();
-  expect(() => preflightKeyFilePath("", log)).toThrow("non-empty keyFilePath");
+  expect(() => preflightKeyFilePath("", log)).toThrow("key file path is empty");
 });
 
 test("rejects a whitespace-only keyFilePath", () => {
   const { log } = makeLogger();
   expect(() => preflightKeyFilePath("   ", log)).toThrow(
-    "non-empty keyFilePath",
+    "key file path is empty",
   );
 });
 
@@ -133,7 +134,7 @@ test("creates the parent directory when it does not yet exist", () => {
   expect(fs.existsSync(createdParent)).toBe(true);
   // The mkdir side effect is shown to the user.
   expect(
-    infos.some((m) => m.includes("created keyFilePath parent directory")),
+    infos.some((m) => m.includes("created key file parent directory")),
   ).toBe(true);
 });
 
@@ -355,3 +356,72 @@ test("accepts an existing regular file at the key path", () => {
   // Only the pre-existing file remains; the probe left nothing behind.
   expect(fs.readdirSync(dir)).toEqual(["existing.key"]);
 });
+
+// --- temp-name length and message content -----------------------------------
+
+const REMEDY_AND_CONSEQUENCE =
+  /before running the exchange; otherwise saving the rotated key would fail after the key exchange/;
+
+test.skipIf(process.platform === "win32")(
+  "rejects a key name whose temp sibling exceeds NAME_MAX though the name itself fits",
+  () => {
+    const { log } = makeLogger();
+    const leaf = "k".repeat(256 - ".tmp.".length - String(process.pid).length);
+    expect(leaf.length).toBeLessThanOrEqual(255);
+    const keyFilePath = path.join(dir, leaf);
+    expect(() => writeFileOwnerOnly(keyFilePath, "{}")).toThrow(/ENAMETOOLONG/);
+    expect(() => preflightKeyFilePath(keyFilePath, log)).toThrow(
+      /temporary file written beside it .*Choose a shorter key file name/,
+    );
+    expect(() => preflightKeyFilePath(keyFilePath, log)).toThrow(
+      REMEDY_AND_CONSEQUENCE,
+    );
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "every portable rejection states the remedy and the post-exchange failure",
+  () => {
+    const { log } = makeLogger();
+    const keyAsDir = path.join(dir, "key-dir");
+    fs.mkdirSync(keyAsDir);
+    const fileParent = path.join(dir, "file-parent");
+    fs.writeFileSync(fileParent, "");
+    for (const keyFilePath of [
+      "",
+      keyAsDir,
+      path.join(fileParent, "key.json"),
+      path.join(fileParent, "sub", "key.json"),
+      path.join(dir, "k".repeat(300)),
+    ])
+      expect(() => preflightKeyFilePath(keyFilePath, log)).toThrow(
+        REMEDY_AND_CONSEQUENCE,
+      );
+  },
+);
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "every permission rejection states the remedy and the post-exchange failure",
+  () => {
+    const { log } = makeLogger();
+    const readOnlyDir = path.join(dir, "readonly");
+    const noReadDir = path.join(dir, "no-read");
+    fs.mkdirSync(readOnlyDir);
+    fs.mkdirSync(noReadDir);
+    fs.chmodSync(readOnlyDir, 0o555);
+    fs.chmodSync(noReadDir, 0o300);
+    try {
+      for (const keyFilePath of [
+        path.join(readOnlyDir, "key.json"),
+        path.join(readOnlyDir, "sub", "key.json"),
+        path.join(noReadDir, "key.json"),
+      ])
+        expect(() => preflightKeyFilePath(keyFilePath, log)).toThrow(
+          REMEDY_AND_CONSEQUENCE,
+        );
+    } finally {
+      fs.chmodSync(readOnlyDir, 0o755);
+      fs.chmodSync(noReadDir, 0o755);
+    }
+  },
+);

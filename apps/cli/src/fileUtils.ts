@@ -531,6 +531,15 @@ function fsyncParentDir(filePath: string): void {
 }
 
 /**
+ * The sibling temp path {@link writeFileOwnerOnly} creates for `destPath` in
+ * this process before renaming or linking it into place. The key-file
+ * pre-flight checks this name too, since it is longer than `destPath`'s own.
+ */
+export function ownerOnlyTempPath(destPath: string): string {
+  return `${destPath}.tmp.${process.pid}`;
+}
+
+/**
  * Atomically write `content` to `destPath` with owner-only permissions: `0600`
  * on Unix, a restricted ACL (current user, inheritance stripped) on Windows.
  * Writes to a sibling temp file and renames so the destination is never
@@ -561,7 +570,7 @@ export function writeFileOwnerOnly(
   // cross-filesystem rename (EXDEV) is not attempted. The PID-qualified
   // suffix keeps concurrent invocations from clobbering each other's temp
   // file.
-  const tmp = `${destPath}.tmp.${process.pid}`;
+  const tmp = ownerOnlyTempPath(destPath);
   // Remove any stale temp file left by a previous crashed run so the subsequent
   // create always produces a fresh file rather than reusing one whose
   // permissions may not match what we are about to set.

@@ -314,7 +314,10 @@ write with):
    `ENOENT`, `ENOTDIR`, `EACCES`, and `ELOOP` continue the pre-flight; anything
    else -- `ENAMETOOLONG` above all -- ends it there, because a pre-flight that
    passed on such a path would leave the write to fail after the secret had
-   rotated.
+   rotated. The temp name the write creates first, `<name>.tmp.<pid>`, is
+   examined for `ENAMETOOLONG` as well: its final component is longer than the
+   key path's own, so a name within a few bytes of the limit passes the first
+   check and would fail at the write.
 4. **The parent directory is created when it is absent**, recursively, mirroring
    what the write itself would do. This is a side effect the pre-flight does not
    unwind: the creation is logged and stays even where the handshake or the
