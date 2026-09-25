@@ -567,7 +567,7 @@ test("assertLeadingLineWithinByteCeiling: a no-terminator file over a ceiling ab
 
 test("loadCSVFile: a browser File with a no-newline leading line over the ceiling fails fast", async () => {
   // Wires the pre-read into loadCSVFile end to end: the File the web caller passes
-  // rejects before parsing, so PapaParse's FileReader path is never reached. This
+  // rejects before parsing, so openCSVSource never opens a decode source. This
   // bounds the web path, which exposes no `data` events for the stream guard.
   const ceiling = 512;
   const file = new File(["x".repeat(ceiling * 2)], "data.csv", {

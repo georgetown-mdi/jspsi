@@ -83,16 +83,16 @@ describe("loadCSVFile multi-chunk parsing", () => {
     });
   });
 
-  test("reads a multi-byte character that falls on a chunk boundary", async () => {
-    // Rows of 3-byte characters past one LocalChunkSize, with the header
-    // padded so byte LocalChunkSize is the second byte of a character: a read
-    // that decodes each LocalChunkSize slice on its own splits it.
+  test("reads a multi-byte character split across a browser stream chunk", async () => {
+    // Rows of 3-byte characters, large enough that the browser's Blob stream
+    // yields more than one chunk somewhere inside a character: the streaming
+    // decoder in decodedCSVTextSource must carry a split byte over to the
+    // next chunk rather than emitting U+FFFD.
     const value = "€".repeat(1000);
     const rowBytes = value.length * 3 + 1;
-    let header = "sym";
-    while (((Papa.LocalChunkSize - header.length - 1) % rowBytes) % 3 !== 1)
-      header += "_";
-    const rowCount = Math.ceil(Papa.LocalChunkSize / rowBytes) + 10;
+    const targetBytes = Papa.LocalChunkSize + 1024 ** 2;
+    const rowCount = Math.ceil(targetBytes / rowBytes);
+    const header = "sym";
     const file = new File(
       [`${header}\n${Array(rowCount).fill(value).join("\n")}\n`],
       "euro.csv",
