@@ -51,6 +51,7 @@ const PROFILE: ProfiledJobInput = {
   columns: csv.columns,
   sanitizedColumnPositions: [],
   columnSamples: new Map(),
+  dateInputFormats: new Map(),
 };
 
 /** The partner's terms, asking for the two name keys the fixture's file

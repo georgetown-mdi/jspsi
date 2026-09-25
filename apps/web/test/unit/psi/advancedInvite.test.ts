@@ -22,7 +22,7 @@ import {
 import {
   addKey,
   buildAdvancedTerms,
-  dateInputFormatForColumns,
+  dateInputFormatsForColumns,
   defaultStandardizationForRows,
   draftFromTerms,
   draftWithFieldAdded,
@@ -42,6 +42,7 @@ import {
   disclosedColumnNames,
   setColumnDisclosure,
   setColumnType,
+  setColumnTypeForMatching,
 } from "../../../src/psi/metadataEditing.js";
 
 import type {
@@ -1329,10 +1330,10 @@ describe("inviter standardization: per-field column binding and multi-field", ()
     });
   });
 
-  test("a seed from (columns + pre-inferred format) deep-equals one from full rows", () => {
-    // The console has no rows: it seeds from the columns plus the date format its
-    // server-side profile inferred. That must reproduce the hosted seed byte for byte,
-    // since the rows feed the model only through that one inferred value.
+  test("a seed from (columns + profiled formats) deep-equals one from full rows", () => {
+    // The console has no rows: it seeds from the columns plus the per-column date
+    // formats its server-side profile inferred. That must reproduce the hosted seed
+    // byte for byte, since the rows feed the model only through those formats.
     const isoRows = [
       {
         ssn: "123456789",
@@ -1349,11 +1350,50 @@ describe("inviter standardization: per-field column binding and multi-field", ()
         dob: "1985-12-25",
       },
     ];
-    const format = dateInputFormatForColumns(ALL_COLUMNS, isoRows);
-    expect(format).toBe("YYYY-MM-DD");
-    expect(seedAdvancedInvite("Org", ALL_COLUMNS, [], format)).toEqual(
+    const formats = dateInputFormatsForColumns(ALL_COLUMNS, isoRows);
+    expect(formats.get("dob")).toBe("YYYY-MM-DD");
+    expect(seedAdvancedInvite("Org", ALL_COLUMNS, [], formats)).toEqual(
       seedAdvancedInvite("Org", ALL_COLUMNS, isoRows),
     );
+  });
+
+  test("a column retyped as the date of birth is parsed with its own format", () => {
+    // The seed binds `dob` (US layout); the operator retypes `birth_date` (ISO
+    // layout) as the date of birth and `dob` as other. The console reconciles from
+    // the profiled per-column formats with no rows, and must parse `birth_date` as
+    // ISO, as the hosted path inferring from the rows does.
+    const retypeColumns = ["first_name", "last_name", "dob", "birth_date"];
+    const rows = [
+      {
+        first_name: "A",
+        last_name: "B",
+        dob: "01/31/1990",
+        birth_date: "1990-01-31",
+      },
+      {
+        first_name: "C",
+        last_name: "D",
+        dob: "12/25/1985",
+        birth_date: "1985-12-25",
+      },
+    ];
+    const formats = dateInputFormatsForColumns(retypeColumns, rows);
+    const { draft } = seedAdvancedInvite("Org", retypeColumns, [], formats);
+    const retyped = setColumnTypeForMatching(
+      setColumnType(draft.metadata, "dob", "other").metadata,
+      "birth_date",
+      "date_of_birth",
+    );
+    const fromProfile = setDraftMetadata(draft, retyped, [], formats);
+    const dob = fromProfile.standardization.find(
+      (t) => t.output === "date_of_birth",
+    );
+    expect(dob?.input).toBe("birth_date");
+    expect(dob?.steps).toContainEqual({
+      function: "parse_date",
+      params: { inputFormat: "YYYY-MM-DD", outputFormat: "YYYYMMDD" },
+    });
+    expect(fromProfile).toEqual(setDraftMetadata(draft, retyped, rows));
   });
 
   test("the seeded default standardization yields the same terms as no standardization (guided path unchanged)", () => {
@@ -2107,7 +2147,7 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
     // comparison is over the field DECLARATIONS, which the date format (a cleaning
     // step) never touches. Pinned here rather than trusting the doc comment.
     const seed = seedFor();
-    const format = dateInputFormatForColumns(columns, rawRows);
+    const format = dateInputFormatsForColumns(columns, rawRows);
     const refused = withFieldConstraints(defaultExport(), "ssn", {
       exclude: ["999999999"],
       validOnly: false,

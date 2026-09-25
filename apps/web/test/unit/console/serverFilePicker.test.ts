@@ -152,6 +152,7 @@ function profileWire(name: string, columns: Array<string>) {
     rowCount: 3,
     columns,
     sanitizedColumnPositions: [],
+    dateInputFormats: [],
     columnSamples: columns.map((column) => ({ column, values: ["value"] })),
   };
 }

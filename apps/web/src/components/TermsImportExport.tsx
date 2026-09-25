@@ -16,8 +16,11 @@ import { importedConstraintDivergenceMessage } from "@psi/authoring/advancedInvi
 
 import { triggerBlobDownload } from "./blobDownload";
 
+import type {
+  AdvancedInviteSeed,
+  ProfiledDateInputFormats,
+} from "@psi/authoring/advancedInvite";
 import type { CSVRow, LinkageTerms } from "@alcove/core";
-import type { AdvancedInviteSeed } from "@psi/authoring/advancedInvite";
 
 const IMPORT_SUCCESS = "Imported. Review the loaded terms before generating.";
 
@@ -36,7 +39,7 @@ export function TermsImportExport({
   currentTerms,
   seed,
   rawRows,
-  dateInputFormat,
+  dateInputFormats,
   onImport,
 }: {
   /** The terms the current draft represents, for export. */
@@ -45,12 +48,12 @@ export function TermsImportExport({
    * imported document would generate for the constraint-divergence refusal. */
   seed: AdvancedInviteSeed;
   /** The inviter's parsed rows, the reconstruction's fallback source for the
-   * date-format inference when no pre-inferred format is threaded (the format does
+   * date-format inference when no profiled formats are threaded (the format does
    * not affect the constraint comparison, but the rebuild takes it). */
   rawRows: ReadonlyArray<CSVRow>;
-  /** The pre-inferred date-of-birth input format, threaded so the reconstruction
-   * never re-derives it from the rows (the console has none). */
-  dateInputFormat?: string;
+  /** The profiled per-column date-of-birth input formats, threaded so the
+   * reconstruction never re-derives them from the rows (the console has none). */
+  dateInputFormats?: ProfiledDateInputFormats;
   /** Called with validated terms to load into the editor. */
   onImport: (terms: LinkageTerms) => void;
 }) {
@@ -72,7 +75,7 @@ export function TermsImportExport({
       result.terms,
       seed,
       rawRows,
-      dateInputFormat,
+      dateInputFormats,
     );
     if (constraintDivergence !== undefined) {
       setError(constraintDivergence);

@@ -370,7 +370,7 @@ export function KeysTab({
             currentTerms={currentTerms}
             seed={editor.seed}
             rawRows={seedRows(csv)}
-            dateInputFormat={csv.dateInputFormat}
+            dateInputFormats={csv.dateInputFormats}
             onImport={onImport}
           />
         </>

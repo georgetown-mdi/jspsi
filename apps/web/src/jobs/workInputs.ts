@@ -5,11 +5,9 @@ import { z } from "zod";
 
 import {
   CsvLineByteCeilingError,
-  INFER_DATE_SCAN_CAP,
   MAX_NAME_LENGTH,
   StandardizationSchema,
-  inferDateFormat,
-  inferDateOfBirthColumn,
+  createDateFormatInferrer,
   maxCodeUnits,
   readRowColumn,
   streamCSVRows,
@@ -27,8 +25,8 @@ import {
 } from "./intentSchemas";
 import { JOB_DATA_ROOT_ENV } from "./gate";
 
+import type { DateFormatInferrer, Standardization } from "@alcove/core";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
-import type { Standardization } from "@alcove/core";
 
 /**
  * The environment variable naming the operator-mounted directory the console
@@ -205,9 +203,17 @@ interface ColumnSample {
   values: Array<string>;
 }
 
-/** The `GET /api/jobs/inputs/profile` response shape. `columnSamples` is an ordered
- * array of per-column pairs, so a prototype-member column name rides the wire as
- * plain data; the client validates it into a keyed map. */
+/** One column's inferred date input format on the wire, held as an array element
+ * for the reason {@link ColumnSample} is. */
+interface ColumnDateInputFormat {
+  column: string;
+  format: string;
+}
+
+/** The `GET /api/jobs/inputs/profile` response shape. `columnSamples` and
+ * `dateInputFormats` are ordered arrays of per-column pairs, so a prototype-member
+ * column name rides the wire as plain data; the client validates them into keyed
+ * maps. */
 export interface JobInputProfile {
   name: string;
   sizeBytes: number;
@@ -220,7 +226,11 @@ export interface JobInputProfile {
    * parsing it themselves, so the positions ride the wire for the notice they
    * show; `columns` already holds the stripped names. */
   sanitizedColumnPositions: Array<number>;
-  dateInputFormat?: string;
+  /** The date input format inferred for each column core's date-format
+   * inference infers one for, in column order: the console holds no rows, so
+   * whichever column the operator binds as the date of birth takes its format
+   * from here. */
+  dateInputFormats: Array<ColumnDateInputFormat>;
   columnSamples: Array<ColumnSample>;
 }
 
@@ -228,11 +238,11 @@ export interface JobInputProfile {
  * Profile a mounted input in ONE streaming pass that retains no rows: columns from
  * the header, `rowCount` by counting, `columnSamples` as the first
  * {@link PREVIEW_SAMPLE_SIZE} non-empty values per column in row order (the
- * `sampleInputValues` semantics the browser preview uses), and `dateInputFormat`
- * via the shared date-of-birth-column composition -- the DOB column is picked with
- * {@link inferDateOfBirthColumn} and its first {@link INFER_DATE_SCAN_CAP} non-empty
- * values are fed to {@link inferDateFormat}. Every accumulator is constant-size, so
- * peak memory is one parse chunk regardless of file size.
+ * `sampleInputValues` semantics the browser preview uses), and `dateInputFormats`
+ * by feeding every column's values to its own core date-format inferrer
+ * ({@link createDateFormatInferrer}), which stops at its scan cap. Every
+ * accumulator is constant-size per column, so peak memory is one parse chunk
+ * regardless of the file's row count.
  *
  * `csvDelimiter` is the field delimiter the operator chose for their own file;
  * omitted, the pass reads commas, and `detect` takes the delimiter from the file.
@@ -247,9 +257,7 @@ export async function profileJobInput(
   const { filePath, stat } = resolveJobInputFile(resolvedDir, name);
   const stream = fs.createReadStream(filePath);
   const samples = new Map<string, Array<string>>();
-  const dobSample: Array<string> = [];
-  let dobColumn: string | undefined;
-  let dobResolved = false;
+  const dateInferrers = new Map<string, DateFormatInferrer>();
   let rowCount = 0;
   let columns: Array<string>;
   let sanitizedColumnPositions: Array<number>;
@@ -257,10 +265,6 @@ export async function profileJobInput(
     ({ columns, sanitizedColumnPositions } = await streamCSVRows(
       stream,
       (rows, cols) => {
-        if (!dobResolved && cols.length > 0) {
-          dobColumn = inferDateOfBirthColumn(cols);
-          dobResolved = true;
-        }
         for (const row of rows) {
           rowCount++;
           for (const col of cols) {
@@ -269,19 +273,19 @@ export async function profileJobInput(
               bucket = [];
               samples.set(col, bucket);
             }
-            if (bucket.length < PREVIEW_SAMPLE_SIZE) {
-              const value = readRowColumn(row, col);
-              if (value !== undefined && value.trim() !== "")
-                bucket.push(value);
+            const value = readRowColumn(row, col);
+            if (
+              bucket.length < PREVIEW_SAMPLE_SIZE &&
+              value !== undefined &&
+              value.trim() !== ""
+            )
+              bucket.push(value);
+            let inferrer = dateInferrers.get(col);
+            if (inferrer === undefined) {
+              inferrer = createDateFormatInferrer();
+              dateInferrers.set(col, inferrer);
             }
-          }
-          if (
-            dobColumn !== undefined &&
-            dobSample.length < INFER_DATE_SCAN_CAP
-          ) {
-            const value = readRowColumn(row, dobColumn);
-            if (value !== undefined && value.trim() !== "")
-              dobSample.push(value);
+            inferrer.add(value);
           }
         }
       },
@@ -299,8 +303,11 @@ export async function profileJobInput(
   // A parse that yields no columns is not a usable CSV (an empty file, or one with
   // no header row), a distinct operator-meaningful reason from a parse fault.
   if (columns.length === 0) throw new JobInputProfileError("not_a_csv");
-  const dateInputFormat =
-    dobColumn !== undefined ? inferDateFormat(dobSample) : undefined;
+  const dateInputFormats: Array<ColumnDateInputFormat> = [];
+  for (const column of new Set(columns)) {
+    const format = dateInferrers.get(column)?.result().format;
+    if (format !== undefined) dateInputFormats.push({ column, format });
+  }
   const columnSamples: Array<ColumnSample> = columns.map((col) => ({
     column: col,
     values: samples.get(col) ?? [],
@@ -312,7 +319,7 @@ export async function profileJobInput(
     rowCount,
     columns,
     sanitizedColumnPositions,
-    ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
+    dateInputFormats,
     columnSamples,
   };
 }

@@ -1660,7 +1660,12 @@ export function applyStep(
 
 // --- Pipeline ----------------------------------------------------------------
 
-function runCompiledPipeline(
+/**
+ * Run a pipeline already compiled with {@link compileSteps}: {@link runPipeline}
+ * without the per-call compile, for a caller applying one pipeline to many
+ * values.
+ */
+export function runCompiledPipeline(
   input: string,
   steps: CompiledStep[],
   provenance?: FanOutProvenance,
