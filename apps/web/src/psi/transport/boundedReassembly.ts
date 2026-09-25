@@ -203,8 +203,9 @@ export function assertChunkReassemblySupported(conn: DataConnection): void {
  *   `_handleChunk`, before any other bound charges it).
  * - Wire bytes across all in-flight reassemblies: `maxFrameBytes` (in
  *   `_handleChunk`).
- * - Retained chunks per reassembly: `maxChunks`, each charged at least
- *   `minChunkResidentBytes` against the byte cap.
+ * - Retained chunks per reassembly: at most the declared count, so
+ *   `maxChunks`, each charged at least `minChunkResidentBytes` against the
+ *   byte cap.
  * - Concurrent incomplete reassemblies: `maxConcurrentReassemblies`; a new id
  *   beyond the cap silently evicts the oldest partial (the lockstep protocol
  *   never has a legitimate second partial, so eviction only drops
@@ -253,7 +254,7 @@ export function boundChunkReassembly(
   // so the first key is the oldest partial to evict).
   const inFlight = new Map<
     number,
-    { bytes: number; chunks: number; total: number; ordinals: Set<number> }
+    { bytes: number; total: number; ordinals: Set<number> }
   >();
   let bytesInFlight = 0;
   // Latched once a bound fails the connection: it is terminal, so every later
@@ -326,20 +327,12 @@ export function boundChunkReassembly(
       );
       return;
     }
-    const chunks = (entry?.chunks ?? 0) + 1;
-    if (chunks > maxChunks) {
-      failClosed(
-        frameRefusalError(`exceeds its ${maxChunks}-chunk reassembly limit`),
-      );
-      return;
-    }
 
     bytesInFlight += bytes;
     const ordinals = entry?.ordinals ?? new Set<number>();
     ordinals.add(chunk.n);
     inFlight.set(id, {
       bytes: (entry?.bytes ?? 0) + bytes,
-      chunks,
       total: chunk.total,
       ordinals,
     });
