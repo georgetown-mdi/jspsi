@@ -6,6 +6,8 @@ import {
   parseSensitiveYaml,
 } from "@alcove/core";
 
+import { stringify as stringifyYaml } from "yaml";
+
 import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
   NO_STANDING_CONDITION,
@@ -14,6 +16,10 @@ import {
   keyFileFieldsSchema,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
+import {
+  ManagedConfigurationRefusedError,
+  readManagedCommandLineConfiguration,
+} from "@psi/managed/managedCommandLineImport";
 import {
   encodeManagedExchangeArtifact,
   importManagedExchangeArtifact,
@@ -412,4 +418,97 @@ describe("rejection of malformed or tampered imports", () => {
       parseManagedExchangeArtifact(JSON.stringify(artifact)),
     ).toThrow();
   });
+});
+
+describe("a backup's webrtc connection outside the credential-free locator", () => {
+  /** The refusal `run` raises, failing the test if it raises something else. */
+  function refusalOf(run: () => unknown): ManagedConfigurationRefusedError {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof ManagedConfigurationRefusedError) return error;
+      throw error;
+    }
+    throw new Error("expected a refusal");
+  }
+
+  const credential = "backup-credential-not-in-any-message";
+  const additions: Array<
+    [string, (connection: Record<string, unknown>) => void]
+  > = [
+    [
+      "turn",
+      (connection) => {
+        connection.turn = [
+          {
+            url: "turn:relay.example.org:3478",
+            username: "operator",
+            credential,
+          },
+        ];
+      },
+    ],
+    [
+      "server.username",
+      (connection) => {
+        (connection.server as Record<string, unknown>).username = credential;
+      },
+    ],
+    [
+      "server.key",
+      (connection) => {
+        (connection.server as Record<string, unknown>).key = credential;
+      },
+    ],
+    [
+      "ice_provision",
+      (connection) => {
+        connection.ice_provision = {
+          host: "ice.example.org",
+          auth: { username: "operator", password: credential },
+        };
+      },
+    ],
+    [
+      "provider_options",
+      (connection) => {
+        connection.provider_options = { secret: credential };
+      },
+    ],
+  ];
+
+  test.each(additions)(
+    "a backup whose connection holds %s is refused as a command-line import of it is",
+    (field, add) => {
+      const artifact = JSON.parse(
+        serializeManagedExchangeArtifact(
+          encodeManagedExchangeArtifact(runnableRecord(newExchange())),
+        ),
+      );
+      const document = parseSensitiveYaml(
+        artifact.exchangeDocument,
+        "test backup document",
+      ) as { connection: Record<string, unknown> };
+      add(document.connection);
+      artifact.exchangeDocument = stringifyYaml(document);
+
+      const backupRefusal = refusalOf(() =>
+        reconstructRecordFromArtifact(
+          parseManagedExchangeArtifact(JSON.stringify(artifact)),
+        ),
+      );
+      const commandLineRefusal = refusalOf(() =>
+        readManagedCommandLineConfiguration(
+          stringifyYaml({
+            ...document,
+            connection: { ...document.connection, role: "inviter" },
+          }),
+        ),
+      );
+
+      expect(backupRefusal.message).toBe(commandLineRefusal.message);
+      expect(backupRefusal.message).toContain(field);
+      expect(backupRefusal.message).not.toContain(credential);
+    },
+  );
 });

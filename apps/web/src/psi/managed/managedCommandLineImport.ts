@@ -284,6 +284,36 @@ function storedDocument(
   return importedDocument({ ...rest, connection: withoutRole(connection) });
 }
 
+/** Refuse a document holding a top-level field this app does not keep. */
+function refuseFieldsOutsideComposableDocument(document: ExchangeSpec): void {
+  const outside = fieldsOutsideComposableDocument(document);
+  if (outside.length > 0)
+    throw new ManagedConfigurationRefusedError(
+      "This configuration holds settings this app does not keep. Remove " +
+        "these top-level lines and import it again: " +
+        outside.join(", ") +
+        ". The configuration this app hands back leaves them out, so add " +
+        "them back to that file before you run it.",
+    );
+}
+
+/**
+ * Refuse a stored exchange document -- the one a backup file embeds -- holding
+ * what a command-line import of the same document refuses: a connection field
+ * outside its channel's allowlist, a literal credential, or a top-level field
+ * this app does not keep. `raw` is the document before the schema parse, so a
+ * `server` key the parse strips is still measured.
+ *
+ * @throws {ManagedConfigurationRefusedError} naming the refused fields.
+ */
+export function refuseDocumentNotHeld(
+  document: ExchangeSpec,
+  raw: unknown,
+): void {
+  importedConnection(document, raw);
+  refuseFieldsOutsideComposableDocument(document);
+}
+
 /**
  * The record fields a command-line `alcove.yaml` supplies: parsed, and refused
  * where this app cannot hold it. Holds no secret; one is added only from a key
@@ -296,15 +326,7 @@ function commandLineExchangeFields(source: string): NewManagedExchange {
   const side = importedSide(connection);
   const tokenMaxAgeDays = importedTokenMaxAgeDays(document);
   const exchangeFile = storedDocument(document, connection);
-  const outside = fieldsOutsideComposableDocument(exchangeFile);
-  if (outside.length > 0)
-    throw new ManagedConfigurationRefusedError(
-      "This configuration holds settings this app does not keep. Remove " +
-        "these top-level lines and import it again: " +
-        outside.join(", ") +
-        ". The configuration this app hands back leaves them out, so add " +
-        "them back to that file before you run it.",
-    );
+  refuseFieldsOutsideComposableDocument(exchangeFile);
   return {
     label: IMPORTED_CONFIGURATION_LABEL,
     exchangeFile,
