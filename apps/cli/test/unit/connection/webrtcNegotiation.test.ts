@@ -14,6 +14,7 @@ import { snapshotDiagnosticSinkAndLevel } from "../../loggingTestSupport";
 import { BROKER_MESSAGE } from "../../../src/connection/webrtc/brokerClient";
 import { ICE_STATS_TIMEOUT_MS } from "../../../src/connection/webrtc/iceDiagnostics";
 import {
+  DEFAULT_UNREPORTED_OFFER_RESEND_MS,
   MAX_CONNECTION_ID_LENGTH,
   MAX_PENDING_REMOTE_CANDIDATES,
   MIN_NEW_OFFER_INTERVAL_MS,
@@ -420,16 +421,24 @@ test("an end-of-candidates event sends nothing", async () => {
 
 // --- offering again after the broker's EXPIRE -----------------------------
 
-test("the acceptor offers again on the broker's EXPIRE and not on a timer", async () => {
+test("the acceptor offers again on the broker's EXPIRE and otherwise only after the fallback", async () => {
   // A browser PeerJS peer handed two copies of one connection id closes the
   // connection its app already took, so no copy is sent while the broker may
-  // still hold the last one.
-  holdRenewalClock();
+  // still hold the last one. The fake clock also runs at wall-clock pace, so
+  // the waits below stop a margin short of each deadline.
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    shouldAdvanceTime: true,
+  });
+  const marginMs = 1_000;
   const { socket, peer, session, inviterId } = await startRendezvous({
     role: "acceptor",
     candidatesDuringSetLocal: [CANDIDATE_A],
+    rendezvousTimeoutMs: 10 * DEFAULT_UNREPORTED_OFFER_RESEND_MS,
   });
-  await vi.advanceTimersByTimeAsync(30_000);
+  await vi.advanceTimersByTimeAsync(
+    DEFAULT_UNREPORTED_OFFER_RESEND_MS - marginMs,
+  );
   expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(1);
   expect(socket.ofType(BROKER_MESSAGE.candidate)).toHaveLength(1);
 
@@ -442,6 +451,15 @@ test("the acceptor offers again on the broker's EXPIRE and not on a timer", asyn
   expect(
     resent.map((frame) => (frame.payload as { candidate: unknown }).candidate),
   ).toEqual([CANDIDATE_A]);
+
+  // The first offer's deadline passes here; only the EXPIRE's own re-send
+  // may be waiting.
+  await vi.advanceTimersByTimeAsync(
+    DEFAULT_UNREPORTED_OFFER_RESEND_MS - marginMs,
+  );
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(2 * marginMs);
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(3);
   expect(peer.channels).toHaveLength(1);
   peer.channels[0].open();
   await session;

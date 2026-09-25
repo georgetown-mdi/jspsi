@@ -55,8 +55,9 @@ import type {
  * Two measured werift behaviours shape this module -- local candidates are
  * queued until this side's description is sent to the broker, and a configured
  * `iceServers` list replaces rather than extends werift's built-in STUN
- * default -- each with its assumptions and re-verification in
- * docs/spec/DEPENDENCY_PINS.md. The broker's hold and expiry of frames for an
+ * default -- and one measured PeerJS behaviour: a second `OFFER` for a
+ * connection id a browser peer holds replaces that connection. Each has its
+ * assumptions and re-verification in docs/spec/DEPENDENCY_PINS.md. The broker's hold and expiry of frames for an
  * unregistered peer, which decides when the dialer offers again, is in
  * docs/spec/WEBRTC_TRANSPORT.md.
  */
@@ -92,10 +93,12 @@ export const MAX_PENDING_REMOTE_CANDIDATES = 128;
 
 /**
  * How long the acceptor waits after sending its offer for an answer or the
- * broker's `EXPIRE` before sending it again anyway. The vendored broker reports
- * an undelivered offer within about 6 s, but drops a frame without reporting it
- * once its table of held queues is full. This is far enough past that report
- * that the copy it replaces is no longer held.
+ * broker's `EXPIRE` before sending it again anyway. The vendored broker answers
+ * a frame it holds for an absent peer with `EXPIRE` within about 6 s, and one
+ * it will not hold at once, but reports nothing for a frame it has handed to
+ * the peer's socket: an offer delivered to a partner whose socket then drops
+ * before it answers is lost unreported. This is far enough past the hold that
+ * the copy it replaces is no longer held.
  */
 export const DEFAULT_UNREPORTED_OFFER_RESEND_MS = 30_000;
 

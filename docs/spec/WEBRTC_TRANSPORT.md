@@ -159,14 +159,19 @@ payload) go up every 5 s.
 The vendored broker holds frames addressed to a peer that has not registered.
 It delivers every held frame at once if the peer registers within about 5 s of
 the first being queued. Otherwise it drops them and sends each sender one
-`EXPIRE` whose `src` is the absent peer, 5 to 6 s after that first frame.
+`EXPIRE` whose `src` is the absent peer, 5 to 6 s after that first frame. A
+frame past one of its hold bounds -- among them eight absent destinations per
+sender -- is not held and is answered with `EXPIRE` at once
+([CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#web-signaling-surface-bounds), "Relay queue bounds").
+It reports nothing about a frame it has handed to the peer's socket, so an
+offer delivered to a partner whose socket then drops before it answers is lost
+with no `EXPIRE`.
 
 - The CLI acceptor sends its `OFFER` once, and sends it again, with the
   candidates already sent, each time an `EXPIRE` arrives before it is answered,
   or once the unreported-offer re-send budget (table below) passes with neither
-  an `EXPIRE` nor an answer: the vendored broker drops a frame without an
-  `EXPIRE` when its table of held queues is full. It never repeats an offer
-  the broker may still hold: PeerJS 1.5.5, given a second `OFFER` for a
+  an `EXPIRE` nor an answer, for an offer lost unreported. It never repeats an
+  offer the broker may still hold: PeerJS 1.5.5, given a second `OFFER` for a
   `connectionId` it already holds, closes that connection -- emitting no
   `close` while it is not yet open -- and builds a new one. A browser
   inviter's app has already taken the first, so the data channel would open on
@@ -175,8 +180,8 @@ the first being queued. Otherwise it drops them and sends each sender one
   channel-open budget bounds a partner that left after answering.
 - A CLI inviter takes no action on an `EXPIRE`. It sends only in reply to an
   `OFFER`, so an `EXPIRE` means the acceptor it answered has left the broker.
-  An acceptor that returns offers under a new `connectionId`, which the inviter
-  follows under the rule below.
+  An acceptor that returns offers under a new `connectionId`, and the inviter
+  follows it under the rule below.
 - A browser acceptor dials again, after a delay, when PeerJS reports the
   `EXPIRE` as `peer-unavailable`, under a new `connectionId` each time.
 
