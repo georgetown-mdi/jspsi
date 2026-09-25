@@ -37,7 +37,8 @@ Each message holds exactly one item and ends the turn:
   affects.
 - The options, each with its effect on users and the product and its cost to
   development -- costs and benefits, not line counts.
-- One recommended option, with its reason in a sentence or two.
+- One recommended option, with its reason in a sentence or two, argued as
+  `.claude/product-principles.md` sets out.
 
 Never open the item with AskUserQuestion, and never put a follow-up filing in a
 docket message.

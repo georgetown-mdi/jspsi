@@ -29,7 +29,8 @@ unasked. Keep this pass in messages of its own, apart from any docket item.
 1. List every potential follow-up the session turned up -- PR bodies, review
    dispositions, agent reports. For each, form your own opinion on whether to
    file it, weighing its benefit to users and the product against its
-   implementation and opportunity costs.
+   implementation and opportunity costs, as `.claude/product-principles.md`
+   sets out.
 2. Consult the PM once over the whole list, through a `project-manager` spawn
    that holds the list, your opinion on each, the consequences of the docket's
    rulings, and the owner's instruction above quoted verbatim. What the PM files
