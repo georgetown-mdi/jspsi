@@ -198,12 +198,14 @@ export function assertChunkReassemblySupported(conn: DataConnection): void {
  * via `fail`, so the offending chunk is never stored and the offending frame
  * is never unpacked:
  *
- * - The chunk envelope's shape, and its declared chunk count against
- *   `maxChunks` (in `_handleChunk`, before any other bound charges it).
+ * - The chunk envelope's shape, its declared chunk count against
+ *   `maxChunks`, and one count and distinct indexes per frame (in
+ *   `_handleChunk`, before any other bound charges it).
  * - Wire bytes across all in-flight reassemblies: `maxFrameBytes` (in
  *   `_handleChunk`).
- * - Retained chunks per reassembly: `maxChunks`, each charged at least
- *   `minChunkResidentBytes` against the byte cap.
+ * - Retained chunks per reassembly: at most the declared count, so
+ *   `maxChunks`, each charged at least `minChunkResidentBytes` against the
+ *   byte cap.
  * - Concurrent incomplete reassemblies: `maxConcurrentReassemblies`; a new id
  *   beyond the cap silently evicts the oldest partial (the lockstep protocol
  *   never has a legitimate second partial, so eviction only drops
@@ -250,15 +252,22 @@ export function boundChunkReassembly(
 
   // Per-id accumulated state, in arrival order (Map preserves insertion order,
   // so the first key is the oldest partial to evict).
-  const inFlight = new Map<number, { bytes: number; chunks: number }>();
+  const inFlight = new Map<
+    number,
+    { bytes: number; total: number; ordinals: Set<number> }
+  >();
   let bytesInFlight = 0;
   // Latched once a bound fails the connection: it is terminal, so every later
   // chunk and frame is dropped without bookkeeping, reassembly, or unpack.
   let failed = false;
 
+  // Terminal, so every partial is released here: nothing reassembles after it.
   const failClosed = (error: ConnectionError): void => {
     if (failed) return;
     failed = true;
+    for (const id of inFlight.keys()) delete internals._chunkedData[id];
+    inFlight.clear();
+    bytesInFlight = 0;
     fail(error);
   };
 
@@ -293,6 +302,19 @@ export function boundChunkReassembly(
     const id = chunk.__peerData;
     const bytes = Math.max(envelope.byteLength, minChunkBytes);
     const entry = inFlight.get(id);
+    // PeerJS keeps the first chunk's count and completes on the number of
+    // chunks received, so a second count or a repeated index would complete a
+    // frame with a hole or a missing tail.
+    if (entry !== undefined && entry.total !== chunk.total) {
+      failClosed(
+        frameRefusalError("declares two different chunk counts for one frame"),
+      );
+      return;
+    }
+    if (entry?.ordinals.has(chunk.n) === true) {
+      failClosed(frameRefusalError("repeats a chunk index it already sent"));
+      return;
+    }
 
     if (entry === undefined) {
       while (inFlight.size >= maxConcurrent) evictOldest();
@@ -305,16 +327,15 @@ export function boundChunkReassembly(
       );
       return;
     }
-    const chunks = (entry?.chunks ?? 0) + 1;
-    if (chunks > maxChunks) {
-      failClosed(
-        frameRefusalError(`exceeds its ${maxChunks}-chunk reassembly limit`),
-      );
-      return;
-    }
 
     bytesInFlight += bytes;
-    inFlight.set(id, { bytes: (entry?.bytes ?? 0) + bytes, chunks });
+    const ordinals = entry?.ordinals ?? new Set<number>();
+    ordinals.add(chunk.n);
+    inFlight.set(id, {
+      bytes: (entry?.bytes ?? 0) + bytes,
+      total: chunk.total,
+      ordinals,
+    });
 
     originalHandleChunk(chunk);
 

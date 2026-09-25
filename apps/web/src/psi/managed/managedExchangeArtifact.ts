@@ -60,6 +60,7 @@ import {
   standingConditionSchema,
   tokenMaxAgeDaysSchema,
 } from "./managedExchangeRecord";
+import { refuseDocumentNotHeld } from "./managedCommandLineImport";
 
 import type {
   ManagedExchangeKeyFields,
@@ -291,6 +292,8 @@ export function parseManagedExchangeArtifact(
  *
  * @throws {UsageError} if the embedded document is not parseable YAML.
  * @throws {ZodError} if the embedded document or the reconstructed record is invalid.
+ * @throws {ManagedConfigurationRefusedError} if the embedded document holds
+ *   what a command-line import of it refuses.
  */
 export function reconstructRecordFromArtifact(
   artifact: ManagedExchangeArtifact,
@@ -300,6 +303,7 @@ export function reconstructRecordFromArtifact(
     "managed exchange backup document",
   );
   const exchangeFile: ExchangeSpec = parseExchangeSpec(document);
+  refuseDocumentNotHeld(exchangeFile, document);
   return buildManagedExchangeRecord({
     label: artifact.local.label,
     exchangeFile,

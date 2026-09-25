@@ -165,6 +165,13 @@ function importedDocument(raw: unknown): ExchangeSpec {
 }
 
 /**
+ * Where a refused document came from, which decides where a refusal tells the
+ * operator to fix it: a command-line `alcove.yaml` is edited line by line, a
+ * backup file holds its configuration as text inside the JSON.
+ */
+type RefusedDocumentSource = "command line" | "backup";
+
+/**
  * Narrow the document's connection to what a configuration on its channel
  * holds, or refuse. A hard refusal: a field outside it is a credential or a
  * path this app would store and hand back to the command line, and a literal
@@ -177,6 +184,7 @@ function importedDocument(raw: unknown): ExchangeSpec {
 function importedConnection(
   document: ExchangeSpec,
   raw: unknown,
+  source: RefusedDocumentSource,
 ): ConnectionConfig {
   const connection = document.connection;
   const outside = [
@@ -188,6 +196,15 @@ function importedConnection(
       ),
     ]),
   ].sort();
+  if (outside.length > 0 && source === "backup")
+    throw new ManagedConfigurationRefusedError(
+      "This backup's configuration holds settings this app does not keep " +
+        "-- a credential, or an address or file the command line would " +
+        "open: " +
+        outside.join(", ") +
+        ". Remove them from the configuration inside the backup file and " +
+        "import it again.",
+    );
   if (outside.length > 0)
     throw new ManagedConfigurationRefusedError(
       "This configuration's connection holds settings this app does not " +
@@ -198,6 +215,14 @@ function importedConnection(
         "them back to that file before you run it.",
     );
   const literal = literalCredentialFields(connection);
+  if (literal.length > 0 && source === "backup")
+    throw new ManagedConfigurationRefusedError(
+      "This backup's configuration writes a credential into the file " +
+        "itself: " +
+        literal.join(", ") +
+        ". This app does not store a credential. Remove it from the " +
+        "configuration inside the backup file and import it again.",
+    );
   if (literal.length > 0)
     throw new ManagedConfigurationRefusedError(
       "This configuration writes a credential into the file itself: " +
@@ -284,19 +309,19 @@ function storedDocument(
   return importedDocument({ ...rest, connection: withoutRole(connection) });
 }
 
-/**
- * The record fields a command-line `alcove.yaml` supplies: parsed, and refused
- * where this app cannot hold it. Holds no secret; one is added only from a key
- * file read on its own terms ({@link readManagedCommandLineKeyFile}).
- */
-function commandLineExchangeFields(source: string): NewManagedExchange {
-  const raw = parseSensitiveYaml(source, "command-line exchange configuration");
-  const document = importedDocument(raw);
-  const connection = importedConnection(document, raw);
-  const side = importedSide(connection);
-  const tokenMaxAgeDays = importedTokenMaxAgeDays(document);
-  const exchangeFile = storedDocument(document, connection);
-  const outside = fieldsOutsideComposableDocument(exchangeFile);
+/** Refuse a document holding a top-level field this app does not keep. */
+function refuseFieldsOutsideComposableDocument(
+  document: ExchangeSpec,
+  source: RefusedDocumentSource,
+): void {
+  const outside = fieldsOutsideComposableDocument(document);
+  if (outside.length > 0 && source === "backup")
+    throw new ManagedConfigurationRefusedError(
+      "This backup's configuration holds settings this app does not keep: " +
+        outside.join(", ") +
+        ". Remove them from the configuration inside the backup file and " +
+        "import it again.",
+    );
   if (outside.length > 0)
     throw new ManagedConfigurationRefusedError(
       "This configuration holds settings this app does not keep. Remove " +
@@ -305,6 +330,39 @@ function commandLineExchangeFields(source: string): NewManagedExchange {
         ". The configuration this app hands back leaves them out, so add " +
         "them back to that file before you run it.",
     );
+}
+
+/**
+ * Refuse a stored exchange document -- the one a backup file embeds -- holding
+ * what a command-line import of the same document refuses: a connection field
+ * outside its channel's allowlist, a literal credential, or a top-level field
+ * this app does not keep, each worded for a backup file. `raw` is the document
+ * before the schema parse, so a `server` key the parse strips is still
+ * measured.
+ *
+ * @throws {ManagedConfigurationRefusedError} naming the refused fields.
+ */
+export function refuseDocumentNotHeld(
+  document: ExchangeSpec,
+  raw: unknown,
+): void {
+  importedConnection(document, raw, "backup");
+  refuseFieldsOutsideComposableDocument(document, "backup");
+}
+
+/**
+ * The record fields a command-line `alcove.yaml` supplies: parsed, and refused
+ * where this app cannot hold it. Holds no secret; one is added only from a key
+ * file read on its own terms ({@link readManagedCommandLineKeyFile}).
+ */
+function commandLineExchangeFields(source: string): NewManagedExchange {
+  const raw = parseSensitiveYaml(source, "command-line exchange configuration");
+  const document = importedDocument(raw);
+  const connection = importedConnection(document, raw, "command line");
+  const side = importedSide(connection);
+  const tokenMaxAgeDays = importedTokenMaxAgeDays(document);
+  const exchangeFile = storedDocument(document, connection);
+  refuseFieldsOutsideComposableDocument(exchangeFile, "command line");
   return {
     label: IMPORTED_CONFIGURATION_LABEL,
     exchangeFile,

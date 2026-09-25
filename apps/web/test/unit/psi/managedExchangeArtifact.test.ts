@@ -6,6 +6,8 @@ import {
   parseSensitiveYaml,
 } from "@alcove/core";
 
+import { stringify as stringifyYaml } from "yaml";
+
 import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
   NO_STANDING_CONDITION,
@@ -14,6 +16,10 @@ import {
   keyFileFieldsSchema,
   runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
+import {
+  ManagedConfigurationRefusedError,
+  readManagedCommandLineConfiguration,
+} from "@psi/managed/managedCommandLineImport";
 import {
   encodeManagedExchangeArtifact,
   importManagedExchangeArtifact,
@@ -411,5 +417,147 @@ describe("rejection of malformed or tampered imports", () => {
     expect(() =>
       parseManagedExchangeArtifact(JSON.stringify(artifact)),
     ).toThrow();
+  });
+});
+
+describe("a backup's webrtc connection outside the credential-free locator", () => {
+  /** The refusal `run` raises, failing the test if it raises something else. */
+  function refusalOf(run: () => unknown): ManagedConfigurationRefusedError {
+    try {
+      run();
+    } catch (error) {
+      if (error instanceof ManagedConfigurationRefusedError) return error;
+      throw error;
+    }
+    throw new Error("expected a refusal");
+  }
+
+  /** The field names a refusal message lists after its colon. */
+  function refusedFields(message: string): Array<string> {
+    const listed = /: (.+?)\. [A-Z]/.exec(message);
+    if (listed === null) throw new Error(`no field list in: ${message}`);
+    return listed[1].split(", ");
+  }
+
+  /** A backup of a runnable webrtc record whose embedded document `edit`
+   * rewrites, as JSON text, and the edited document. */
+  function editedBackup(
+    edit: (document: { connection: Record<string, unknown> }) => void,
+  ): { backup: string; document: { connection: Record<string, unknown> } } {
+    const artifact = JSON.parse(
+      serializeManagedExchangeArtifact(
+        encodeManagedExchangeArtifact(runnableRecord(newExchange())),
+      ),
+    );
+    const document = parseSensitiveYaml(
+      artifact.exchangeDocument,
+      "test backup document",
+    ) as { connection: Record<string, unknown> };
+    edit(document);
+    artifact.exchangeDocument = stringifyYaml(document);
+    return { backup: JSON.stringify(artifact), document };
+  }
+
+  const credential = "backup-credential-not-in-any-message";
+  const additions: Array<
+    [string, (connection: Record<string, unknown>) => void]
+  > = [
+    [
+      "turn",
+      (connection) => {
+        connection.turn = [
+          {
+            url: "turn:relay.example.org:3478",
+            username: "operator",
+            credential,
+          },
+        ];
+      },
+    ],
+    [
+      "server.username",
+      (connection) => {
+        (connection.server as Record<string, unknown>).username = credential;
+      },
+    ],
+    [
+      "server.key",
+      (connection) => {
+        (connection.server as Record<string, unknown>).key = credential;
+      },
+    ],
+    [
+      "ice_provision",
+      (connection) => {
+        connection.ice_provision = {
+          host: "ice.example.org",
+          auth: { username: "operator", password: credential },
+        };
+      },
+    ],
+    [
+      "provider_options",
+      (connection) => {
+        connection.provider_options = { secret: credential };
+      },
+    ],
+  ];
+
+  test.each(additions)(
+    "a backup whose connection holds %s refuses the fields a command-line import of it does",
+    (field, add) => {
+      const { backup, document } = editedBackup((edited) =>
+        add(edited.connection),
+      );
+
+      const backupRefusal = refusalOf(() =>
+        reconstructRecordFromArtifact(parseManagedExchangeArtifact(backup)),
+      );
+      const commandLineRefusal = refusalOf(() =>
+        readManagedCommandLineConfiguration(
+          stringifyYaml({
+            ...document,
+            connection: { ...document.connection, role: "inviter" },
+          }),
+        ),
+      );
+
+      expect(refusedFields(backupRefusal.message)).toEqual(
+        refusedFields(commandLineRefusal.message),
+      );
+      expect(backupRefusal.message).toMatch(
+        /^This backup's configuration holds settings this app does not keep /,
+      );
+      expect(backupRefusal.message).toContain(
+        "Remove them from the configuration inside the backup file and " +
+          "import it again.",
+      );
+      expect(backupRefusal.message).toContain(field);
+      expect(backupRefusal.message).not.toContain(credential);
+    },
+  );
+
+  test("a backup whose sftp connection writes a password in is refused in a backup's words", () => {
+    const { backup } = editedBackup((edited) => {
+      edited.connection = {
+        channel: "sftp",
+        server: {
+          host: "sftp.example.org",
+          username: "operator",
+          password: credential,
+        },
+      };
+    });
+
+    const refusal = refusalOf(() =>
+      reconstructRecordFromArtifact(parseManagedExchangeArtifact(backup)),
+    );
+
+    expect(refusal.message).toBe(
+      "This backup's configuration writes a credential into the file " +
+        "itself: connection.server.password. This app does not store a " +
+        "credential. Remove it from the configuration inside the backup " +
+        "file and import it again.",
+    );
   });
 });

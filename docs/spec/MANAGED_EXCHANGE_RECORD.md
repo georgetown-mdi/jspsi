@@ -351,6 +351,16 @@ outside the allowlist rather than letting the non-strict webrtc connection
 schema silently strip it. The composition rule, not a strip pass, is the
 enforcement.
 
+A backup file's document was composed by this app, but the file is in the
+operator's hands before it is imported, so the backup import measures its
+document against the same allowlist a command-line import applies
+(`refuseDocumentNotHeld`, `apps/web/src/psi/managed/managedCommandLineImport.ts`):
+a connection field outside its channel's locator subset, a literal credential,
+or a top-level field this app does not keep is refused, naming the fields a
+command-line import of that document names, and nothing is installed. The
+refusal tells the operator to remove them from the configuration inside the
+backup file, since a backup holds that configuration as text.
+
 A configuration-only record on `filedrop` holds that channel's credential-free
 locator subset under the same rule: what `connectionFromLocator`'s arm for the
 channel expands to, the folder fields and `options`.

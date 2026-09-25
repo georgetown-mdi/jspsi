@@ -364,10 +364,10 @@ describe("a record that is not a webrtc exchange", () => {
 });
 
 /** A record as a hand-crafted artifact import produces one. The import path
- * validates the embedded document with the FULL exchange schema rather than the
- * credential-free locator composition, so a document the app itself could never
- * compose reaches a record this way -- each import below succeeding is the
- * reachability half of the refusal the test then asserts. */
+ * validates the embedded document with the full exchange schema and the
+ * command-line import's allowlist rather than the record composer, so a
+ * document part the composer never writes but a command-line file may hold
+ * reaches a record this way. */
 function importedRecordWithDocument(
   exchangeFile: ExchangeSpec,
 ): RunnableManagedExchangeRecord {
@@ -383,12 +383,18 @@ function importedRecordWithDocument(
   );
 }
 
-function importedRecordWithConnection(
+/** A record holding a webrtc connection the app could not compose. The backup
+ * import refuses such a document, but the record schema admits it, so a record
+ * stored before that refusal can still reach the export. */
+function recordWithStoredConnection(
   connection: WebRTCConnectionConfig,
 ): RunnableManagedExchangeRecord {
-  return importedRecordWithDocument(
-    assembleExchangeSpec({ connection, linkageTerms }),
-  );
+  return runnableRecord({
+    label: "Imported quarterly",
+    exchangeFile: assembleExchangeSpec({ connection, linkageTerms }),
+    side: "inviter",
+    sharedSecret: generateSharedSecret(),
+  });
 }
 
 /** The message the export refuses a record with, failing the test if it composed
@@ -494,7 +500,7 @@ describe("a webrtc connection outside the credential-free locator subset", () =>
   test.each(outsideLocatorSubset)(
     "is refused rather than republished (%s)",
     (_case, connection, field, value) => {
-      const record = importedRecordWithConnection(connection);
+      const record = recordWithStoredConnection(connection);
       const message = exportRefusal(record);
       expect(message).toContain(field);
       // Named in kind: the field, never what it holds.
@@ -503,7 +509,7 @@ describe("a webrtc connection outside the credential-free locator subset", () =>
   );
 
   test("names every offending field at once, and no value", () => {
-    const record = importedRecordWithConnection({
+    const record = recordWithStoredConnection({
       channel: "webrtc",
       server: { ...locatorServer, key: "@/home/other/peerjs.key" },
       turn: [

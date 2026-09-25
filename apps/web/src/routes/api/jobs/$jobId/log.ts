@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import fsp from "node:fs/promises";
 
 import { createFileRoute } from "@tanstack/react-router";
@@ -26,6 +27,9 @@ import { jobFileExists } from "@jobs/workdir";
  * headers as the record and keys, never rendered inline: it also holds text the
  * partner and the transport chose, and an attachment keeps those bytes off the
  * console's own page.
+ *
+ * The file is streamed rather than read whole, since a debug-level log of a long
+ * run has no size bound of its own.
  */
 export const Route = createFileRoute("/api/jobs/$jobId/log")({
   server: {
@@ -41,7 +45,15 @@ export const Route = createFileRoute("/api/jobs/$jobId/log")({
         if (view.logPath === null) return jobEmptyResponse(404);
         if (!jobFileExists(view.logPath)) return jobEmptyResponse(404);
 
-        const body = await fsp.readFile(view.logPath);
+        let log: fsp.FileHandle;
+        try {
+          log = await fsp.open(view.logPath, "r");
+        } catch {
+          return jobEmptyResponse(404);
+        }
+        const body = Readable.toWeb(
+          log.createReadStream(),
+        ) as ReadableStream<Uint8Array>;
         return new Response(body, {
           status: 200,
           headers: {

@@ -772,6 +772,35 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
     expect(await response.text()).toContain("rendezvous opened");
   });
 
+  test("a log larger than one read is streamed across several chunks and arrives intact", async () => {
+    const id = await createSucceededJob(
+      { STUB_OUTPUT_FILE: "id\n1\n" },
+      { ...validIntent(), diagnosticRun: true },
+    );
+    const lines = Array.from(
+      { length: 20_000 },
+      (_, index) => `[2026-08-22] [DEBUG] line ${index} of the run\n`,
+    );
+    const log = lines.join("");
+    expect(log.length).toBeGreaterThan(256 * 1024);
+    seedLog(id, log);
+
+    const response = (await handlersOf(LogRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/log`),
+      params: { jobId: id },
+    })) as Response;
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const chunks: Array<Uint8Array> = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+    }
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(Buffer.concat(chunks).toString("utf8")).toBe(log);
+  });
+
   /** The status body's two log fields, as a client watching for the log reads
    * them. */
   async function logStatusOf(
