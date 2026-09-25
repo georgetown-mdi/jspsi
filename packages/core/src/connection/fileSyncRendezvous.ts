@@ -63,7 +63,7 @@ import {
   isProtocolGrammarName,
   isRetainMessageAck,
 } from "./fileSyncNames";
-import { messageFilename } from "./fileSyncMessageLoop";
+import { MAX_MESSAGE_SEQ, messageFilename } from "./fileSyncMessageLoop";
 import {
   HelloEnvelopeSchema,
   serializeEnvelope,
@@ -278,15 +278,17 @@ export function bilateralMismatch(
   return undefined;
 }
 
-// The file name byte limit (NAME_MAX) on the filesystems and SFTP servers the
-// transport targets.
-/** @internal */
+/**
+ * The file name byte limit (NAME_MAX) on the filesystems and SFTP servers the
+ * file-sync transport targets: the bound on every name the protocol writes,
+ * and the per-entry bound a transport's directory listing enforces.
+ */
 export const MAX_FILE_NAME_BYTES = 255;
 
 // The longest name either party writes that holds both ids: the retain-mode
-// ack of a timestamped message, sized at a six-digit counter and the frame
-// cap's byte count. Its length depends only on the sum of the two ids, so both
-// parties reach the same verdict.
+// ack of a timestamped message, sized at the highest counter send() allows and
+// the frame cap's byte count. Its length depends only on the sum of the two
+// ids, so both parties reach the same verdict.
 const longestTwoIdNameBytes = (selfId: string, peerId: string): number =>
   new TextEncoder().encode(
     ackMarkerName(
@@ -295,7 +297,7 @@ const longestTwoIdNameBytes = (selfId: string, peerId: string): number =>
         id: peerId,
         timestampInFilename: true,
         byteCount: MAX_FRAME_SIZE_BYTES,
-        seq: 999_999,
+        seq: MAX_MESSAGE_SEQ,
         ts: 0,
       }).slice(0, -".json".length),
     ),
@@ -1085,13 +1087,12 @@ export class FileSyncRendezvous {
     // with no flag, or by sweepProtocolFiles after its retain inspection, so
     // a directory either refuses keeps its markers.
     //
-    // Best-effort, like the orphaned-temp sweep: safeDelete swallows a
-    // transport-level failure, so a marker that fails to delete is left on
-    // disk and entry proceeds past it. It is benign: the next exchange's
-    // entry re-runs this sweep, and it cannot forge a PeerAbortError in a
-    // later session, since verifyPeerAbortMarker authenticates the
-    // marker's token against that session's HKDF-derived peer token, which
-    // a stale marker cannot satisfy.
+    // With no flag the delete is best-effort (safeDelete), so a marker that
+    // fails to delete stays on disk and entry proceeds: the next entry
+    // re-runs this sweep, and verifyPeerAbortMarker's per-session token
+    // check keeps a stale marker from forging a PeerAbortError. Under
+    // --sweep-exchange-files, sweepProtocolFiles deletes it with every other
+    // protocol file, and a failed delete is a terminal transport failure.
     const leftoverAbortFiles = deps.options().retainFiles
       ? []
       : files.filter(

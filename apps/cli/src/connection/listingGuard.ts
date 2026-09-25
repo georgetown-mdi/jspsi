@@ -1,6 +1,7 @@
 import {
   DirectoryListingBoundsError,
   DISPLAY_TRUNCATION_MARKER,
+  MAX_FILE_NAME_BYTES,
   redactPrivateKeyMaterial,
   type TransportOperationStalledError,
 } from "@alcove/core";
@@ -31,10 +32,10 @@ export const MAX_DIRECTORY_ENTRIES = 8192;
  * Maximum length, in characters, of a single directory entry's filename;
  * enforced per entry at the transport `list()` layer in both adapters.
  * Fixed, for the same reason as {@link MAX_DIRECTORY_ENTRIES}. Value is
- * the POSIX `NAME_MAX`; derivation: docs/spec/CHANNEL_SECURITY.md,
- * "Directory-listing bound".
+ * core's `MAX_FILE_NAME_BYTES`, the POSIX `NAME_MAX`; derivation:
+ * docs/spec/CHANNEL_SECURITY.md, "Directory-listing bound".
  */
-export const MAX_FILENAME_LENGTH = 255;
+export const MAX_FILENAME_LENGTH = MAX_FILE_NAME_BYTES;
 
 const DIRECTORY_LINK_LABEL = "directory: ";
 

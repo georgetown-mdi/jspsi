@@ -68,6 +68,12 @@ const CLEAN_DIRECTORY_RESTART_REMEDY =
   "Re-run the exchange in a clean directory; both parties must start the new " +
   "exchange fresh.";
 
+// The highest per-session send sequence number, so a timestamped message name
+// holds at most a six-digit counter: send() refuses a message past it, and
+// peerIdLengthRefusal sizes the longest name at it.
+/** @internal */
+export const MAX_MESSAGE_SEQ = 999_999;
+
 // Builds an outgoing message filename. The byte count is always the final
 // `-`-delimited segment before `.json` so the receiver can extract it with a
 // right-anchored parse (see parseMessageByteCount). When timestampInFilename
@@ -96,9 +102,9 @@ export function messageFilename({
     .toISOString()
     .replace(/[-:]/g, "")
     .slice(0, 15);
-  // Zero-padded to three digits for the common case; widens to four or more
-  // past message 999, which keeps names unique (the byte count is still the
-  // final segment) at the cost of strict three-digit width on long sessions.
+  // Zero-padded to three digits for the common case; widens past message 999
+  // up to MAX_MESSAGE_SEQ's six digits, which keeps names unique (the byte
+  // count is still the final segment) at the cost of strict three-digit width.
   const counter = String(seq).padStart(3, "0");
   return `${id}-${timestamp}-${counter}-${byteCount}.json`;
 }
@@ -387,6 +393,12 @@ export class FileSyncMessageLoop {
           cause: this.indeterminatePublish.error,
           alcoveRecoveryHintEmitted: true,
         },
+      );
+
+    if (this.seq > MAX_MESSAGE_SEQ)
+      throw new UsageError(
+        `cannot send: this session has already sent ${MAX_MESSAGE_SEQ + 1} ` +
+          `messages, the most one file-sync session allows`,
       );
 
     // `path` is the inbound directory: where the peer's ack of our message (and,

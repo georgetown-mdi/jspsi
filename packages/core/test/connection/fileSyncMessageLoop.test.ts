@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { default as EventEmitter } from "eventemitter3";
 
 import {
+  MAX_MESSAGE_SEQ,
   messageFilename,
   resolveUnexpectedFilesPolicy,
   isRecognizedLoopFile,
@@ -638,6 +639,25 @@ describe("FileSyncMessageLoop counter commit points", () => {
     expect(f.loop.lastSentFile).toBe(
       `${SELF}-${objectMessage({ a: 1 }).length}.json`,
     );
+  });
+
+  test("send() refuses a message past the highest counter a file name holds", async () => {
+    const files = new Map<string, Buffer>();
+    const f = makeLoop({ timestampInFilename: true }, {}, files);
+    f.loop.seq = MAX_MESSAGE_SEQ;
+
+    await f.loop.send({ a: 1 });
+    expect(f.loop.lastSentFile).toMatch(/-999999-\d+\.json$/);
+    const written = [...files.keys()];
+
+    const refusal: unknown = await f.loop.send({ a: 2 }).catch((e) => e);
+    expect(refusal).toBeInstanceOf(UsageError);
+    expect((refusal as Error).message).toBe(
+      "cannot send: this session has already sent 1000000 messages, the " +
+        "most one file-sync session allows",
+    );
+    expect([...files.keys()]).toEqual(written);
+    expect(f.loop.seq).toBe(MAX_MESSAGE_SEQ + 1);
   });
 
   // A virtual clock for the send-wait budget cases below. send() reads the clock

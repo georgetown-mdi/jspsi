@@ -7,6 +7,7 @@ import type {
   FileTransportClient,
 } from "../../src/connection/fileSyncConnection";
 import { messageFilename } from "../../src/connection/fileSyncMessageLoop";
+import { MAX_FILE_NAME_BYTES } from "../../src/connection/fileSyncRendezvous";
 import { MAX_FRAME_SIZE_BYTES } from "../../src/connection/frameSize";
 import {
   DirectoryListingBoundsError,
@@ -77,11 +78,10 @@ const ACK_FILENAME = `${PEER_ID}-${MESSAGE_FILENAME.replace(/\.json$/, "")}-ack.
 
 // The widest name a listed entry can have on the shipped path: the bound
 // the CLI's directory-listing guard enforces on every entry it enumerates
-// (MAX_FILENAME_LENGTH, apps/cli/src/connection/listingGuard.ts). Restated
-// rather than imported since packages/core does not depend on apps/cli; it
-// is the tightest bound there is, since core and the SFTP protocol impose
-// none of their own.
-const MAX_LISTED_FILENAME_LENGTH = 255;
+// (MAX_FILENAME_LENGTH, apps/cli/src/connection/listingGuard.ts, set from
+// this constant). It is the tightest bound there is, since the SFTP protocol
+// imposes none of its own.
+const MAX_LISTED_FILENAME_LENGTH = MAX_FILE_NAME_BYTES;
 // A peer message file at exactly that width, still selected by the loop's
 // message grammar: the peer prefix the scan keys on and the byte-count terminal
 // segment it parses, padded between them.
