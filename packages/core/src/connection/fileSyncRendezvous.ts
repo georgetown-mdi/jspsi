@@ -42,6 +42,7 @@ import type { HandshakeRole } from "../types";
 import {
   UsageError,
   BilateralModeMismatchError,
+  FrameSizeExceededError,
   markPeerWaitTimeout,
 } from "../errors";
 import {
@@ -116,7 +117,15 @@ export function composeDirsDisplay(
 /** @internal */
 type PeerHelloProvenance = "presentAtEntry" | "appearedAfterEntry";
 
-// Reads the hello control file through the I5 partial-sync gate: retries a
+// Cap on a hello read: the envelope is under 100 bytes, and the gate may
+// re-read the file every poll cycle until its deadline, so the frame cap
+// would be far too generous for it. Applied to the listed size before any
+// get() and as the get() byte cap.
+/** @internal */
+export const HELLO_MAX_BYTES = 1024;
+
+// Reads the hello control file through the I5 partial-sync gate: refuses a
+// file listed over HELLO_MAX_BYTES before any read, then retries a
 // transient get() or JSON-parse failure until timeToLive expires, then
 // throws a transport Error. A typed UsageError from get() -- an over-cap
 // body or a stalled read -- is terminal and not retried, since retrying
@@ -132,12 +141,20 @@ type PeerHelloProvenance = "presentAtEntry" | "appearedAfterEntry";
 export async function readControlFileWithGate(
   client: FileTransportClient,
   filePath: string,
+  listedSize: number,
   timeToLive: Date,
   pollingFrequency: number,
   schema: z.ZodType<HelloEnvelope>,
   provenance: PeerHelloProvenance,
   signal: AbortSignal,
 ): Promise<HelloEnvelope> {
+  if (listedSize > HELLO_MAX_BYTES)
+    throw new FrameSizeExceededError(
+      `a peer hello is listed at ${listedSize} byte(s), exceeding the ` +
+        `maximum control file size of ${HELLO_MAX_BYTES} bytes; refusing to ` +
+        `read it`,
+      { details: [`control file: ${redactPrivateKeyMaterial(filePath)}`] },
+    );
   // do-while guarantees at least one read attempt even when timeToLive has
   // already expired by the time the gate is entered (e.g. a slow polling loop
   // that exhausts the budget before reaching this call). Without this a fully-
@@ -147,7 +164,7 @@ export async function readControlFileWithGate(
     try {
       raw = await client.get(filePath, {
         encoding: "utf-8",
-        maxBytes: MAX_FRAME_SIZE_BYTES,
+        maxBytes: HELLO_MAX_BYTES,
       });
     } catch (err) {
       // A typed UsageError from get() (FrameSizeExceededError,
@@ -717,6 +734,7 @@ export class FileSyncRendezvous {
           const envelope = await readControlFileWithGate(
             deps.client(),
             `${inboundPath}/${hello.name}`,
+            hello.size,
             inspectionDeadline,
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
@@ -1228,6 +1246,7 @@ export class FileSyncRendezvous {
     const peerEnvelope = await readControlFileWithGate(
       deps.client(),
       otherPath,
+      otherFile.size,
       helloReadDeadline(deps.options()),
       deps.options().pollingFrequency,
       HelloEnvelopeSchema,
@@ -1529,6 +1548,7 @@ export class FileSyncRendezvous {
             const peerEnvelope = await readControlFileWithGate(
               deps.client(),
               `${scope.inboundPath}/${peerHello.name}`,
+              peerHello.size,
               helloReadDeadline(deps.options()),
               deps.options().pollingFrequency,
               HelloEnvelopeSchema,
@@ -1891,6 +1911,7 @@ export class FileSyncRendezvous {
           const peerEnvelope = await readControlFileWithGate(
             deps.client(),
             `${scope.inboundPath}/${otherFile.name}`,
+            otherFile.size,
             helloReadDeadline(deps.options()),
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
@@ -1971,6 +1992,7 @@ export class FileSyncRendezvous {
           const peerEnvelope = await readControlFileWithGate(
             deps.client(),
             otherPath,
+            otherFile.size,
             helloReadDeadline(deps.options()),
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,
@@ -2039,6 +2061,7 @@ export class FileSyncRendezvous {
           const peerEnvelope = await readControlFileWithGate(
             deps.client(),
             `${scope.inboundPath}/${otherFile.name}`,
+            otherFile.size,
             helloReadDeadline(deps.options()),
             deps.options().pollingFrequency,
             HelloEnvelopeSchema,

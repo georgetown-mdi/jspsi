@@ -22,6 +22,7 @@ import {
   responsibleFilesOf,
   makeRendezvousPair,
 } from "../utils/fileSyncConnectionFixture";
+import { HELLO_MAX_BYTES } from "../../src/connection/fileSyncRendezvous";
 
 test("synchronize() cleans up hello and lock files when createExclusive() throws EEXIST", async () => {
   // Simulates the losing party in the lock-file race: createExclusive() throws
@@ -910,6 +911,45 @@ test("synchronize() joiner branch: assigns initiator role and writes own hello a
   expect(files.has(`${conn.path}/${conn.id}-hello.json`)).toBe(true);
   expect(files.has(`${conn.path}/${conn.id}-joining.json`)).toBe(false);
 });
+
+// The peer hello is padded with trailing whitespace, which leaves it valid JSON,
+// so only its size decides between the two cases. The mock's list() reports each
+// file's real byte length.
+test.each([
+  ["reads a peer hello listed at", HELLO_MAX_BYTES, true],
+  [
+    "refuses, before any read, a peer hello listed over",
+    HELLO_MAX_BYTES + 1,
+    false,
+  ],
+] as const)(
+  "synchronize() joiner branch: %s the control file size cap",
+  async (_, helloSize, admitted) => {
+    const peerId = "00000000-0000-4000-8000-000000000001";
+    const reads: string[] = [];
+    const { client, files } = makeMockClient({
+      onGet: (path) => reads.push(path),
+    });
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.id = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    const peerHelloPath = `${conn.path}/${peerId}-hello.json`;
+    const body = Buffer.alloc(helloSize, " ");
+    LOCK_HELLO_BODY.copy(body);
+    files.set(peerHelloPath, body);
+
+    if (admitted) {
+      await conn.synchronize();
+      expect(reads).toContain(peerHelloPath);
+      expect(conn.peerId).toBe(peerId);
+    } else {
+      await expect(conn.synchronize()).rejects.toBeInstanceOf(
+        FrameSizeExceededError,
+      );
+      expect(reads).not.toContain(peerHelloPath);
+      expect(files.has(peerHelloPath)).toBe(true);
+    }
+  },
+);
 
 // --- synchronize(): joiner partial-failure (sentinel) ------------------------
 
