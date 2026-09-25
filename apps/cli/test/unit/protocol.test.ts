@@ -1691,6 +1691,64 @@ test("a partner-shaped output-phase fault exits 69, not the local write-loss cod
   expect(terminal.category).toBe("output");
 }, 20_000);
 
+test("a partner payload missing a matched row still leaves the record and the receipt", async () => {
+  // runExchange completed and returned its audit and the dual-signed receipt,
+  // so the disclosure happened; the partner payload then fails the real core
+  // table build. The failure is raised only after both artifacts are on disk.
+  const { buildOutputTable: coreBuildOutputTable } =
+    await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
+  vi.mocked(buildOutputTable).mockImplementation(() =>
+    coreBuildOutputTable([[0], [7]], [], [], {
+      columns: ["dob"],
+      rowIndices: [5],
+      rows: [["1990-01-02"]],
+    }),
+  );
+  vi.mocked(runExchange).mockImplementation((async () => {
+    const base = (await defaultRunExchange()) as Record<string, unknown>;
+    return { ...base, audit, signedReceipt: signedReceiptFixture };
+  }) as never);
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+  const parties = ["a", "b"].map((name) => ({
+    record: path.join(tmpDir, `rec-${name}.json`),
+    receipt: path.join(tmpDir, `receipt-${name}.json`),
+    keyFile: name === "a" ? keyFileA : keyFileB,
+    name: `test-${name}`,
+  }));
+
+  let outcomes: PromiseSettledResult<unknown>[];
+  try {
+    outcomes = await Promise.allSettled(
+      parties.map((p) =>
+        runSigningParty(p.keyFile, p.name, p.receipt, {
+          recordFile: p.record,
+        }),
+      ),
+    );
+  } finally {
+    vi.mocked(buildOutputTable).mockReturnValue({ headers: [], rows: [] });
+  }
+
+  for (const [i, p] of parties.entries()) {
+    const outcome = outcomes[i];
+    expect(outcome.status).toBe("rejected");
+    const reason = (outcome as PromiseRejectedResult).reason as Error;
+    expect(reason.message).toContain(
+      "missing rows for association table indices",
+    );
+    expect(exitCodeForError(reason)).toBe(69);
+    expect(
+      parseExchangeRecord(JSON.parse(fs.readFileSync(p.record, "utf8"))),
+    ).toEqual(sampleRecord);
+    expect(
+      parseDualSignedRecord(JSON.parse(fs.readFileSync(p.receipt, "utf8"))),
+    ).toEqual(signedReceiptFixture);
+  }
+}, 20_000);
+
 // --- One-sided result withholding via runProtocol ----------------------------
 
 test("writes no result file for a non-receiving party when the exchange withholds the table", async () => {

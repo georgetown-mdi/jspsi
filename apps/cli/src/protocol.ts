@@ -1720,6 +1720,9 @@ async function writeExchangeOutputs(params: {
   // written. A box rather than the error itself, since a thrower may raise any
   // value, `undefined` included.
   let undelivered: { error: unknown } | undefined;
+  // A result table that could not be built from the partner's payload, held
+  // the same way: the disclosure before it is still owed its record.
+  let unbuilt: { error: unknown } | undefined;
 
   // A count-only exchange produces no matched pairing for either party,
   // so there is no result file to write and nothing was withheld from
@@ -1770,16 +1773,29 @@ async function writeExchangeOutputs(params: {
     // file reads back through the delimiter this party chose. A party that
     // named none, or chose detection, gets a comma-separated result.
     const resultDelimiter = resultCsvDelimiter(csvDelimiter);
-    const { headers, rows } = buildOutputTable(
-      associationTable,
-      prepared.rawRows,
-      prepared.metadata,
-      partnerPayload,
-      prepared.includeOwnColumns,
-      resultDelimiter,
-    );
+    let table: ReturnType<typeof buildOutputTable> | undefined;
     try {
-      await writeOutput(output, headers, rows, log, undefined, resultDelimiter);
+      table = buildOutputTable(
+        associationTable,
+        prepared.rawRows,
+        prepared.metadata,
+        partnerPayload,
+        prepared.includeOwnColumns,
+        resultDelimiter,
+      );
+    } catch (err) {
+      unbuilt = { error: err };
+    }
+    try {
+      if (table !== undefined)
+        await writeOutput(
+          output,
+          table.headers,
+          table.rows,
+          log,
+          undefined,
+          resultDelimiter,
+        );
     } catch (err) {
       // The result did not reach where it was owed -- a file that did
       // not reach disk, or a stdout reader that stopped taking it before
@@ -1815,7 +1831,11 @@ async function writeExchangeOutputs(params: {
   // is core's own composition over integers it formats itself -- the same one
   // the browser seat renders, so no two sinks drift -- and holds no
   // partner-authored text.
-  if (entityClusters !== undefined && undelivered === undefined)
+  if (
+    entityClusters !== undefined &&
+    undelivered === undefined &&
+    unbuilt === undefined
+  )
     log.info(describeEntityClusters(entityClusters));
 
   // Every audit artifact this run was asked for and could not produce,
@@ -1881,6 +1901,8 @@ async function writeExchangeOutputs(params: {
     reportPersistenceLoss(missing, eventStream);
 
   let everyArtifactOnDisk = missingArtifacts.length === 0;
+
+  if (unbuilt !== undefined) throw unbuilt.error;
 
   // The result went nowhere, so the run fails on it and the caller's own
   // persistence below does not run: it writes configuration for a run whose
