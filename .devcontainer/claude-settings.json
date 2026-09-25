@@ -8,6 +8,7 @@
     "command": "node /workspace/.claude/statusline.mjs"
   },
   "effortLevel": "xhigh",
+  "cleanupPeriodDays": 60,
   "awaySummaryEnabled": false,
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
