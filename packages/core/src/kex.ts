@@ -14,7 +14,7 @@ import {
   ConnectionError,
   type MessageConnection,
 } from "./connection/messageConnection.js";
-import { markPeerWaitTimeout } from "./errors.js";
+import { AuthenticationError, markPeerWaitTimeout } from "./errors.js";
 
 // The authenticated key exchange that produces the exchange session key: an
 // ephemeral P-256 Diffie-Hellman pinned to the Noise NNpsk0 pattern plus an
@@ -67,7 +67,7 @@ const RESPONDER_CONFIRM_LABEL = "alcove-kex-v2:responder-confirm";
 
 // The one message every authentication failure throws, and it must stay
 // non-oracular: no throw site may narrow it to the check that failed, and the
-// ConnectionError's "security" kind is what consumers classify on. What that
+// error's class, AuthenticationError, is what consumers classify on. What that
 // property covers and what it does not: docs/spec/PROTOCOL.md ("Failure
 // handling").
 const GENERIC_FAILURE = "key exchange authentication failed";
@@ -467,8 +467,9 @@ interface KexResult {
  * in-band: two peers both passing `"initiator"` reject each other and two
  * `"responder"`s deadlock on receive -- neither yields a false session.
  *
- * @throws {ConnectionError} of kind `"security"`, message `"key exchange
- *   authentication failed"`, on any authentication failure.
+ * @throws {AuthenticationError} (a `"security"`-kind ConnectionError),
+ *   message `"key exchange authentication failed"`, on any authentication
+ *   failure.
  * @throws {Error} `"key exchange handshake timed out"` if a peer does not
  *   respond within 30 seconds -- a transport fault, not a security
  *   classification.
@@ -510,19 +511,19 @@ export async function runKex(
     const msg2 = KexMsg2Schema.safeParse(await receiveHandshake(conn));
     if (!msg2.success) {
       await sendAbort(conn);
-      throw new ConnectionError(GENERIC_FAILURE, "security");
+      throw new AuthenticationError(GENERIC_FAILURE);
     }
     const peerPublic = decodeBase64Url(msg2.data.e);
     const peerKey =
       peerPublic === undefined ? undefined : await importPeerShare(peerPublic);
     if (peerPublic === undefined || peerKey === undefined) {
       await sendAbort(conn);
-      throw new ConnectionError(GENERIC_FAILURE, "security");
+      throw new AuthenticationError(GENERIC_FAILURE);
     }
     const dh = await deriveSharedSecret(mySecret, peerKey);
     if (dh === undefined) {
       await sendAbort(conn);
-      throw new ConnectionError(GENERIC_FAILURE, "security");
+      throw new AuthenticationError(GENERIC_FAILURE);
     }
     // We are the initiator, so our flag is the initiator flag and the
     // responder's (msg2.reqEnc) is the responder flag. Binding both into the
@@ -548,7 +549,7 @@ export async function runKex(
       !bytesEqual(receivedConfirm, responderConfirm)
     ) {
       await sendAbort(conn);
-      throw new ConnectionError(GENERIC_FAILURE, "security");
+      throw new AuthenticationError(GENERIC_FAILURE);
     }
 
     await conn.send({
@@ -566,19 +567,19 @@ export async function runKex(
     const msg1 = KexMsg1Schema.safeParse(await receiveHandshake(conn));
     if (!msg1.success) {
       await sendAbort(conn);
-      throw new ConnectionError(GENERIC_FAILURE, "security");
+      throw new AuthenticationError(GENERIC_FAILURE);
     }
     const peerPublic = decodeBase64Url(msg1.data.e);
     const peerKey =
       peerPublic === undefined ? undefined : await importPeerShare(peerPublic);
     if (peerPublic === undefined || peerKey === undefined) {
       await sendAbort(conn);
-      throw new ConnectionError(GENERIC_FAILURE, "security");
+      throw new AuthenticationError(GENERIC_FAILURE);
     }
     const dh = await deriveSharedSecret(mySecret, peerKey);
     if (dh === undefined) {
       await sendAbort(conn);
-      throw new ConnectionError(GENERIC_FAILURE, "security");
+      throw new AuthenticationError(GENERIC_FAILURE);
     }
     // peerPublic is the initiator's e; myPublic is the responder's e. The
     // initiator's flag (msg1.reqEnc) is the initiator flag and ours is the
@@ -613,7 +614,7 @@ export async function runKex(
     // way, and the initiator has already moved on. This trades operator
     // diagnosability for a single non-oracular outcome.
     if (!msg3.success || msg3.data.kexMsg !== "3") {
-      throw new ConnectionError(GENERIC_FAILURE, "security");
+      throw new AuthenticationError(GENERIC_FAILURE);
     }
     // No explicit tag length check: bytesEqual is total (see msg2 above).
     const receivedConfirm = decodeBase64Url(msg3.data.confirm);
@@ -621,7 +622,7 @@ export async function runKex(
       receivedConfirm === undefined ||
       !bytesEqual(receivedConfirm, initiatorConfirm)
     ) {
-      throw new ConnectionError(GENERIC_FAILURE, "security");
+      throw new AuthenticationError(GENERIC_FAILURE);
     }
 
     return {

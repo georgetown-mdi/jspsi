@@ -74,6 +74,7 @@ import {
   type TeardownOutcome,
 } from "./transportTeardown";
 import { writeOutput } from "./util/dataIo";
+import { AUTHENTICATION_FAILED_EXIT_CODE } from "./util/exit";
 import { noteSignalOwnsExit } from "./util/exitGate";
 import { runBeforeEachLogLine } from "./util/logging";
 import { logRuntimeEnv } from "./util/runtimeEnv";
@@ -1049,7 +1050,7 @@ async function authenticateRun(params: {
   // or non-integer tokenMaxAgeDays, reachable only by a caller
   // bypassing the config schema) propagates as the UsageError it is
   // (exit 64) rather than being caught and re-wrapped as a
-  // "could not be saved" transport-style failure (exit 69).
+  // "could not be saved" failure (exit 77).
   const rotatedKeyFile = buildRotatedKeyFile(
     rotatedSecret,
     auth.tokenMaxAgeDays,
@@ -1075,12 +1076,19 @@ async function authenticateRun(params: {
     // uses on its own validation errors (see auth.ts), so the
     // runProtocol catch below skips its generic authStarted advisory
     // and the user sees one coherent recovery message.
+    //
+    // It exits with the authentication code rather than 69: the parties'
+    // secrets may now differ, so a retry fails the key exchange instead of
+    // recovering.
     const message = messageWithOperatorText`${ROTATED_TOKEN_SAVE_PREAMBLE}${operatorSuppliedText(
       keyFilePath,
     )}: ${err instanceof Error ? err.message : String(err)}${ROTATED_TOKEN_SAVE_REMEDY}`;
     throw Object.assign(
       keepOperatorSuppliedText(new Error(message.text), message),
-      { alcoveRecoveryHintEmitted: true },
+      {
+        alcoveRecoveryHintEmitted: true,
+        exitCode: AUTHENTICATION_FAILED_EXIT_CODE,
+      },
     );
   }
 

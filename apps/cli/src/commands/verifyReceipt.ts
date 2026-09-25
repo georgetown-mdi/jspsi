@@ -69,6 +69,8 @@ import {
   exitCodeForError,
   exitWithError,
   RECEIPT_VERIFICATION_FAILED_EXIT_CODE,
+  RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE,
+  worseReceiptVerdictExitCode,
 } from "../util/exit";
 import { csvDelimiterFlag, parseOrExit, singleValue } from "../util/flags";
 import { configureLogging, logLevelFlag } from "../util/logging";
@@ -478,8 +480,22 @@ function configTermsNote(
   );
 }
 
+/** The exit code a verdict reports: 0 only when everything was checked. */
+function verdictExitCode(
+  verdict: "verified" | "incomplete" | "failed",
+): number {
+  switch (verdict) {
+    case "failed":
+      return RECEIPT_VERIFICATION_FAILED_EXIT_CODE;
+    case "incomplete":
+      return RECEIPT_VERIFICATION_INCOMPLETE_EXIT_CODE;
+    case "verified":
+      return 0;
+  }
+}
+
 /** Render the unsigned record's verification report to output lines and an exit
- * code (0 unless a check definitively failed). @internal exported for testing */
+ * code (0 only when the verdict is verified). @internal exported for testing */
 export function formatVerificationReport(
   report: RecordVerificationReport,
   warnings: Displayable[],
@@ -531,11 +547,7 @@ export function formatVerificationReport(
           "self-attested. Pass --signed-record with the exchange's dual-signed " +
           "record (alcove-receipt-*.json) to check them.",
   );
-  return {
-    lines,
-    exitCode:
-      report.outcome === "failed" ? RECEIPT_VERIFICATION_FAILED_EXIT_CODE : 0,
-  };
+  return { lines, exitCode: verdictExitCode(report.outcome) };
 }
 
 const CERTIFICATE_BINDING_WORD: Record<CertificateBindingStatus, string> = {
@@ -707,7 +719,7 @@ function guidanceLine(guidance: SignedReceiptVerdictGuidance): string {
 }
 
 /** Render the dual-signed record's verification report to output lines and an exit
- * code (0 unless a check definitively failed). @internal exported for testing */
+ * code (0 only when the verdict is verified). @internal exported for testing */
 export function formatSignedRecordReport(
   report: DualSignedRecordVerificationReport,
   supplied: SuppliedVerificationInputs = NOTHING_SUPPLIED,
@@ -773,11 +785,7 @@ export function formatSignedRecordReport(
       "session key, which only the two parties held).",
   );
   lines.push(...verdict.guidance.map(guidanceLine));
-  return {
-    lines,
-    exitCode:
-      headline.tone === "failed" ? RECEIPT_VERIFICATION_FAILED_EXIT_CODE : 0,
-  };
+  return { lines, exitCode: verdictExitCode(headline.tone) };
 }
 
 // --- Handler -----------------------------------------------------------------
@@ -1255,7 +1263,7 @@ export async function handler(argv: Arguments): Promise<void> {
         supplied,
       );
       lines.push(...rendered.lines);
-      exitCode = Math.max(exitCode, rendered.exitCode);
+      exitCode = worseReceiptVerdictExitCode(exitCode, rendered.exitCode);
     }
 
     if (signedRecord !== undefined) {
@@ -1293,7 +1301,7 @@ export async function handler(argv: Arguments): Promise<void> {
           expectations.expectedIdentities === undefined,
       });
       lines.push(...rendered.lines);
-      exitCode = Math.max(exitCode, rendered.exitCode);
+      exitCode = worseReceiptVerdictExitCode(exitCode, rendered.exitCode);
     }
 
     // The verdict is the command's result, so it goes to stdout; the log level
