@@ -334,25 +334,28 @@ writes with. In order:
    `ENOENT`, `ENOTDIR`, `EACCES`, and `ELOOP` continue the pre-flight; anything
    else -- `ENAMETOOLONG` above all -- ends it there, because a pre-flight that
    passed on such a path would leave the write to fail after the secret had
-   rotated. The temp name the write creates first, `<name>.tmp.<pid>`, is
-   examined for `ENAMETOOLONG` as well: its final component is longer than the
-   key path's own, so a name within a few bytes of the limit passes the first
-   check and would fail at the write.
+   rotated.
 4. **The parent directory is created when it is absent**, recursively, mirroring
    what the write itself would do. This is a side effect the pre-flight does not
    unwind: the creation is logged and stays even where the handshake or the
    exchange then fails.
 5. **A parent that exists and is not a directory** is rejected.
-6. **Writability is established by creating and removing a probe file**, not by
+6. **The key's name and the temp name the write creates first,
+   `<name>.tmp.<pid>`, are examined for `ENAMETOOLONG`**, once the parent
+   exists: under a missing directory the lookup fails `ENOENT` before it
+   measures the final component, so step 3 alone passes an over-long name
+   there. The temp name's final component is longer than the key's own, so a
+   name within a few bytes of the limit fits and would fail at the write.
+7. **Writability is established by creating and removing a probe file**, not by
    an access check: `access()` reports only the read-only attribute on Windows
    and can misreport under Linux capabilities such as `CAP_DAC_OVERRIDE`. The
    probe is named `.alcove-write-probe-<pid>-<8 hex>`, created exclusively, and
    removed in a `finally`; a stale probe left by an earlier run is swept first,
    and every failure of that sweep is ignored as cosmetic.
-7. **Readability is established by opening the parent for reading**, on POSIX
+8. **Readability is established by opening the parent for reading**, on POSIX
    only -- on Windows opening a directory fails outright and the parent flush is
    skipped, so there is no read requirement to verify there.
-8. **A key file that is a mount point of its own is rejected**, as a key file
+9. **A key file that is a mount point of its own is rejected**, as a key file
    bind-mounted alone into a container is: the write's rename cannot replace a
    mount point and fails `EBUSY`. The key path's directory entry, its parent
    resolved, is looked up among the mount points `/proc/self/mountinfo` lists,

@@ -1322,6 +1322,25 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
+test.skipIf(process.platform === "win32")(
+  "handler refuses to export over the file a symlinked identity path resolves to",
+  async () => {
+    const realPath = path.join(dir, "real-id.json");
+    idFile.saveSigningIdentity(
+      realPath,
+      await generateSigningIdentity("Party A"),
+    );
+    const before = fs.readFileSync(realPath, "utf8");
+    const linkPath = path.join(dir, "id.json");
+    fs.symlinkSync(realPath, linkPath);
+    await expect(exportCertificate(linkPath, realPath)).rejects.toThrow(
+      "exit:64",
+    );
+    expect(fs.readFileSync(realPath, "utf8")).toBe(before);
+    expect((await loadSigningIdentity(realPath))?.privateKey).toBeDefined();
+  },
+);
+
 // --- handler: repeated single-value flag -------------------------------------
 
 test("handler rejects a repeated single-value flag with a usage error (exit 64)", async () => {

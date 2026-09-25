@@ -1755,6 +1755,22 @@ test("persistExpectedPayloadColumns throws (not silently) on a malformed config"
   expect(fs.readFileSync(configPath, "utf8")).toBe(original);
 });
 
+test("persistExpectedPayloadColumns refuses two non-snake_case spellings, naming both", () => {
+  const configPath = path.join(dir, "alcove.yaml");
+  const original = configWithLinkageTerms({
+    connection: SFTP_CONNECTION_FIELDS,
+    expectedPayloadColumns: ["diagnosis"],
+    expected_payloadColumns: ["zip"],
+  });
+  fs.writeFileSync(configPath, original);
+  expect(() =>
+    persistExpectedPayloadColumns(configPath, ["diagnosis"]),
+  ).toThrow(
+    /has keys "expectedPayloadColumns" and "expected_payloadColumns", which are read as one setting/,
+  );
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+});
+
 // --- persistInvitationRelay ---------------------------------------------------
 
 test("persistInvitationRelay sets the relay and keeps the rest of the connection block", () => {

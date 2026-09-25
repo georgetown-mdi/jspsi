@@ -380,6 +380,30 @@ test.skipIf(process.platform === "win32")(
 );
 
 test.skipIf(process.platform === "win32")(
+  "rejects an over-long temp sibling under a parent the pre-flight creates",
+  () => {
+    const { log } = makeLogger();
+    const leaf = "k".repeat(256 - ".tmp.".length - String(process.pid).length);
+    const keyFilePath = path.join(dir, "missing", "sub", leaf);
+    expect(() => preflightKeyFilePath(keyFilePath, log)).toThrow(
+      /temporary file written beside it .*Choose a shorter key file name/,
+    );
+    expect(() => writeFileOwnerOnly(keyFilePath, "{}")).toThrow(/ENAMETOOLONG/);
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "rejects an over-long key name under a parent the pre-flight creates",
+  () => {
+    const { log } = makeLogger();
+    const keyFilePath = path.join(dir, "missing", "sub", "k".repeat(300));
+    expect(() => preflightKeyFilePath(keyFilePath, log)).toThrow(
+      /its file name exceeds the filesystem's name limit/,
+    );
+  },
+);
+
+test.skipIf(process.platform === "win32")(
   "rejects an existing directory as not a regular file before its temp sibling's length",
   () => {
     const { log } = makeLogger();

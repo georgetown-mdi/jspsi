@@ -151,16 +151,6 @@ export function preflightKeyFilePath(
         }). Remove or rename it before running the exchange; ` +
         `${FAILS_AFTER_KEY_EXCHANGE}.`,
     );
-  // The write's first act is on `<name>.tmp.<pid>`, a longer final component
-  // than the key path's own, so a name within a few bytes of the limit passes
-  // the lstat above and fails there after the secret rotated.
-  const tempPath = ownerOnlyTempPath(kfp);
-  try {
-    fs.lstatSync(tempPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENAMETOOLONG")
-      throw nameTooLongError(kfp, tempPath);
-  }
   // Pre-validate the parent: create it if missing (mirroring saveKeyFile's
   // `mkdirSync({ recursive: true })`) and confirm it is a directory, so
   // saveKeyFile cannot fail here after the handshake (see the JSDoc above).
@@ -215,6 +205,18 @@ export function preflightKeyFilePath(
         "file path inside a directory before running the exchange; " +
         `${FAILS_AFTER_KEY_EXCHANGE}.`,
     );
+  // Only once the parent exists: under a missing directory lstat fails ENOENT
+  // before it measures the final component. The write's first act is on
+  // `<name>.tmp.<pid>`, longer than the key's own name, so a name within a
+  // few bytes of the limit fits and its temp sibling does not.
+  for (const name of [kfp, ownerOnlyTempPath(kfp)]) {
+    try {
+      fs.lstatSync(name);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENAMETOOLONG")
+        throw nameTooLongError(kfp, name);
+    }
+  }
   // Best-effort writability check for the common case of a read-only parent
   // before the secret rotates: fs.accessSync(W_OK) is unreliable here
   // (Windows checks only the read-only attribute; Linux can misreport under

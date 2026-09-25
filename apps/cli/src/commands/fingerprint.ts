@@ -428,25 +428,41 @@ function report(
   console.log(fingerprint);
 }
 
+/** Whether two stats describe one inode. */
+function sameInode(statA: fs.Stats, statB: fs.Stats): boolean {
+  return statA.ino !== 0 && statA.dev === statB.dev && statA.ino === statB.ino;
+}
+
 /**
- * Whether `a` and `b` name one directory entry, the one a rename onto either
- * would replace. Beyond a lexical match, the entries are compared by device and
- * inode through `lstat`, which resolves every directory on the way (a
- * symlinked parent, `/var` against `/private/var`) and the name's case as the
- * filesystem itself does, but not a symlink in the final component: renaming
- * onto such a link replaces the link and leaves its target intact.
+ * Whether a rename onto `exportPath` would replace the file `identityPath`
+ * holds the private key in. Beyond a lexical match, the export's entry is
+ * compared by device and inode through `lstat`, which resolves every directory
+ * on the way (a symlinked parent, `/var` against `/private/var`) and the name's
+ * case as the filesystem itself does, but not a symlink in the final
+ * component: renaming onto such a link replaces the link and leaves its target
+ * intact. The identity side is compared both as its own entry and, when it is
+ * a symlink, as the file the link resolves to.
  */
-function namesSameDirectoryEntry(a: string, b: string): boolean {
-  if (path.resolve(a) === path.resolve(b)) return true;
-  let statA: fs.Stats;
-  let statB: fs.Stats;
+function exportReplacesIdentity(
+  exportPath: string,
+  identityPath: string,
+): boolean {
+  if (path.resolve(exportPath) === path.resolve(identityPath)) return true;
+  let exportStat: fs.Stats;
+  let identityStat: fs.Stats;
   try {
-    statA = fs.lstatSync(a);
-    statB = fs.lstatSync(b);
+    exportStat = fs.lstatSync(exportPath);
+    identityStat = fs.lstatSync(identityPath);
   } catch {
     return false;
   }
-  return statA.ino !== 0 && statA.dev === statB.dev && statA.ino === statB.ino;
+  if (sameInode(exportStat, identityStat)) return true;
+  if (!identityStat.isSymbolicLink()) return false;
+  try {
+    return sameInode(exportStat, fs.statSync(identityPath));
+  } catch {
+    return false;
+  }
 }
 
 /** What the export refusal states behind the path it was asked to write. */
@@ -516,7 +532,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // Pointing --export-certificate at the identity file would replace the
       // private key with the public certificate, destroying the key and every
       // partner's pin.
-      if (namesSameDirectoryEntry(exportPath, identityPath)) {
+      if (exportReplacesIdentity(exportPath, identityPath)) {
         const message = messageWithOperatorText`--export-certificate path ${operatorSuppliedText(
           exportPath,
         )}${EXPORT_OVER_IDENTITY_REMEDY}`;
