@@ -18,7 +18,9 @@ import {
   getManagedExchange,
 } from "@psi/managed/managedExchangeStore";
 import { ManagedExchangeExpiredError } from "@psi/managed/managedExpiry";
+import { PartnerNoShowError } from "@psi/transport/waitForConnection";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
+import { readManagedFailure } from "@psi/managed/managedFailureTiers";
 import { runManagedRerun } from "@psi/managed/managedRun";
 
 import type {
@@ -70,9 +72,13 @@ function fakeSeams(
       order.push("acquireInput");
       return Promise.resolve({ input: true });
     },
-    handshake: () => {
+    handshake: async (
+      _input: unknown,
+      markRotationInFlight: () => Promise<void>,
+    ) => {
+      await markRotationInFlight();
       order.push("handshake");
-      return Promise.resolve({ rotatedSecret, handshake: "carried" });
+      return { rotatedSecret, handshake: "carried" };
     },
     dataExchange: async () => {
       order.push("dataExchange");
@@ -145,6 +151,8 @@ describe("runManagedRerun launched from a stored record", () => {
     // secret (the persist resolved first) and no success stamp yet.
     expect(storedAtDataExchange?.sharedSecret).toBe(rotatedSecret);
     expect(storedAtDataExchange?.lastRun).toBeUndefined();
+    // The same write removed the rotation-in-flight marker.
+    expect(storedAtDataExchange?.rotationInFlightSince).toBeUndefined();
   });
 
   test("a lapsed record short-circuits before the lock, seams never run", async () => {
@@ -340,5 +348,122 @@ describe("runManagedRerun: the runner's failure bookkeeping", () => {
     const stored = await getManagedExchange(created.id);
     expect(stored?.lastRun).toBeUndefined();
     expect(stored?.sharedSecret).toBe(created.sharedSecret);
+  });
+});
+
+describe("runManagedRerun: a rotation in flight across a crash", () => {
+  test("the marker is on disk before the key exchange and gone after the rotation", async () => {
+    const created = await createManagedExchange(newExchange());
+    const at = Date.parse("2026-07-14T12:00:00.000Z");
+    let storedAtKeyExchange: ManagedExchangeRecord | undefined;
+
+    await runManagedRerun(
+      created,
+      {
+        acquireInput: () => Promise.resolve({ input: true }),
+        handshake: async (_input, markRotationInFlight) => {
+          await markRotationInFlight();
+          storedAtKeyExchange = await getManagedExchange(created.id);
+          return {
+            rotatedSecret: generateSharedSecret(),
+            handshake: "carried",
+          };
+        },
+        dataExchange: () => Promise.resolve("exchanged"),
+      },
+      { now: () => at },
+    );
+
+    expect(storedAtKeyExchange?.sharedSecret).toBe(created.sharedSecret);
+    expect(storedAtKeyExchange?.rotationInFlightSince).toBe(
+      new Date(at).toISOString(),
+    );
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.rotationInFlightSince).toBeUndefined();
+    expect(stored?.lastRun?.outcome).toBe("succeeded");
+  });
+
+  test("a run cut in its key exchange is read at the next no-show and cleared by the next success", async () => {
+    const created = await createManagedExchange(newExchange());
+    const cutAt = Date.parse("2026-07-14T12:00:00.000Z");
+
+    // The key exchange started and the run ended before the rotation write:
+    // the secret stands, and the marker is what the run left behind.
+    await expect(
+      runManagedRerun(
+        created,
+        {
+          acquireInput: () => Promise.resolve({ input: true }),
+          handshake: async (_input, markRotationInFlight) => {
+            await markRotationInFlight();
+            throw new ConnectionError("the channel closed", "transport");
+          },
+          dataExchange: () => Promise.resolve("never"),
+        },
+        { now: () => cutAt },
+      ),
+    ).rejects.toBeInstanceOf(ConnectionError);
+    const afterCut = await getManagedExchange(created.id);
+    expect(afterCut?.sharedSecret).toBe(created.sharedSecret);
+    expect(afterCut?.rotationInFlightSince).toBe(new Date(cutAt).toISOString());
+    // Not yet a reading of its own: no run since has missed the partner.
+    expect(
+      readManagedFailure(afterCut as ManagedExchangeRecord, undefined, cutAt)
+        .tier,
+    ).toBe("transport");
+
+    // The next run meets nobody -- the partner's rendezvous follows a secret
+    // this device did not save.
+    const missedAt = cutAt + 86_400_000;
+    await expect(
+      runManagedRerun(
+        afterCut as ManagedExchangeRecord,
+        {
+          acquireInput: () => Promise.resolve({ input: true }),
+          handshake: () =>
+            Promise.reject(new PartnerNoShowError("nobody arrived")),
+          dataExchange: () => Promise.resolve("never"),
+        },
+        { now: () => missedAt },
+      ),
+    ).rejects.toBeInstanceOf(PartnerNoShowError);
+    const afterMiss = await getManagedExchange(created.id);
+    expect(afterMiss?.rotationInFlightSince).toBe(
+      new Date(cutAt).toISOString(),
+    );
+    expect(
+      readManagedFailure(
+        afterMiss as ManagedExchangeRecord,
+        undefined,
+        missedAt,
+      ),
+    ).toEqual({ tier: "partial-rotation", standing: false });
+
+    // A completed rotation clears it, and the reading with it.
+    const doneAt = missedAt + 86_400_000;
+    await runManagedRerun(
+      afterMiss as ManagedExchangeRecord,
+      {
+        acquireInput: () => Promise.resolve({ input: true }),
+        handshake: async (_input, markRotationInFlight) => {
+          await markRotationInFlight();
+          return {
+            rotatedSecret: generateSharedSecret(),
+            handshake: "carried",
+          };
+        },
+        dataExchange: () => Promise.resolve("exchanged"),
+      },
+      { now: () => doneAt },
+    );
+    const afterSuccess = await getManagedExchange(created.id);
+    expect(afterSuccess?.rotationInFlightSince).toBeUndefined();
+    expect(
+      readManagedFailure(
+        afterSuccess as ManagedExchangeRecord,
+        undefined,
+        doneAt,
+      ).tier,
+    ).toBe("none");
   });
 });

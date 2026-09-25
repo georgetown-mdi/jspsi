@@ -721,6 +721,45 @@ file, and each party provisions its own `.alcove.key` from the code:
   writing the inviter-side copy (secret **and** expiry, matching `alcove
   invite`) so the invitation's bounded lifetime is enforced at exchange time.
 
+### The rotation-in-flight marker
+
+The key file holds a third, optional field beside `sharedSecret` and `expires`:
+`rotationInFlightSince`, an ISO 8601 UTC instant. It records a key exchange
+that began and has not saved its rotated secret.
+
+- **Write order.** `runProtocol` (`apps/cli/src/protocol.ts`) writes it through
+  `markRotationInFlight` (`apps/cli/src/keyFile.ts`) after the transport to the
+  partner is open and before the key exchange starts, under the same
+  owner-only, atomic-rename write as the rotation itself. The rotated-secret
+  write that follows the handshake (`buildRotatedKeyFile`) holds no marker, so
+  the one atomic write that stores the new secret removes it. A marker already
+  present keeps its first instant. A write that fails stops the run before the
+  key exchange, with the shared secret unchanged; the file may still hold the
+  marker, since the write renames into place before it flushes the directory.
+- **What supersedes it.** A recorded outcome supersedes the marker: a key
+  exchange that fails closed (a `"security"`-kind `ConnectionError`) removes
+  it through the same write before the run reports that failure, while a
+  crash, a stopped process, or a dropped connection leaves it.
+- **Where it is not written.** It is written only over a key file holding the
+  secret the run authenticates with, so the online `invite` and `accept`,
+  whose key file is written after the handshake, write none.
+- **What it means.** A key file still holding it at the next run records a run
+  that stopped between the start of its key exchange and its save: the partner
+  may have completed the handshake and saved a secret this file does not hold.
+  `alcove exchange` states that at load, as a warning naming the instant, the
+  re-invite remedy, and the confirm-first step for an authentication failure
+  neither party's interruption explains. It is evidence for the benign desync
+  reading only beside the authentication failure or no-show it predicts, and
+  it changes no exit code and refuses nothing.
+- **What it does not change.** The file still holds exactly one live secret;
+  no previous secret is kept and the handshake is unchanged.
+- **Across applications.** The console's check of a mounted key file admits
+  the field, and the CLI run it starts reads the marker as above. A key file
+  imported into a managed exchange beside an `alcove.yaml` is admitted and its
+  marker dropped, since an import is read through the import marker instead
+  (see [MANAGED_EXCHANGE_RECORD.md](MANAGED_EXCHANGE_RECORD.md#the-rotation-in-flight-marker)).
+  A key file the web application writes holds no marker.
+
 ### `exchange --invitation` fail-closed ordering
 
 `provisionKeyFileFromInvitation` (`apps/cli/src/keyFile.ts`) is the ordering

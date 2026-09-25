@@ -38,12 +38,14 @@
  *   unreadable local record, neither a hand-off nor a rotation this device
  *   failed to save.
  *
- * - **Persist-before-success.** The rotated secret is written durably (a
- *   strict-durability transaction awaited to `complete`) before the data
- *   exchange begins. {@link runRotationCriticalSection} enforces the
- *   ordering, resolving the gate the data exchange needs only after the
- *   persist commits; {@link persistManagedExchangeRotation} is the durable,
- *   field-scoped write it awaits.
+ * - **Persist-before-success.** A rotation-in-flight marker is written
+ *   durably before the key exchange starts, and the rotated secret is written
+ *   durably (a strict-durability transaction awaited to `complete`, which
+ *   removes the marker) before the data exchange begins.
+ *   {@link runRotationCriticalSection} enforces the ordering, resolving the
+ *   gate the data exchange needs only after the persist commits;
+ *   {@link persistManagedExchangeRotation} is the durable, field-scoped write
+ *   it awaits.
  */
 
 import { ManagedInputError, managedInputLastRun } from "./managedInputGuard";
@@ -54,6 +56,7 @@ import {
   succeededRun,
 } from "./managedRunRotate";
 import {
+  markManagedExchangeRotationInFlight,
   persistManagedExchangeRotation,
   recordManagedExchangeLastRun,
 } from "./managedExchangeStore";
@@ -131,9 +134,12 @@ interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
   acquireInput: () => Promise<TInput>;
   /** Run the authenticated handshake and yield the rotated secret (from the
    * `AuthResult`) plus whatever the data exchange needs. Runs inside the lock, after
-   * the input guard passed; receives the acquired input. */
+   * the input guard passed; receives the acquired input, and the durable
+   * rotation-in-flight marker write it must await after the partner connects
+   * and before the key exchange starts. */
   handshake: (
     input: TInput,
+    markRotationInFlight: () => Promise<void>,
   ) => Promise<{ rotatedSecret: string; handshake: THandshake }>;
   /** Begin and complete the data exchange -- reachable only after the durable
    * persist resolves. Receives the value the handshake produced. */
@@ -239,7 +245,13 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
       // failure to the benign tier. Every other failure is the runner's to
       // classify and record.
       const gate = await runRotationCriticalSection<THandshake>({
-        handshake: () => phases.handshake(input),
+        handshake: () =>
+          phases.handshake(input, () =>
+            markManagedExchangeRotationInFlight(
+              record.id,
+              new Date(now()).toISOString(),
+            ),
+          ),
         persist: (writeBack: RotationWriteBack) =>
           persistRotation(record.id, writeBack),
         tokenMaxAgeDays: record.tokenMaxAgeDays,

@@ -60,7 +60,7 @@ import { keyFileFieldsFromRecord } from "./managedExchangeArtifact";
 
 import type { ConnectionConfig, ExchangeSpec } from "@alcove/core";
 import type {
-  ManagedExchangeKeyFields,
+  ManagedExchangeKeyPair,
   ManagedExchangeRecord,
   RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
@@ -254,7 +254,7 @@ function composeCronExportDocument(
  * write (`saveKeyFile`, `apps/cli/src/keyFile.ts`) so the exported file is
  * byte-shaped like one the CLI wrote itself.
  */
-function serializeKeyFile(fields: ManagedExchangeKeyFields): string {
+function serializeKeyFile(fields: ManagedExchangeKeyPair): string {
   return `${JSON.stringify(fields, null, 2)}\n`;
 }
 

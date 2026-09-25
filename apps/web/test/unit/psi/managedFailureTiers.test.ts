@@ -690,3 +690,74 @@ describe("the too-large tier: a set over the bound one WebRTC message holds", ()
     }
   });
 });
+
+describe("readManagedFailure: a rotation in flight across a crash", () => {
+  const MARKED_AT = "2026-07-13T09:00:00.000Z";
+  const missed: ManagedExchangeLastRun = { at: RUN_AT, outcome: "missed" };
+
+  test("a no-show after an interrupted key exchange reads as a probable partial rotation", () => {
+    expect(
+      readManagedFailure(
+        record({ lastRun: missed, rotationInFlightSince: MARKED_AT }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "partial-rotation", standing: false });
+  });
+
+  test("the partner, whose save cleared its own marker, reads its no-show as a no-show", () => {
+    expect(
+      readManagedFailure(record({ lastRun: missed }), undefined, NOW),
+    ).toEqual({ tier: "missed", standing: false });
+  });
+
+  test("a marker set after the last stamp belongs to a run with no miss beside it yet", () => {
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: missed,
+          rotationInFlightSince: new Date(NOW).toISOString(),
+        }),
+        undefined,
+        NOW,
+      ).tier,
+    ).toBe("missed");
+  });
+
+  test("a marker alone, with no run since, is not a reading", () => {
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: { at: "2026-07-12T09:00:00.000Z", outcome: "succeeded" },
+          rotationInFlightSince: MARKED_AT,
+        }),
+        undefined,
+        NOW,
+      ).tier,
+    ).toBe("none");
+  });
+
+  test("a failed-closed handshake stays unexplained beside a marker", () => {
+    expect(
+      readManagedFailure(
+        record({ lastRun: failed("auth"), rotationInFlightSince: MARKED_AT }),
+        undefined,
+        NOW,
+      ).tier,
+    ).toBe("unexplained");
+  });
+
+  test("a standing unexplained condition is not softened by a marker and a later no-show", () => {
+    expect(
+      readManagedFailure(
+        record({
+          lastRun: missed,
+          rotationInFlightSince: MARKED_AT,
+          standingCondition: { since: MARKED_AT, kind: "auth" },
+        }),
+        undefined,
+        NOW,
+      ),
+    ).toEqual({ tier: "unexplained", standing: true });
+  });
+});

@@ -105,6 +105,13 @@ const TIER_EVIDENCE: Record<
     undefined,
   ],
   storage: [record({ lastRun: failed("storage") }), undefined],
+  "partial-rotation": [
+    record({
+      lastRun: { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
+      rotationInFlightSince: "2026-07-13T09:00:00.000Z",
+    }),
+    undefined,
+  ],
   imported: [record({ lastRun: failed("auth") }), RESTORED],
   transport: [record({ lastRun: failed("transport") }), undefined],
   unexplained: [record({ lastRun: failed("auth") }), undefined],

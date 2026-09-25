@@ -27,6 +27,7 @@ import {
 } from "@psi/managed/managedExchangeImport";
 import {
   applyManagedExchangeCommandLinePair,
+  applyManagedExchangeRotationInFlight,
   buildManagedExchangeRecord,
   composeManagedExchangeFile,
   runnableManagedExchange,
@@ -204,7 +205,8 @@ describe("reading a .alcove.key", () => {
         sharedSecret: generateSharedSecret(),
         [nearMiss]: nearMiss,
       }),
-      "it holds a field other than sharedSecret and expires",
+      "it holds a field other than sharedSecret, expires, and " +
+        "rotationInFlightSince",
     ],
     [
       "a file over the cap",
@@ -233,6 +235,23 @@ describe("reading a .alcove.key", () => {
     );
     expect((error as Error).message).toContain("its expires is not");
     expect((error as Error).message).toContain("holds a field other than");
+    expect(errorText(error)).not.toContain(sharedSecret);
+  });
+
+  test("a rotationInFlightSince that is not a date and time is named, not the whole shape", () => {
+    const sharedSecret = generateSharedSecret();
+    const error = thrownBy(() =>
+      readManagedCommandLineKeyFile(
+        commandLineKeyText({ sharedSecret, rotationInFlightSince: "soon" }),
+      ),
+    );
+    expect(error).toBeInstanceOf(ManagedKeyFileRefusedError);
+    expect((error as Error).message).toContain(
+      "its rotationInFlightSince is not a date and time",
+    );
+    expect((error as Error).message).not.toContain(
+      "does not hold the sharedSecret",
+    );
     expect(errorText(error)).not.toContain(sharedSecret);
   });
 });
@@ -378,6 +397,41 @@ describe("laying a pair over the stored record it revives", () => {
     expect(revived.expires).toBeUndefined();
     expect(revived.tokenMaxAgeDays).toBeUndefined();
     expect(revived.side).toBe(imported.side);
+  });
+
+  const MARKED_AT = "2026-07-13T09:00:00.000Z";
+
+  test("a pair holding the stored secret keeps the rotation-in-flight marker", () => {
+    const stored = applyManagedExchangeRotationInFlight(
+      runnableManagedExchangeOrRefuse(
+        buildManagedExchangeRecord(newExchange()),
+      ),
+      MARKED_AT,
+    );
+    const imported = runnableManagedExchangeOrRefuse(
+      buildManagedExchangeRecord(
+        newExchange({ label: "", sharedSecret: stored.sharedSecret }),
+      ),
+    );
+    expect(
+      applyManagedExchangeCommandLinePair(stored, imported)
+        .rotationInFlightSince,
+    ).toBe(MARKED_AT);
+  });
+
+  test("a pair holding another secret drops the rotation-in-flight marker", () => {
+    const stored = applyManagedExchangeRotationInFlight(
+      runnableManagedExchangeOrRefuse(
+        buildManagedExchangeRecord(newExchange()),
+      ),
+      MARKED_AT,
+    );
+    const imported = runnableManagedExchangeOrRefuse(
+      buildManagedExchangeRecord(newExchange({ label: "" })),
+    );
+    const revived = applyManagedExchangeCommandLinePair(stored, imported);
+    expect(revived.sharedSecret).toBe(imported.sharedSecret);
+    expect(revived).not.toHaveProperty("rotationInFlightSince");
   });
 });
 

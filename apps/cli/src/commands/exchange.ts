@@ -38,6 +38,7 @@ import { establishHostKeyTrust } from "../hostKeyTrust";
 import {
   loadKeyFile,
   checkKeyFileExpiry,
+  rotationInFlightNotice,
   provisionKeyFileFromInvitation,
   DEFAULT_KEY_PATH,
   type KeyFile,
@@ -610,6 +611,10 @@ export function loadConfig(options: ExchangeOptions): {
     )} expired at ${expiredAt}${EXPIRED_SECRET_REMEDY}`;
     throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
+  if (keyData.rotationInFlightSince !== undefined)
+    log.warn(
+      rotationInFlightNotice(options.keyFile, keyData.rotationInFlightSince),
+    );
   const authPersist: AuthPersist = {
     // Operator-policy fields parsed from the YAML `authentication` block (today,
     // token_max_age_days), passed through end to end -- protocol.ts reads

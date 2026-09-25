@@ -2754,13 +2754,15 @@ describe("the key file beside the opened configuration", () => {
     expect(composed.authentication).toEqual({ tokenMaxAgeDays: 30 });
   });
 
-  test("a key file stating an expiry and an unknown key is one the run accepts", async () => {
-    // The CLI's reader strips an unknown key and takes an ISO expiry, so the
-    // console refuses no file the run itself would read.
+  test("a key file stating an expiry, a rotation in flight, and an unknown key is one the run accepts", async () => {
+    // The CLI's reader strips an unknown key and takes an ISO expiry and
+    // rotation-in-flight instant, so the console refuses no file the run
+    // itself would read.
     const root = mountWith(
       JSON.stringify({
         sharedSecret: MOUNTED_SHARED_SECRET,
         expires: "2030-01-01T00:00:00.000Z",
+        rotationInFlightSince: "2029-12-01T00:00:00.000Z",
         note: "kept by the operator",
       }),
     );
@@ -2793,6 +2795,13 @@ describe("the key file beside the opened configuration", () => {
     [
       "invalid",
       JSON.stringify({ sharedSecret: MOUNTED_SHARED_SECRET, expires: "soon" }),
+    ],
+    [
+      "invalid",
+      JSON.stringify({
+        sharedSecret: MOUNTED_SHARED_SECRET,
+        rotationInFlightSince: "soon",
+      }),
     ],
   ] as const)(
     "refuses the run, before anything is written, when the key file is %s",

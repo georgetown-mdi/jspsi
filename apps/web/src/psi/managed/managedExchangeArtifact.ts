@@ -52,7 +52,7 @@ import {
   MANAGED_EXCHANGE_ARTIFACT_VERSION,
   MANAGED_EXCHANGE_PREVIOUS_ARTIFACT_VERSION,
   buildManagedExchangeRecord,
-  keyFileFieldsSchema,
+  keyPairFieldsSchema,
   lastRunSchema,
   parseManagedExchangeRecord,
   raisedStandingCondition,
@@ -63,7 +63,7 @@ import {
 import { refuseDocumentNotHeld } from "./managedCommandLineImport";
 
 import type {
-  ManagedExchangeKeyFields,
+  ManagedExchangeKeyPair,
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
@@ -129,8 +129,8 @@ interface ManagedExchangeArtifact {
   /** The exchange-file document embedded as a valid `alcove.yaml` (snake_case
    * YAML). The CLI half of the record. */
   exchangeDocument: string;
-  /** The `.alcove.key` pair (see {@link ManagedExchangeKeyFields}). */
-  key: ManagedExchangeKeyFields;
+  /** The `.alcove.key` pair (see {@link ManagedExchangeKeyPair}). */
+  key: ManagedExchangeKeyPair;
   /** The browser-only fields (see {@link ManagedExchangeArtifactLocal}). */
   local: ManagedExchangeArtifactLocal;
 }
@@ -145,7 +145,7 @@ interface ManagedExchangeArtifact {
  */
 export function keyFileFieldsFromRecord(
   record: RunnableManagedExchangeRecord,
-): ManagedExchangeKeyFields {
+): ManagedExchangeKeyPair {
   return {
     sharedSecret: record.sharedSecret,
     ...(record.expires !== undefined ? { expires: record.expires } : {}),
@@ -227,7 +227,7 @@ const artifactSchema: ZodType<ManagedExchangeArtifact> = z
   .object({
     artifactVersion: z.literal(MANAGED_EXCHANGE_ARTIFACT_VERSION),
     exchangeDocument: z.string(),
-    key: keyFileFieldsSchema,
+    key: keyPairFieldsSchema,
     local: artifactLocalSchema,
   })
   .strict();

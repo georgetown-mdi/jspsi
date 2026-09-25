@@ -422,9 +422,13 @@ const KEY_FILE_PROBLEMS = {
   malformedExpires:
     "its expires is not a date and time in the form Alcove writes, such " +
     "as 2026-12-31T00:00:00.000Z",
+  malformedRotationInFlight:
+    "its rotationInFlightSince is not a date and time in the form Alcove " +
+    "writes, so the file was written by hand or damaged; write the file " +
+    "again from the command line, or remove that field",
   unknownField:
-    "it holds a field other than sharedSecret and expires, the two a " +
-    ".alcove.key holds",
+    "it holds a field other than sharedSecret, expires, and " +
+    "rotationInFlightSince, the three a .alcove.key holds",
 } as const;
 
 /** A problem {@link KEY_FILE_PROBLEMS} names. */
@@ -435,6 +439,7 @@ const KEY_FILE_PROBLEM_ORDER: ReadonlyArray<KeyFileProblem> = [
   "missingSecret",
   "malformedSecret",
   "malformedExpires",
+  "malformedRotationInFlight",
   "unknownField",
 ];
 
@@ -451,6 +456,8 @@ function keyPairProblems(
     else if (issue.path[0] === "sharedSecret")
       found.add("sharedSecret" in parsed ? "malformedSecret" : "missingSecret");
     else if (issue.path[0] === "expires") found.add("malformedExpires");
+    else if (issue.path[0] === "rotationInFlightSince")
+      found.add("malformedRotationInFlight");
     else found.add("notObject");
   }
   if (found.has("notObject")) return ["notObject"];

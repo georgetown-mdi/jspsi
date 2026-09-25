@@ -14,8 +14,11 @@
  * tier.
  */
 
+import {
+  answersRotationInFlight,
+  raisedStandingCondition,
+} from "./managedExchangeRecord";
 import { managedExchangeLapsed } from "./managedExpiry";
-import { raisedStandingCondition } from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeRecord,
@@ -61,6 +64,12 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   every later run refuses the same way while that entry cannot be read).
  * - `"storage"` -- a rotation the last run could not persist (recovery: re-invite; a
  *   one-sided persist failure may have desynced the two parties).
+ * - `"partial-rotation"` -- a key exchange began and did not save its rotated
+ *   secret (the record's rotation-in-flight marker stands), and a run since then
+ *   did not meet the partner: the partner probably saved a secret this device
+ *   does not hold (recovery: re-invite). Read only beside that no-show, the
+ *   failure a one-sided rotation predicts, and never over a standing condition,
+ *   so it cannot stand in for an unexplained handshake failure.
  * - `"imported"` -- a restore-from-backup, migration import, or take-back of a
  *   command-line hand-off since the last successful run (recovery: re-invite; a
  *   copy from any of those can hold a secret the partnership has rotated past).
@@ -81,6 +90,7 @@ export type ManagedFailureTier =
   | "custody-unreadable"
   | "missed"
   | "storage"
+  | "partial-rotation"
   | "imported"
   | "transport"
   | "unexplained"
@@ -99,6 +109,40 @@ export function importedSinceLastSuccess(
   local: ManagedLocalState | undefined,
 ): boolean {
   return local?.imported !== undefined;
+}
+
+/**
+ * Whether a key exchange on this record began and did not save its rotated
+ * secret before the run stamped in `lastRun` -- the marker predates that run,
+ * so the run that stamped it did not set it and a run since has passed without
+ * clearing it. A marker set after the stamp belongs to a run still in flight,
+ * or to the interrupted run itself, and has no later run beside it yet.
+ */
+export function rotationInFlightBeforeLastRun(
+  record: ManagedExchangeRecord,
+): boolean {
+  const since = record.rotationInFlightSince;
+  const lastRun = record.lastRun;
+  if (since === undefined || lastRun === undefined) return false;
+  return Date.parse(since) < Date.parse(lastRun.at);
+}
+
+/**
+ * Whether a run launched on `atLaunch` that met no partner reads as the
+ * partial-rotation state: a rotation-in-flight marker stands, no standing
+ * condition is raised, and no outcome recorded since the marker supersedes it
+ * ({@link answersRotationInFlight}). The launch record precedes this run's own
+ * stamp, so a marker with no later outcome is the interrupted run's; a later
+ * no-show is read through {@link rotationInFlightBeforeLastRun} instead.
+ */
+export function rotationInFlightUnansweredAtLaunch(
+  atLaunch: ManagedExchangeRecord,
+): boolean {
+  const since = atLaunch.rotationInFlightSince;
+  if (since === undefined) return false;
+  if (raisedStandingCondition(atLaunch) !== undefined) return false;
+  const lastRun = atLaunch.lastRun;
+  return lastRun === undefined || !answersRotationInFlight(lastRun, since);
 }
 
 /** A record's failure tier and where the evidence for it came from: the run
@@ -152,6 +196,11 @@ export function managedStandingConditionTier(
  *   explains it, which is Tier 1's "the record holds a benign explanation" made
  *   durable (docs/MANAGED_EXCHANGE.md, "Telling a desync from an attack").
  *
+ * With no condition standing, a `"missed"` reading beside a rotation-in-flight
+ * marker that predates it reads as `"partial-rotation"`
+ * ({@link rotationInFlightBeforeLastRun}). Only a no-show is read that way: a
+ * failed-closed handshake stays `"unexplained"` whatever the marker says.
+ *
  * It does not displace a recorded benign cause: an input problem or a consent
  * refusal is this run's own actionable state, and the condition stands until
  * something clears it, so nothing is lost by showing that state first.
@@ -167,7 +216,11 @@ export function readManagedFailure(
     return { tier: "expired", standing: false };
   const recorded = recordedFailureTier(record, local);
   const condition = raisedStandingCondition(record);
-  if (condition === undefined) return { tier: recorded, standing: false };
+  if (condition === undefined) {
+    if (recorded === "missed" && rotationInFlightBeforeLastRun(record))
+      return { tier: "partial-rotation", standing: false };
+    return { tier: recorded, standing: false };
+  }
   if (recorded === "none" || recorded === "missed")
     return {
       tier: managedStandingConditionTier(condition, local),

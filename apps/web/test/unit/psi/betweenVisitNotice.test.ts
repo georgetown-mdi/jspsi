@@ -446,3 +446,58 @@ describe("betweenVisitNotice: everything else stays quiet", () => {
     expect(tagFor("riverbend")).not.toBe(tagFor("lakeside"));
   });
 });
+
+describe("betweenVisitNotice: a missed window after an interrupted key exchange", () => {
+  const MARKED_AT = "2026-07-13T09:00:00.000Z";
+
+  function missedAfterMarker(consecutiveMisses: number): ManagedExchangeRecord {
+    return record({
+      schedule: schedule({ consecutiveMisses }),
+      lastRun: { at: RUN_AT, outcome: "missed" },
+      rotationInFlightSince: MARKED_AT,
+    });
+  }
+
+  test("names the probable partial rotation and the re-invite, under the alert's title", () => {
+    const notice = betweenVisitNotice({
+      record: missedAfterMarker(1),
+      local: undefined,
+      caughtUpMisses: 0,
+      disposition: "missed",
+      now: NOW,
+    });
+
+    expect(notice?.kind).toBe("partial-rotation");
+    expect(notice?.title).toBe(alertTitle("partial-rotation"));
+    expect(notice?.body).toContain("Riverbend quarterly");
+    expect(notice?.body).toContain("re-invite your partner");
+  });
+
+  test("holds every later miss to one notice: the tag is the standing state", () => {
+    const tagAt = (consecutiveMisses: number) =>
+      betweenVisitNotice({
+        record: missedAfterMarker(consecutiveMisses),
+        local: undefined,
+        caughtUpMisses: 0,
+        disposition: "missed",
+        now: NOW,
+      })?.tag;
+
+    expect(tagAt(1)).toBe(tagAt(3));
+  });
+
+  test("the partner, holding no marker, gets the plain miss notice", () => {
+    const notice = betweenVisitNotice({
+      record: record({
+        schedule: schedule({ consecutiveMisses: 1 }),
+        lastRun: { at: RUN_AT, outcome: "missed" },
+      }),
+      local: undefined,
+      caughtUpMisses: 0,
+      disposition: "missed",
+      now: NOW,
+    });
+
+    expect(notice?.kind).toBe("missed");
+  });
+});

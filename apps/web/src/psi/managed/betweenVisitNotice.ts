@@ -28,6 +28,7 @@ import { readManagedFailure } from "./managedFailureTiers";
 import {
   CONSENT_FAILURE_TITLE,
   INPUT_FAILURE_TITLE,
+  PARTIAL_ROTATION_FAILURE_TITLE,
   REPEATED_MISS_TITLE,
   SINGLE_COLUMN_DELIMITER_REMEDY,
   TERMS_SHORTFALL_FAILURE_TITLE,
@@ -49,6 +50,7 @@ export type BetweenVisitNoticeKind =
   | "missed"
   | "skipped"
   | "repeated-misses"
+  | "partial-rotation"
   | "input"
   | "terms-shortfall"
   | "consent"
@@ -101,6 +103,7 @@ const NOTICE_TITLES: Record<
   backup: "A scheduled run finished; back up this exchange",
   missed: "A scheduled run did not happen",
   skipped: "Scheduled runs are on hold",
+  "partial-rotation": PARTIAL_ROTATION_FAILURE_TITLE,
   input: INPUT_FAILURE_TITLE,
   "terms-shortfall": TERMS_SHORTFALL_FAILURE_TITLE,
   consent: CONSENT_FAILURE_TITLE,
@@ -180,7 +183,30 @@ export function betweenVisitNotice(
     }
   }
   if (disposition !== "missed" && caughtUpMisses === 0) return undefined;
+  if (readManagedFailure(record, local, now).tier === "partial-rotation")
+    return partialRotationNotice(record, name);
   return missNotice(record, name);
+}
+
+/** The notice a passed window earns where it follows a key exchange that never
+ * saved its rotation: the misses are what a secret the partner saved and this
+ * device did not produces, so the notice names the re-invite rather than
+ * another wait. Its tag names the standing state, so later misses say nothing
+ * further while it stands. */
+function partialRotationNotice(
+  record: ManagedExchangeRecord,
+  name: string,
+): BetweenVisitNotice {
+  return {
+    kind: "partial-rotation",
+    title: NOTICE_TITLES["partial-rotation"],
+    body:
+      `${name}: a run stopped during its key exchange before it saved the ` +
+      `updated secret on this device, and a scheduled run since then did not ` +
+      `meet your partner. Your partner probably saved a secret this device ` +
+      `does not have. Open this app and re-invite your partner.`,
+    tag: noticeTag(record.id, "partial-rotation"),
+  };
 }
 
 /** The notice a failed window earns from the tier its bookkeeping resolves to.

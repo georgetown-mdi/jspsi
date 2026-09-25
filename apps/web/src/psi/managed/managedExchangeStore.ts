@@ -28,6 +28,7 @@ import {
   applyManagedExchangeOutputDirectory,
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
+  applyManagedExchangeRotationInFlight,
   applyManagedExchangeScheduleAdvance,
   applyManagedExchangeStandingConditionCleared,
   buildManagedExchangeRecord,
@@ -1031,7 +1032,8 @@ export async function updateManagedExchangeLocalFields(
 
 /**
  * Persist a rotation to the stored record: advance the rotated secret and the
- * `expires` bound, and nothing else, AND clear the record's backup marker -- both
+ * `expires` bound and remove the rotation-in-flight marker, and nothing else,
+ * AND clear the record's backup marker -- both
  * in one strict-durability transaction spanning the record and sibling stores
  * ({@link readModifyWriteRotation}). The record write is field-scoped through
  * {@link applyManagedExchangeRotation} (which re-validates), so it cannot include a
@@ -1057,6 +1059,34 @@ export async function persistManagedExchangeRotation(
       parseManagedExchangeRecord(stored),
     );
     return applyManagedExchangeRotation(existing, rotation);
+  });
+}
+
+/**
+ * Mark the stored record's rotation as in flight at `since`, before the key
+ * exchange that may rotate its secret, in a strict-durability transaction
+ * awaited to `complete` -- the marker must be on disk before the handshake can
+ * change anything, or a crash between the handshake and the rotation write
+ * would leave no trace. Field-scoped through
+ * {@link applyManagedExchangeRotationInFlight}, which keeps a marker already
+ * present; the rotation write ({@link persistManagedExchangeRotation}) removes
+ * it (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Persist-before-success ordering").
+ *
+ * @throws {Error} if no record with `id` exists, or it holds a configuration
+ *   only.
+ * @throws {ZodError} if the stored value or the resulting record is invalid.
+ */
+export async function markManagedExchangeRotationInFlight(
+  id: string,
+  since: string,
+): Promise<void> {
+  await readModifyWriteRecord(id, (stored) => {
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    return applyManagedExchangeRotationInFlight(
+      runnableManagedExchangeOrRefuse(parseManagedExchangeRecord(stored)),
+      since,
+    );
   });
 }
 

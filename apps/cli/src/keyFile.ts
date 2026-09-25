@@ -4,6 +4,7 @@ import {
   keepOperatorSuppliedText,
   messageWithOperatorText,
   operatorSuppliedText,
+  redactAndRenderOperatorSuppliedText,
   SHARED_SECRET_REGEX,
   UsageError,
 } from "@alcove/core";
@@ -31,6 +32,13 @@ export interface KeyFile {
   sharedSecret: string;
   /** ISO 8601 datetime after which the shared secret should be considered expired. */
   expires?: string;
+  /**
+   * ISO 8601 datetime a key exchange began at that has not yet saved its rotated
+   * secret. Written just before the key exchange starts and dropped by the write
+   * that stores the rotated secret, so a file still holding it at the next run
+   * records a rotation that may have completed on the partner's side only.
+   */
+  rotationInFlightSince?: string;
 }
 
 const SHARED_SECRET_FORMAT_MESSAGE =
@@ -47,6 +55,7 @@ const KeyFileSchema: z.ZodType<KeyFile> = z.object({
         "one, both parties must re-invite",
     ),
   expires: z.iso.datetime().optional(),
+  rotationInFlightSince: z.iso.datetime().optional(),
 });
 
 /**
@@ -199,6 +208,79 @@ export function saveKeyFile(
     keyFilePath,
     JSON.stringify(data, null, 2) + "\n",
     options,
+  );
+}
+
+/**
+ * Record in the key file at `keyFilePath` that a key exchange is starting, before
+ * it can rotate the secret the file holds. The rotated-secret write
+ * ({@link buildRotatedKeyFile}) holds no marker, so the same atomic write that
+ * stores the new secret clears it.
+ *
+ * A marker already present is kept with its first instant: the rotation it
+ * records has not completed since. Nothing is written when no key file is at the
+ * path, or when it holds a secret other than `sharedSecret` -- the online
+ * `invite` and `accept` write their key file only after the handshake, so there
+ * is no stored secret to mark.
+ *
+ * A throw leaves the shared secret unchanged, but not always the file: the
+ * write renames into place before it flushes the directory, so a failed flush
+ * can leave the marker written.
+ */
+export function markRotationInFlight(
+  keyFilePath: string,
+  sharedSecret: string,
+  now: number,
+): void {
+  const current = loadKeyFile(keyFilePath, { warnOnPermissive: false });
+  if (current === undefined || current.sharedSecret !== sharedSecret) return;
+  if (current.rotationInFlightSince !== undefined) return;
+  saveKeyFile(keyFilePath, {
+    ...current,
+    rotationInFlightSince: new Date(now).toISOString(),
+  });
+}
+
+/**
+ * Remove the rotation-in-flight marker from the key file at `keyFilePath`
+ * through the same atomic owner-only write that set it, once the key exchange
+ * has failed closed: this side did not rotate, and that failure is the outcome
+ * the operator reads. Nothing is written when the file holds no marker or a
+ * secret other than `sharedSecret`.
+ */
+export function clearRotationInFlight(
+  keyFilePath: string,
+  sharedSecret: string,
+): void {
+  const current = loadKeyFile(keyFilePath, { warnOnPermissive: false });
+  if (current === undefined || current.sharedSecret !== sharedSecret) return;
+  if (current.rotationInFlightSince === undefined) return;
+  const { rotationInFlightSince: _cleared, ...unmarked } = current;
+  saveKeyFile(keyFilePath, unmarked);
+}
+
+/**
+ * What a run states when its key file holds a rotation-in-flight marker: an
+ * earlier key exchange began and did not save its rotated secret, so the partner
+ * may hold a secret this file does not. The benign reading rests on the failures
+ * it predicts, so it is stated as conditional on them, and an authentication
+ * failure keeps the confirm-first step (docs/CLI.md, "Out-of-sync tokens").
+ */
+export function rotationInFlightNotice(
+  keyFilePath: string,
+  since: string,
+): string {
+  return (
+    `The key file at ${redactAndRenderOperatorSuppliedText(
+      operatorSuppliedText(keyFilePath),
+    )} records a key exchange that began at ${since} and did not save its ` +
+    "rotated shared secret: a run stopped or failed partway through the key " +
+    "exchange, and your partner may have saved a secret this key file does " +
+    "not hold. If this run fails authentication or never meets your partner, " +
+    "the two of you probably hold different secrets: re-invite, as described " +
+    'under "Out-of-sync tokens" in docs/CLI.md. If neither of you had a run ' +
+    "stop partway, confirm with your partner over a channel you trust before " +
+    "re-inviting."
   );
 }
 
