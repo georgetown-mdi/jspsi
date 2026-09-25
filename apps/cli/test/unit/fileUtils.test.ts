@@ -286,6 +286,30 @@ describe("writeFileOwnerOnly", () => {
       );
     },
   );
+
+  test.skipIf(process.platform === "win32")(
+    "with exclusive, a failed directory flush leaves no file behind (POSIX)",
+    () => {
+      const dest = path.join(dir, "secret");
+      const realFsync = fs.fsyncSync;
+      vi.spyOn(fs, "fsyncSync").mockImplementation((fd: number) => {
+        if (fs.fstatSync(fd).isDirectory())
+          throw Object.assign(new Error("EIO: i/o error, fsync"), {
+            code: "EIO",
+          });
+        return realFsync(fd);
+      });
+
+      expect(() =>
+        writeFileOwnerOnly(dest, "only", { exclusive: true }),
+      ).toThrow("EIO");
+      vi.mocked(fs.fsyncSync).mockRestore();
+
+      expect(fs.readdirSync(dir)).toEqual([]);
+      writeFileOwnerOnly(dest, "retry", { exclusive: true });
+      expect(fs.readFileSync(dest, "utf8")).toBe("retry");
+    },
+  );
 });
 
 // --- writeFileAtomic ---------------------------------------------------------

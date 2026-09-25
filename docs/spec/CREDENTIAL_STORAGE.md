@@ -46,7 +46,11 @@ the write either creates the file or fails, and the failure is its own refusal
 naming the path rather than an overwrite; an `EPERM` from a filesystem that does
 not support the call, where the destination exists, is read as that same
 refusal. The temp name is then unlinked best-effort, the destination already
-being correct, and a failure to unlink it does not undo the creation.
+being correct, and a failure to unlink it does not undo the creation. The
+parent-directory flush that follows is part of the write: if it fails, the
+destination just linked is removed before the failure is raised, so the caller
+never sees a failure beside a file it created. That removal is best-effort, and
+a removal that also fails leaves the file in place.
 Everything ahead of the final step is identical, so the mode, the exclusive
 non-following temp create, and the `fsync` ordering below hold for both steps.
 Create-if-absent is what every file written where none should exist takes: a
