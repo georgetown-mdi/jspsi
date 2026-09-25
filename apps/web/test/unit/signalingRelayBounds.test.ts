@@ -178,6 +178,10 @@ function settlesWithin(
   ]).finally(() => clearTimeout(timer));
 }
 
+// The most one relayed frame can take on the recipient's socket, from the
+// derivation beside MAX_RELAY_BUFFERED_BYTES.
+const MAX_RELAYED_FRAME_BYTES = 1.11 * 1024 * 1024;
+
 /** A signaling frame whose string payload brings it to `payloadChars` over
  * the envelope, addressed to `dst`. */
 function offerFrame(dst: string, payloadChars: number): string {
@@ -225,8 +229,15 @@ describe("relay send-buffer bound", () => {
     }
     await waitFor(recipientReleased, 5_000);
 
-    expect(peakBuffered).toBeGreaterThan(0);
-    expect(peakBuffered).toBeLessThanOrEqual(MAX_RELAY_BUFFERED_BYTES);
+    // A send goes out while the buffer is at most the bound, so the buffer
+    // can pass it by one relayed frame and its WebSocket header.
+    const relayedFrameBytes = Buffer.byteLength(
+      JSON.stringify({ ...JSON.parse(frame), src: SENDER_ID }),
+    );
+    expect(peakBuffered).toBeGreaterThan(MAX_RELAY_BUFFERED_BYTES);
+    expect(peakBuffered).toBeLessThanOrEqual(
+      MAX_RELAY_BUFFERED_BYTES + relayedFrameBytes + 10,
+    );
     expect(broker.realm.getClientById(RECIPIENT_ID)).toBeUndefined();
 
     // The sender is told the recipient left and keeps its own registration.
@@ -264,11 +275,9 @@ describe("relay send-buffer bound", () => {
     expect(sender.frames.map((received) => received.type)).toEqual(["OPEN"]);
   }, 30_000);
 
-  test("relays the largest frame decoding can produce to an idle recipient", async () => {
-    // The relayed form of a frame can exceed its wire form: a binary frame is
-    // decoded as UTF-8, and each invalid byte becomes a three-byte U+FFFD. A
-    // wire-legal frame made of them is the largest thing the relay writes in
-    // one send, and the bound must hold it on a socket with nothing queued.
+  test("relays a frame that decoding triples to an idle recipient", async () => {
+    // A binary frame is decoded as UTF-8, and each invalid byte in a string
+    // becomes a three-byte U+FFFD in the relayed form.
     const broker = await startShippedBroker();
     const sender = await connectCollecting(broker.port, SENDER_ID);
     const recipient = await connectCollecting(broker.port, RECIPIENT_ID);
@@ -293,8 +302,43 @@ describe("relay send-buffer bound", () => {
     );
     const relayedBytes = recipient.frameBytes[offerIndex];
     expect(relayedBytes).toBeGreaterThan(2.9 * MAX_SIGNALING_PAYLOAD_BYTES);
-    expect(relayedBytes).toBeLessThanOrEqual(MAX_RELAY_BUFFERED_BYTES);
+    expect(relayedBytes).toBeLessThanOrEqual(MAX_RELAYED_FRAME_BYTES);
     expect(recipient.ws.readyState).toBe(WebSocket.OPEN);
+    expect(sender.frames.map((received) => received.type)).toEqual(["OPEN"]);
+  });
+
+  test("relays a frame larger than the bound to an idle recipient", async () => {
+    // Reprinting a number can grow it more than decoding grows a string:
+    // `1e20` reprints as its 21 digits. A maximal wire frame of them relays
+    // at more than the bound, and still reaches a recipient with nothing
+    // queued.
+    const broker = await startShippedBroker();
+    const sender = await connectCollecting(broker.port, SENDER_ID);
+    const recipient = await connectCollecting(broker.port, RECIPIENT_ID);
+
+    const head = `{"type":"OFFER","dst":"${RECIPIENT_ID}","payload":[1e20`;
+    const tail = "]}";
+    const elementCount = Math.floor(
+      (MAX_SIGNALING_PAYLOAD_BYTES - head.length - tail.length) /
+        ",1e20".length,
+    );
+    const body = `${head}${",1e20".repeat(elementCount)}${tail}`;
+    const wireFrame = body.padEnd(MAX_SIGNALING_PAYLOAD_BYTES, " ");
+    expect(Buffer.byteLength(wireFrame)).toBe(MAX_SIGNALING_PAYLOAD_BYTES);
+    sender.ws.send(wireFrame);
+
+    await waitFor(() =>
+      recipient.frames.some((received) => received.type === "OFFER"),
+    );
+    const offerIndex = recipient.frames.findIndex(
+      (received) => received.type === "OFFER",
+    );
+    expect(recipient.frames[offerIndex].payload).toHaveLength(elementCount + 1);
+    const relayedBytes = recipient.frameBytes[offerIndex];
+    expect(relayedBytes).toBeGreaterThan(MAX_RELAY_BUFFERED_BYTES);
+    expect(relayedBytes).toBeLessThanOrEqual(MAX_RELAYED_FRAME_BYTES);
+    expect(recipient.ws.readyState).toBe(WebSocket.OPEN);
+    expect(broker.realm.getClientById(RECIPIENT_ID)).toBeDefined();
     expect(sender.frames.map((received) => received.type)).toEqual(["OPEN"]);
   });
 

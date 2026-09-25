@@ -1,16 +1,15 @@
-import { Buffer } from "node:buffer";
-
 import { MessageType } from "../../../enums.ts";
 import type { IClient } from "../../../models/client.ts";
 import type { IMessage } from "../../../models/message.ts";
 import type { IRealm } from "../../../models/realm.ts";
 
 // Bound on the bytes the relay leaves queued toward one destination socket
-// that has not yet taken them; past this the socket is terminated, its
-// registration removed, and the sender told it left. One inbound frame is at
-// most the 256 KiB MAX_SIGNALING_PAYLOAD_BYTES, and decoding can triple that
-// (an invalid UTF-8 byte becomes a three-byte U+FFFD), so 1 MiB holds any
-// single relayed frame. See docs/spec/CHANNEL_SECURITY.md.
+// that has not yet taken them: a frame is sent only while the socket holds at
+// most this much, else the socket is terminated, its registration removed, and
+// the sender told it left. A socket so holds at most this plus one relayed
+// frame, itself at most 4.4 times the 256 KiB wire cap (`1e20,` reprints as 22
+// bytes; parseBoundedJson admits any structure that size) plus 1.5 KiB of
+// `src`: under 1.11 MiB. See docs/spec/CHANNEL_SECURITY.md.
 export const MAX_RELAY_BUFFERED_BYTES = 1024 * 1024;
 
 export const TransmissionHandler = ({
@@ -32,10 +31,7 @@ export const TransmissionHandler = ({
         if (socket) {
           const data = JSON.stringify(message);
 
-          if (
-            socket.bufferedAmount + Buffer.byteLength(data, "utf8") <=
-            MAX_RELAY_BUFFERED_BYTES
-          ) {
+          if (socket.bufferedAmount <= MAX_RELAY_BUFFERED_BYTES) {
             socket.send(data);
             delivered = true;
           }
