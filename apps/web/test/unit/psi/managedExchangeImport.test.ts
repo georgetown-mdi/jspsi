@@ -18,6 +18,7 @@ import {
   ManagedImportOtherExchangeError,
   importManagedExchange,
   importManagedExchangeFile,
+  managedInstallFields,
   restoreManagedExchangeFromBackup,
 } from "@psi/managed/managedExchangeImport";
 import {
@@ -326,6 +327,69 @@ describe("importManagedExchange", () => {
       importManagedExchange(JSON.stringify(artifact), deps),
     ).rejects.toThrow();
     expect(deps.installed).toHaveLength(0);
+  });
+});
+
+describe("a fresh install keeps what the backup holds", () => {
+  test("a raised standing condition and the operator's response to it survive the install", async () => {
+    // A backup restored on a new browser profile installs fresh. The condition
+    // withholds the schedule and re-invite until the operator, a re-invite, or a
+    // delete clears it, so the install must not be the act that clears it.
+    const standingCondition = {
+      since: "2026-07-01T14:00:00.000Z",
+      kind: "auth",
+      response: { kind: "compromise", at: "2026-07-01T15:00:00.000Z" },
+    } as const;
+    const source = runnableRecord({
+      label: "Riverbend quarterly",
+      exchangeFile: composeManagedExchangeFile({
+        connection: { channel: "webrtc", host: "signaling.example.org" },
+        linkageTerms,
+      }),
+      side: "inviter",
+      sharedSecret: generateSharedSecret(),
+      standingCondition,
+    });
+    const bytes = serializeManagedExchangeArtifact(
+      encodeManagedExchangeArtifact(source),
+    );
+    const stored: Array<ManagedExchangeRecord> = [];
+    const deps: ManagedImportDeps = {
+      ...recordingDeps(),
+      install: (record) => {
+        const created = buildManagedExchangeRecord(
+          managedInstallFields(record),
+        );
+        stored.push(created);
+        return Promise.resolve(created);
+      },
+    };
+
+    const { record } = await importManagedExchange(bytes, deps);
+
+    expect(stored).toEqual([record]);
+    expect(record.id).not.toBe(source.id);
+    expect(record.standingCondition).toEqual(standingCondition);
+  });
+
+  test("a backup holding no condition installs with none", () => {
+    const record = runnableRecord({
+      label: "Riverbend quarterly",
+      exchangeFile: composeManagedExchangeFile({
+        connection: { channel: "webrtc", host: "signaling.example.org" },
+        linkageTerms,
+      }),
+      side: "inviter",
+      sharedSecret: generateSharedSecret(),
+    });
+
+    expect(managedInstallFields(record)).not.toHaveProperty(
+      "standingCondition",
+    );
+    expect(
+      buildManagedExchangeRecord(managedInstallFields(record))
+        .standingCondition,
+    ).toEqual(record.standingCondition);
   });
 });
 

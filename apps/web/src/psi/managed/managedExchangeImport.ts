@@ -103,9 +103,11 @@ import {
   markManagedExchangeImported,
   markManagedExchangeKeyImported,
 } from "./managedLocalState";
+import { raisedStandingCondition } from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeRecord,
+  NewManagedExchange,
   RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import type {
@@ -241,23 +243,37 @@ export interface ManagedImportDeps {
   now: () => Date;
 }
 
+/**
+ * The fields a fresh install creates its record from: everything `record`
+ * holds but its `id`, which the install assigns anew, and the platform
+ * grants, which a file cannot bring. The run bookkeeping and a raised
+ * standing condition are kept, so an install on a new profile clears neither.
+ */
+export function managedInstallFields(
+  record: ManagedExchangeRecord,
+): NewManagedExchange {
+  const standingCondition = raisedStandingCondition(record);
+  return {
+    label: record.label,
+    exchangeFile: record.exchangeFile,
+    side: record.side,
+    sharedSecret: record.sharedSecret,
+    ...(record.expires !== undefined ? { expires: record.expires } : {}),
+    ...(record.tokenMaxAgeDays !== undefined
+      ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
+      : {}),
+    ...(record.schedule !== undefined ? { schedule: record.schedule } : {}),
+    ...(record.lastRun !== undefined ? { lastRun: record.lastRun } : {}),
+    ...(standingCondition !== undefined ? { standingCondition } : {}),
+  };
+}
+
 /** The default boundaries: revive or install through the store, mark through the sibling
  * store, and read the wall clock. */
 const defaultDeps: ManagedImportDeps = {
   reviveSpent: reviveSpentManagedExchange,
   install: async (record) =>
-    createManagedExchange({
-      label: record.label,
-      exchangeFile: record.exchangeFile,
-      side: record.side,
-      sharedSecret: record.sharedSecret,
-      ...(record.expires !== undefined ? { expires: record.expires } : {}),
-      ...(record.tokenMaxAgeDays !== undefined
-        ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
-        : {}),
-      ...(record.schedule !== undefined ? { schedule: record.schedule } : {}),
-      ...(record.lastRun !== undefined ? { lastRun: record.lastRun } : {}),
-    }),
+    createManagedExchange(managedInstallFields(record)),
   markImported: markManagedExchangeImported,
   now: () => new Date(),
 };
