@@ -97,7 +97,7 @@ are the standing definition of the managed exchange.
 | ----- | ---- | ----- |
 | `schemaVersion` | string literal | The single recognized literal for v4, `alcove-managed-exchange/v4`; a reader rejects any other value rather than migrating it -- the earlier literals among them, `alcove-managed-exchange/v1` (whose records hold no `standingCondition`) and `alcove-managed-exchange/v2` (whose condition holds no operator response) -- matching the reader-rejects-unknown rule the exchange-record and verification-keys files follow (see [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md)). |
 | `id` | string (UUID) | A locally-generated identifier for this managed exchange, distinct from any rendezvous id. Used only to name the record in local UI; never sent on the wire. |
-| `label` | string, at most 120 characters (enforced at write) | An operator-supplied display name for the partnership. Local only; never sent -- but disclosed to any reader of the store (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). The length cap is enforced; the content guidance is not and cannot be: keeping agreement numbers, contact details, and other sensitive counterparty detail out of the label is **operator cooperation**, exactly as export-source invalidation is -- the field's only structural protections are the cap and its never-sent locality. |
+| `label` | string, at most 120 UTF-16 code units (enforced at write; a character outside the Basic Multilingual Plane counts as two) | An operator-supplied display name for the partnership. Local only; never sent -- but disclosed to any reader of the store (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). The length cap is enforced; the content guidance is not and cannot be: keeping agreement numbers, contact details, and other sensitive counterparty detail out of the label is **operator cooperation**, exactly as export-source invalidation is -- the field's only structural protections are the cap and its never-sent locality. |
 | `exchangeFile` | object | This party's exchange-file document, verbatim: the validated `ExchangeSpec` shape both applications share (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md), "The artifact is the CLI config schema") -- the linkage terms both parties validated (column **shape** and disclosed payload column **names**, never a row value), metadata, standardization, any payload-column commitments, the acceptor's own outbound-payload consent record (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md#payload-disclosure-consent), "Payload-disclosure consent"), the acceptor's `expectedPartnerDeduplicate` -- the cardinality side the accepted invitation declared for the partner, which a re-run holds the partner to (see [EXCHANGE_FILE.md](EXCHANGE_FILE.md#terms-binding-consent), "Terms-binding consent") -- this party's own `includeOwnColumns` output-composition choice, a closed two-value enum naming no column, this party's own `csvDelimiter` -- the field-delimiter choice its input file is read under and its result file written with, naming no column and holding no row value: one character, or the reserved word `detect` where the operator chose to have the delimiter taken from the file itself, a value distinct from the field being absent; an absent field is read and written with a comma, so every record stored without one keeps reading and no migration pass rewrites it -- and the connection block. A record stored before that rule holds no delimiter: it was read by detection and now reads as a comma, with no `schemaVersion` change, so a recurring exchange whose input is not comma-separated fails closed at its next window, with the single-column delimiter remedy stated at launch. It has **no `authentication` block** (the secret lives in `sharedSecret` below) and is composed exactly as the mint layer composes a downloadable file: assembled from a credential-free locator input, validated through the shared schema, with the **parse result** (never the raw input) persisted. The document's operator-authored free-text fields persist verbatim with it: each metadata column's optional `description` (no schema length bound), each standardization step's `params` (an open parameter map -- an authored cleaning step can embed a literal value, a pattern or a replacement string), and `retentionDisposition` (bounded at 1024 characters, the config schema's text bound), plus the terms' own 1024-bounded payload `description` and legal-agreement `purpose` strings. The record stores the document as minted, or as the operator last edited its local settings, so the content guidance for these fields is the same **operator cooperation** the `label` row describes, and no additional bound or strip pass runs at persist time: the document is kept verbatim, and a document the mint layer accepts must remain saveable as managed (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). The document's terms and connection are fixed for the partnership: a re-invite re-issues the document verbatim with only a fresh secret, and exchanging on different terms is a new exchange, not an edit or re-invite of this record. Its three per-party settings -- `includeOwnColumns`, `csvDelimiter`, and `retentionDisposition` -- are local fields the operator edits in place (see [Local settings of the document](#local-settings-of-the-document)). |
 | `side` | enum (`"inviter"` \| `"acceptor"`), or absent | This party's side of the partnership; dispatches a re-run to the matching rendezvous flow (see [Role: a local `side` field](#role-a-local-side-field-not-the-document)). Local-only by design -- not the document's `connection.role`, which no web path reads. Present exactly when the document's connection is `webrtc`, the one channel whose connection names a `role`: a [configuration-only record](#the-configuration-only-record) on `sftp` or `filedrop` holds none, and a reader refuses a record whose `side` and channel disagree. |
 | `inputFileHandle` | `FileSystemFileHandle` or absent | A persisted **pointer** to the operator's input file, held where the File System Access API exists (Chromium), with persistent read permission where the platform grants it (an installed app), so an unattended run reads the standing file with nobody present and an attended re-run is one action. It is a reference, never a copy: no input content or row value derived from it persists, which is where the no-second-copy invariant is enforced. It is also live, not a snapshot: each run calls `getFile()` at run start and reads whatever file exists at the path, the pointer following the name rather than the file that stood there when it was picked -- a `File` already obtained stops being readable once the file underneath it changes, so `File` objects are never retained across runs -- which is what makes putting the current period's extract at the same name the data-refresh workflow, by an overwrite in place, a rename over the name, or a delete and a create (see [The input file each run](../MANAGED_EXCHANGE.md#the-input-file-each-run)). A missing entry at run start fails the file read with a clean not-found, recorded as a benign `"input"` failure (see `lastRun`), never routed through desync/attack framing. What it does add to the store's disclosure is the input file's **name**, and the granted read permission extends an in-origin reader's reach to the file's current contents (see [Metadata at rest](../SECURITY_DESIGN.md#metadata-at-rest-presence-and-shape)). Absent on browsers without the API (each attended run re-selects the file) and in any imported record: the handle is a device- and profile-local platform object stored by structured clone, with no file serialization, so the export artifact omits it and the first run after an import re-acquires one by selection. |
@@ -512,9 +512,12 @@ then:
 - **Edit with no reconstructable bound** -- no prior policy, or a policy but no
   parseable `expires` (the {policy present, bound absent} state, and the corrupt-
   `expires` case). No bound to reconstruct an anchor from, so the anchor is the
-  **edit instant**: the bound is `edit instant + new days`, with no current bound
-  to floor against. Introducing a bound where none was in force only tightens
-  (unbounded to bounded).
+  **edit instant**: the bound is `edit instant + new days`. Where a parseable
+  `expires` is stamped without a policy (the {policy absent, bound present}
+  state, which a key-file import can leave), the bound is floored at it,
+  `min(edit instant + new days, current expires)`, so this arm never moves
+  `expires` later either. Introducing a bound where none was in force only
+  tightens (unbounded to bounded).
 - **Clearing the policy.** Drops `expires` entirely, matching the rotation
   write-back's `null` clear -- a dropped policy must not leave a stale bound armed.
 
@@ -525,7 +528,7 @@ conservative outcome (re-invite recovers a mistaken clear). The schema's day-cou
 cap makes this unreachable through the UI; the rule holds for a schema-bypassing
 caller.
 
-The decoupling has an real consequence, always in the **safe** (never-later)
+The decoupling has a real consequence, always in the **safe** (never-later)
 direction. After a lengthen keeps the current bound, the reconstructed anchor no
 longer matches the real advance instant: `current expires - new (longer) days`
 lands **earlier** than the true anchor. A subsequent shorten therefore computes
@@ -576,6 +579,13 @@ after the fact. They do not reach the entry a [schedule advance](#catch-up-on-wa
 carries: that one is the catch-up walk's verdict on an already-closed window, or
 a skipped window's own stamp, rather than a run in flight, so it states no run
 start and the monotonic rule is what holds a newer success off it.
+
+A stored entry stamped later than the writer's own clock holds nothing off, for
+the run write and the schedule advance alike: the incoming entry replaces it. A
+stamp from the future -- a clock that ran fast and was corrected, or a record
+imported from such a machine -- would otherwise drop every later outcome until
+wall time passed it, the same stamp [catch-up](#catch-up-on-wake) already
+refuses as evidence.
 
 Neither rule reaches the [standing condition](#the-standing-condition) an entry
 raises. They choose which of two runs' **stamps** the record keeps, while the
@@ -848,6 +858,13 @@ recovery surface. The skip costs one exchange its scheduled runs; the rejection
 would cost all of them. The attended read stays strict precisely so the operator
 does meet that surface, which is where a skipped entry is resolved.
 
+The wake reads each record's [local sibling
+state](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
+the same way. A record whose sibling entry this build cannot parse -- a member a
+newer deployment added, or a corrupted value -- is skipped as unreadable, since
+that entry may be the one recording a hand-off, and every other record still
+runs.
+
 #### Catch-up on wake
 
 A runner does not tick while its machine sleeps, so a runtime can wake -- a
@@ -866,8 +883,12 @@ On wake, before attempting anything, the runner applies one catch-up rule:
   attempts it immediately; otherwise `nextWindow` is the first window opening
   after the current instant.
 
-A window is **unattempted** when no run bookkeeping falls inside it. A window
-that does have a `lastRun` was met, so it takes that entry's verdict from the
+A window is **unattempted** when no run bookkeeping falls inside it. A
+`"succeeded"` entry stamped after a window closed and before the next one opens
+is that window's: the stamp is the run's completion, so a run met inside the
+window can finish past its close, and a success in the gap follows that
+window's verdict in time anyway. Any other entry in the gap speaks for no
+window. A window that does have a `lastRun` was met, so it takes that entry's verdict from the
 `consecutiveMisses` row above rather than counting as a miss, and its own
 bookkeeping stands rather than being overwritten by the catch-up's `"missed"`
 entry. The same reading determines the window still open at the wake: a
@@ -943,10 +964,13 @@ pacing gap, and a window whose attempt cap runs out before the close leaves it
 free for the tail (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#cross-tab-single-writer-locking-web-locks)).
 An operator's own Run can take the lock in any such free interval and rotate
-the shared secret, and the occupancy's later attempts then run against a
-rotated record. Their own `lastRun` cannot land over that run's success: the
-write rule in [Recording a run outcome](#recording-a-run-outcome) holds a
-failing run's entry off a success stamped after that run began. An attempt that
+the shared secret. The occupancy does not attempt again after it: the attempt
+after the Run finds its success stamped inside the window on the record it
+reads (below) and ends the occupancy as `"succeeded"`, as catch-up would
+discharge the same window. An attempt already under way when the Run's success
+landed cannot write over it either: the write rule in [Recording a run
+outcome](#recording-a-run-outcome) holds a failing run's entry off a success
+stamped after that run began. An attempt that
 instead meets that Run still in flight -- the lock spans its payload exchange --
 is refused rather than queued, since the scheduled path takes the lock
 fail-fast: the window's disposition is `"unattempted"`, the occupancy ends
@@ -989,10 +1013,24 @@ refusal itself is non-retryable and counts no partner miss, but a window that
 already found the partner absent before it still folds to `"missed"` under the
 table below.
 
-The record's own presence is read on that same per-attempt cadence: a record
-deleted while its window is being occupied stops the attempts after the delete,
-and that window is accounted for nowhere, there being no record left to write
-its bookkeeping onto.
+The record itself is read on that same per-attempt cadence, and each attempt
+runs the record that read returns -- its secret, input handle, document, and
+max-age policy -- never the copy the window was claimed on, so an edit, a
+re-pointed input, or an attended rotation reaches the attempts after it. The
+same read ends the occupancy:
+
+- A record deleted while its window is being occupied stops the attempts after
+  the delete, and that window is accounted for nowhere, there being no record
+  left to write its bookkeeping onto.
+- A record whose schedule was dropped, or whose `anchor`, `intervalDays`,
+  `windowSeconds`, `nextWindow`, or `consecutiveMisses` no longer match the plan
+  the window was claimed on, stops the same way with no disposition: the
+  window's conditioned write would be dropped, and the stored plan is the
+  operator's.
+- A record that lost its input handle, or holds no shared secret, stops with no
+  disposition, as the passed-over records below do.
+- A record whose `lastRun` is a `"succeeded"` entry stamped inside the window
+  ends it as `"succeeded"`: another context met the partner in it.
 
 The window's disposition folds every attempt it took, written once for the window
 rather than once per attempt. A further disposition, `"skipped"`, is decided by
@@ -1002,7 +1040,7 @@ response](#a-due-window-under-the-operators-compromise-response)):
 
 | Disposition | The window | `consecutiveMisses` | Advance has a `lastRun` |
 | ----------- | ---------- | ------------------- | --------------------------- |
-| `"succeeded"` | an attempt completed the exchange | reset to 0 | no -- the run recorded its own |
+| `"succeeded"` | an attempt completed the exchange, or another context recorded a success inside the window | reset to 0 | no -- the run recorded its own |
 | `"missed"` | none did, at least one found the partner absent, and none failed in a way that proves the partner was met | incremented | no -- the run recorded its own |
 | `"failed"` | its attempts failed, none of them on an absent partner -- or one of them proved the partner was met | unchanged | no -- the run recorded its own |
 | `"unattempted"` | its last attempt was refused the single-writer lock, held by another context | unchanged | no -- the window has no bookkeeping |
@@ -1474,12 +1512,14 @@ record, in a separate origin-local store keyed by the record `id`, and are
   own persist would then supersede the copy just handed over. So the spend takes the
   record's [run+rotate lock](#the-secret-is-a-linear-resource) with `ifAvailable`
   before it opens the transaction at all, and refuses while a run holds it, reporting
-  a refusal of its own. The exclusion runs both ways from one lock: a run that begins
-  while the spend holds it waits for the spend to finish (or, on the `ifAvailable`
-  scheduled path, defers the attempt as `"unattempted"`), and then re-reads the spent
-  state that spend wrote as its first act inside the lock, which is the refusal
-  above. Spend and run are therefore mutually excluded rather than observing each
-  other, and neither order leaves a handed-over copy behind a rotation.
+  a refusal of its own. The exclusion runs both ways from one lock: both run paths
+  take it with `ifAvailable` too, so a run that begins while the spend holds it is
+  refused rather than queued -- the attended Run as the exchange being busy, the
+  scheduled path by deferring the attempt as `"unattempted"` -- and any later run
+  re-reads the spent state that spend wrote as its first act inside the lock, which
+  is the refusal above. Waiting for the spend would reach that same refusal later.
+  Spend and run are therefore mutually excluded rather than observing each other,
+  and neither order leaves a handed-over copy behind a rotation.
 
   Stated limit: that exclusion is the Web Locks lock's, so it binds the contexts of
   one browser profile on one machine -- which is the whole scenario, both hand-off
@@ -1594,8 +1634,13 @@ record, in a separate origin-local store keyed by the record `id`, and are
   **structurally**, not by comparing timestamps, by two write-side rules that mirror
   the backup marker's:
   - **Import stamps it.** A fresh install and a revive-in-place both stamp
-    `importedAt` (alongside the backup marker) as of the import instant, so a
-    restored record holds the evidence from the moment it lands. Every [take-back of
+    `importedAt` (alongside the backup marker) as of the import instant. A
+    revive-in-place stamps it in its own transaction, so that record holds the
+    evidence from the moment it lands; a fresh install, from a backup or a
+    command-line pair, stamps it in a separate best-effort write after the
+    install, and a failure of that write leaves the installed record without it,
+    so a stale-secret handshake failure on that record tiers as unexplained
+    rather than as the import. Every [take-back of
     a command-line hand-off](#taking-a-command-line-hand-off-back) stamps it too,
     with or without a key file, and the one that installs a key file's secret clears
     the backup marker rather than stamping it. An import of a command-line
@@ -1616,9 +1661,10 @@ All three are **local siblings by design**. The marker's currency input, this
 device's spent status, and this device's restore history must not travel in the
 export artifact: an imported copy is a fresh live owner, for which "the source
 last backed up on X", "the source was spent", or "the source was imported on X"
-is meaningless. And the record schema is reader-rejects-unknown, so holding any
-of them on the record would force a new `schemaVersion` or leak into the
-artifact. Keeping them siblings makes their non-inclusion **structural**: the
+is meaningless. And the record schema is not strict: a member it does not name
+is dropped on read rather than rejected, and is gone at that build's next write.
+Holding any of them on the record would therefore force a new `schemaVersion`,
+so no older build drops it silently, or leak into the artifact. Keeping them siblings makes their non-inclusion **structural**: the
 exporter reads
 only the record. Deleting a managed exchange removes the record and its sibling
 state together (see [Deleting a managed
@@ -1634,6 +1680,12 @@ nothing. The reconciliation runs in one transaction over the record and sibling
 stores (`reviveSpentManagedExchange`, `managedExchangeStore.ts`), comparing
 secrets in memory, and nothing is written on any outcome but a revive or a fresh
 install.
+
+Stated limit: a fresh install is a second transaction, run after the
+reconciliation has found no match. Two imports of the same artifact racing in
+two tabs can therefore both find none and both install, leaving two live copies
+of one secret, which split at the first rotation either makes exactly as the
+live-copy refusal below describes.
 
 **The outcomes**, each named to the operator:
 
@@ -2212,9 +2264,10 @@ give this party no output -- parks nothing.
 **Why it cannot be a record field.** Two reasons, either sufficient. The export
 artifact must not hold row values, and a sibling store makes that exclusion
 structural, as it does for the markers and the accounting: the exporter reads
-only the record. And the record schema is reader-rejects-unknown, so a
-delivery-state field on the record would make every later delivery shape a
-`schemaVersion` event.
+only the record. And the record schema drops a member it does not name rather
+than rejecting it, so a delivery-state field on the record would make every
+later delivery shape a `schemaVersion` event, lest an older build drop the field
+at its next write.
 
 **The retention is arithmetic, not a timer.** An entry is offered and kept while
 `now` is before `runAt` plus the retention, which is **30 days**. There is no
