@@ -392,6 +392,11 @@ export interface ManagedExchangeRecord {
   schedule?: ManagedExchangeSchedule;
   /** Run bookkeeping; absent until the first run records an outcome. */
   lastRun?: ManagedExchangeLastRun;
+  /** ISO 8601 UTC instant a run began a key exchange that has not saved its
+   * rotated secret: written before the key exchange starts and removed by the
+   * write that stores the rotated secret, so it outlives a run that stopped
+   * between the two. Absent while no rotation is in flight. */
+  rotationInFlightSince?: string;
   /** The unanswered standing condition an `auth` or `storage` failure raised, or
    * {@link NO_STANDING_CONDITION} while none stands. Cleared by the operator's
    * explicit clear-and-acknowledge, by a re-invite, or with the record itself --
@@ -520,6 +525,10 @@ export interface ManagedExchangeKeyFields {
   sharedSecret: string;
   /** The instant after which the secret must not be used; absent means no bound. */
   expires?: string;
+  /** A command-line key file's rotation-in-flight marker. Admitted so such a
+   * file reads; never carried onto a record, whose import is read through the
+   * import marker instead. */
+  rotationInFlightSince?: string;
 }
 
 /**
@@ -533,6 +542,7 @@ export const keyFileFieldsSchema: ZodType<ManagedExchangeKeyFields> = z
   .object({
     sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
     expires: z.iso.datetime().optional(),
+    rotationInFlightSince: z.iso.datetime().optional(),
   })
   .strict();
 
@@ -575,6 +585,7 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
     tokenMaxAgeDays: tokenMaxAgeDaysSchema.optional(),
     schedule: scheduleSchema.optional(),
     lastRun: lastRunSchema.optional(),
+    rotationInFlightSince: z.iso.datetime().optional(),
     standingCondition: standingConditionFieldSchema,
   })
   .refine(
@@ -583,12 +594,13 @@ const ManagedExchangeRecordSchema: ZodType<ManagedExchangeRecord> = z
       (record.expires === undefined &&
         record.schedule === undefined &&
         record.lastRun === undefined &&
+        record.rotationInFlightSince === undefined &&
         record.inputFileHandle === undefined &&
         record.outputDirectoryHandle === undefined),
     {
       message:
         "a record without a sharedSecret is configuration only and must hold " +
-        "no expires, schedule, lastRun, or platform handle",
+        "no expires, schedule, lastRun, rotationInFlightSince, or platform handle",
     },
   )
   .refine(
@@ -950,8 +962,9 @@ export interface ManagedExchangeRotation {
 
 /**
  * Apply a rotation to a record, producing a validated new record with only the
- * rotated secret and the `expires` bound changed -- the document, the label, the
- * schedule, the handle, and the bookkeeping remain untouched. A
+ * rotated secret and the `expires` bound changed and the rotation-in-flight
+ * marker removed in the same write -- the document, the label, the schedule,
+ * the handle, and the run bookkeeping remain untouched. A
  * string `expires` sets the bound; `null` clears it (a policy dropped between runs
  * must not leave a stale bound armed). The result is re-validated through the
  * schema, so a malformed rotated secret is rejected here. The input record is not
@@ -969,13 +982,14 @@ export function applyManagedExchangeRotation(
   };
   if (rotation.expires === null) delete next.expires;
   else next.expires = rotation.expires;
+  delete next.rotationInFlightSince;
   return runnableManagedExchangeOrRefuse(parseManagedExchangeRecord(next));
 }
 
 /**
  * Apply a re-invite rotation to a record: advance the rotated secret and the
- * `expires` bound exactly as {@link applyManagedExchangeRotation}, AND drop any
- * `lastRun` bookkeeping. A re-invite is the recovery for the failure `lastRun`
+ * `expires` bound and remove the rotation-in-flight marker exactly as
+ * {@link applyManagedExchangeRotation}, AND drop any `lastRun` bookkeeping. A re-invite is the recovery for the failure `lastRun`
  * recorded; leaving that entry in place would re-derive the consumed failure at
  * the next visit, and once the import marker is cleared in the same rotation, a
  * stale `auth` failure would re-derive as the attack tier. Clearing it in the
@@ -997,8 +1011,28 @@ export function applyManagedExchangeReinviteRotation(
   if (rotation.expires === null) delete next.expires;
   else next.expires = rotation.expires;
   delete next.lastRun;
+  delete next.rotationInFlightSince;
   next.standingCondition = NO_STANDING_CONDITION;
   return runnableManagedExchangeOrRefuse(parseManagedExchangeRecord(next));
+}
+
+/**
+ * Mark a record's rotation as in flight at `since`, producing a validated new
+ * record: the key exchange is about to start and may rotate the secret before
+ * this device saves the result. A marker already present is kept with its
+ * first instant, since the rotation it records has not completed since. Only
+ * the marker changes; the input record is not mutated.
+ *
+ * @throws {ZodError} if the result is not a valid record.
+ */
+export function applyManagedExchangeRotationInFlight(
+  record: RunnableManagedExchangeRecord,
+  since: string,
+): RunnableManagedExchangeRecord {
+  if (record.rotationInFlightSince !== undefined) return record;
+  return runnableManagedExchangeOrRefuse(
+    parseManagedExchangeRecord({ ...record, rotationInFlightSince: since }),
+  );
 }
 
 /**
@@ -1008,7 +1042,9 @@ export function applyManagedExchangeReinviteRotation(
  * `expires` or policy clearing the stored one, and everything the pair has no
  * field for -- the `id`, label, schedule, `lastRun`, standing condition, and
  * platform grants -- stays as stored, so the revive clears no condition only
- * the operator, a re-invite, or a delete may clear. The inputs are not mutated.
+ * the operator, a re-invite, or a delete may clear. A rotation-in-flight marker
+ * goes with the stored secret when the pair replaces it. The inputs are not
+ * mutated.
  *
  * @throws {ZodError} if the result is not a valid record.
  */
@@ -1026,6 +1062,8 @@ export function applyManagedExchangeCommandLinePair(
   else next.expires = imported.expires;
   if (imported.tokenMaxAgeDays === undefined) delete next.tokenMaxAgeDays;
   else next.tokenMaxAgeDays = imported.tokenMaxAgeDays;
+  if (imported.sharedSecret !== stored.sharedSecret)
+    delete next.rotationInFlightSince;
   return runnableManagedExchangeOrRefuse(parseManagedExchangeRecord(next));
 }
 

@@ -1,4 +1,5 @@
 import {
+  ConnectionError,
   LinkageTermsUnsatisfiableError,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -16,7 +17,10 @@ import {
   withShownCause,
 } from "@recurring/managedRunLaunchModel";
 
-import { SINGLE_COLUMN_DELIMITER_REMEDY } from "@psi/managed/managedFailureCopy";
+import {
+  PARTIAL_ROTATION_FAILURE_TITLE,
+  SINGLE_COLUMN_DELIMITER_REMEDY,
+} from "@psi/managed/managedFailureCopy";
 
 import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
@@ -1193,6 +1197,7 @@ describe("the launch error a classified state shows", () => {
     "already-running": "withheld",
     missed: "withheld",
     storage: "withheld",
+    "partial-rotation": "withheld",
     imported: "withheld",
     unexplained: "withheld",
   };
@@ -1374,5 +1379,67 @@ describe("the launch error a classified state shows", () => {
     expect(withShownCause(bare, new Error("partner text"), unmapped)).toEqual(
       bare,
     );
+  });
+});
+
+describe("a rotation in flight across a crash", () => {
+  const MARKED_AT = "2026-07-13T09:00:00.000Z";
+
+  test("a no-show launched over an interrupted key exchange is the partial-rotation state", () => {
+    const failure = classifyAgainstOneRecord(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record({ rotationInFlightSince: MARKED_AT }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("partial-rotation");
+    expect(failure.title).toBe(PARTIAL_ROTATION_FAILURE_TITLE);
+    expect(failure.recovery).toBe("reinvite");
+    expect(managedRunReinvites(failure)).toBe(true);
+    expect(failure.message).toMatch(/re-invite your partner/i);
+    // Plain re-invite copy, never the confirmation framing.
+    expect(failure.message).not.toMatch(/interfer|trusted channel/i);
+  });
+
+  test("a no-show launched with no marker stays the no-show state", () => {
+    const failure = classifyAgainstOneRecord(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record(),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("missed");
+  });
+
+  test("a failed-closed handshake beside a marker keeps the unexplained state", () => {
+    const failure = classifyAgainstOneRecord(
+      new ConnectionError("key exchange authentication failed", "security"),
+      record({
+        lastRun: failed("auth"),
+        rotationInFlightSince: MARKED_AT,
+      }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("unexplained");
+    expect(failure.recovery).toBe("confirm");
+  });
+
+  test("the next visit reads a recorded no-show after the marker as the partial-rotation state", () => {
+    const failure = withCopy(
+      managedRunFailureFromRecord(
+        record({
+          lastRun: { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
+          rotationInFlightSince: MARKED_AT,
+        }),
+        undefined,
+        NOW,
+      ),
+    );
+    expect(failure.kind).toBe("partial-rotation");
+    expect(failure.recovery).toBe("reinvite");
   });
 });

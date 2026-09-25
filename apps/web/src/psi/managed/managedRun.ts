@@ -78,11 +78,16 @@ interface ManagedRerunSeams<TInput, THandshake, TExchange> {
   /**
    * Open the side-dispatched rendezvous, authenticate the partner, and yield the
    * rotated secret plus the value the data exchange consumes. Receives the
-   * acquired input. The side dispatch and the fresh peer-id derivation live here
-   * (see {@link ./managedRendezvous.ts}); this module only guarantees it runs
-   * after the pre-connection checks and inside the run+rotate lock.
+   * acquired input, and the rotation-in-flight marker write to await once the
+   * partner has connected and before the key exchange starts. The side
+   * dispatch and the fresh peer-id derivation live here (see
+   * {@link ./managedRendezvous.ts}); this module only guarantees it runs after
+   * the pre-connection checks and inside the run+rotate lock.
    */
-  handshake: (input: TInput) => Promise<ManagedRerunHandshake<THandshake>>;
+  handshake: (
+    input: TInput,
+    markRotationInFlight: () => Promise<void>,
+  ) => Promise<ManagedRerunHandshake<THandshake>>;
   /** Run the data exchange -- reachable only after the durable persist resolves.
    * Receives the handshake's output value. */
   dataExchange: (handshake: THandshake) => Promise<TExchange>;

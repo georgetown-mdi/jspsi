@@ -85,6 +85,10 @@ const OUTPUTS: RunOutputs = vi.hoisted(() => ({
   resultsUrl: "blob:results",
 }));
 
+/** The rotation-in-flight marker write the mocked orchestration hands the
+ * handshake, so a case can place it among the wiring's other calls. */
+const markRotationInFlight = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+
 // The rest of the module stays real: the launch surface's classification reads
 // its benign-outcome check.
 vi.mock("../../../src/psi/managed/managedRun.js", async (importOriginal) => ({
@@ -94,12 +98,15 @@ vi.mock("../../../src/psi/managed/managedRun.js", async (importOriginal) => ({
       _record: unknown,
       seams: {
         acquireInput: () => Promise<unknown>;
-        handshake: (input: unknown) => Promise<{ handshake: unknown }>;
+        handshake: (
+          input: unknown,
+          mark: () => Promise<void>,
+        ) => Promise<{ handshake: unknown }>;
         dataExchange: (carried: unknown) => Promise<unknown>;
       },
     ) => {
       const input = await seams.acquireInput();
-      const { handshake } = await seams.handshake(input);
+      const { handshake } = await seams.handshake(input, markRotationInFlight);
       const exchange = await seams.dataExchange(handshake);
       return { exchange, lastRun: { at: 0, outcome: "succeeded" } };
     },
@@ -360,6 +367,48 @@ describe("runManagedExchangeInBrowser", () => {
       );
     },
   );
+
+  test("marks the rotation in flight once the channel opens and before the key exchange", async () => {
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+
+    await runDriver(new AbortController().signal);
+
+    expect(markRotationInFlight).toHaveBeenCalledTimes(1);
+    const markedAt = markRotationInFlight.mock.invocationCallOrder[0];
+    expect(mockedOpen.mock.invocationCallOrder[0]).toBeLessThan(markedAt);
+    expect(markedAt).toBeLessThan(
+      mockedAuthenticate.mock.invocationCallOrder[0],
+    );
+  });
+
+  test("a marker that cannot be written stops the run before the key exchange", async () => {
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    markRotationInFlight.mockRejectedValueOnce(new Error("quota exceeded"));
+
+    await expect(runDriver(new AbortController().signal)).rejects.toThrow(
+      "quota exceeded",
+    );
+    expect(mockedAuthenticate).not.toHaveBeenCalled();
+  });
+
+  test("a partner who never arrives leaves no marker to write", async () => {
+    acquireResources("inviter");
+    mockedWaitForIncoming.mockRejectedValue(
+      new PartnerNoShowError("nobody arrived"),
+    );
+
+    await runDriver(
+      new AbortController().signal,
+      undefined,
+      recordForSide("inviter"),
+    ).catch(() => undefined);
+
+    expect(markRotationInFlight).not.toHaveBeenCalled();
+  });
 
   test("a partner who never arrives reaches the classifier unchanged", async () => {
     // The wiring's rendezvous catch frees the peer and rethrows. Rethrowing the

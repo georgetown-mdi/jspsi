@@ -533,3 +533,19 @@ describe("a configuration-only row", () => {
     );
   });
 });
+
+describe("savedExchangeRow: a rotation in flight across a crash", () => {
+  test("a no-show after an interrupted key exchange names the probable desync and the re-invite", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: { at: "2026-07-10T09:00:00.000Z", outcome: "missed" },
+        rotationInFlightSince: "2026-07-09T09:00:00.000Z",
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(/^Probably out of sync with your partner /);
+    expect(row.status).toMatch(/re-invite/i);
+    expect(row.status).not.toMatch(/attack|tamper|impersonat/i);
+  });
+});

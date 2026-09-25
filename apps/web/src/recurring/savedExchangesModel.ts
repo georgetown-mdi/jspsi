@@ -155,6 +155,8 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
       return `Last run stopped before connecting (${at}); part of its stored copy could not be read`;
     case "storage":
       return `Last run could not be saved (${at}); re-invite to reconnect`;
+    case "partial-rotation":
+      return `Probably out of sync with your partner (${at}); re-invite to reconnect`;
     case "imported":
       return (
         "Restored from a backup or key file, or taken back from the command " +

@@ -97,6 +97,10 @@ export const TOO_LARGE_REMEDY =
   "Split the input into smaller files and set up one exchange for each; if " +
   "the set was your partner's, ask them to split theirs.";
 
+/** The title over the interrupted-rotation failure tier. */
+export const PARTIAL_ROTATION_FAILURE_TITLE =
+  "This exchange is probably out of sync with your partner";
+
 /** The title over the Tier-2 unexplained failure tier. */
 export const UNEXPLAINED_FAILURE_TITLE =
   "This run failed and needs you to check with your partner";

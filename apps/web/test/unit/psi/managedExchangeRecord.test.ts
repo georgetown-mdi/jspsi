@@ -20,12 +20,14 @@ import {
   applyManagedExchangeOutputDirectory,
   applyManagedExchangeReinviteRotation,
   applyManagedExchangeRotation,
+  applyManagedExchangeRotationInFlight,
   applyManagedExchangeScheduleAdvance,
   applyManagedExchangeStandingConditionCleared,
   buildManagedExchangeRecord,
   channelThisAppDoesNotRun,
   composeManagedExchangeFile,
   diagnoseManagedExchangeRecord,
+  keyFileFieldsSchema,
   parseManagedExchangeRecord,
   partitionReadableManagedExchanges,
   runnableManagedExchange,
@@ -1833,5 +1835,90 @@ describe("a record on a channel this app does not run", () => {
     expect(() =>
       buildManagedExchangeRecord({ label: "", exchangeFile: exchangeFile() }),
     ).toThrow(/side exactly when/);
+  });
+});
+
+describe("the rotation-in-flight marker", () => {
+  const MARKED_AT = "2026-07-13T09:00:00.000Z";
+
+  test("is set with its instant, and a later mark keeps the first", () => {
+    const marked = applyManagedExchangeRotationInFlight(
+      runnableRecord(),
+      MARKED_AT,
+    );
+    expect(marked.rotationInFlightSince).toBe(MARKED_AT);
+    expect(
+      applyManagedExchangeRotationInFlight(marked, "2026-07-14T09:00:00.000Z")
+        .rotationInFlightSince,
+    ).toBe(MARKED_AT);
+  });
+
+  test("the rotation write removes it with the secret it stores", () => {
+    const marked = applyManagedExchangeRotationInFlight(
+      runnableRecord(),
+      MARKED_AT,
+    );
+    const rotated = applyManagedExchangeRotation(marked, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(rotated).not.toHaveProperty("rotationInFlightSince");
+  });
+
+  test("the re-invite's rotation removes it too", () => {
+    const marked = applyManagedExchangeRotationInFlight(
+      runnableRecord(),
+      MARKED_AT,
+    );
+    const reinvited = applyManagedExchangeReinviteRotation(marked, {
+      sharedSecret: generateSharedSecret(),
+      expires: null,
+    });
+    expect(reinvited).not.toHaveProperty("rotationInFlightSince");
+  });
+
+  test("a run's bookkeeping leaves it standing", () => {
+    const marked = applyManagedExchangeRotationInFlight(
+      runnableRecord(),
+      MARKED_AT,
+    );
+    const stamped = applyManagedExchangeLastRun(
+      marked,
+      { at: "2026-07-14T09:00:00.000Z", outcome: "missed" },
+      Date.parse("2026-07-14T08:00:00.000Z"),
+    );
+    expect(stamped.rotationInFlightSince).toBe(MARKED_AT);
+  });
+
+  test("a configuration-only record cannot hold one", () => {
+    const configurationOnly = buildManagedExchangeRecord({
+      label: "Riverbend quarterly",
+      exchangeFile: exchangeFile(),
+      side: "inviter",
+    });
+    expect(
+      safeParseManagedExchangeRecord({
+        ...configurationOnly,
+        rotationInFlightSince: MARKED_AT,
+      }).success,
+    ).toBe(false);
+  });
+
+  test("a value that is not an ISO instant is refused", () => {
+    expect(
+      safeParseManagedExchangeRecord({
+        ...runnableRecord(),
+        rotationInFlightSince: "soon",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("a command-line key file holding one reads as a key pair", () => {
+    expect(
+      keyFileFieldsSchema.safeParse({
+        sharedSecret: generateSharedSecret(),
+        rotationInFlightSince: MARKED_AT,
+      }).success,
+    ).toBe(true);
   });
 });

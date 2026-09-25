@@ -15,6 +15,7 @@ import { WebRtcFrameLimitError, sanitizeErrorForDisplay } from "@alcove/core";
 import {
   CONSENT_FAILURE_TITLE,
   INPUT_FAILURE_TITLE,
+  PARTIAL_ROTATION_FAILURE_TITLE,
   SINGLE_COLUMN_DELIMITER_REMEDY,
   TERMS_SHORTFALL_FAILURE_TITLE,
   TOO_LARGE_FAILURE_TITLE,
@@ -113,6 +114,7 @@ export interface ManagedRunFailureAlert {
     | "already-running"
     | "missed"
     | "storage"
+    | "partial-rotation"
     | "imported"
     | "transport"
     | "unexplained";
@@ -375,6 +377,24 @@ const STORAGE_FAILURE: ManagedRunFailureAlert = {
   recovery: "reinvite",
 };
 
+/** The Tier-1 interrupted-rotation state: a key exchange began and did not save
+ * its rotated secret on this device, and a run since then did not meet the
+ * partner -- the pattern a secret the partner saved and this device did not
+ * produces, since the rendezvous derives from the secret. Plain copy naming
+ * re-invite, with no attack checklist: it is read only beside a no-show, never
+ * beside a handshake that failed closed. */
+const PARTIAL_ROTATION_FAILURE: ManagedRunFailureAlert = {
+  kind: "partial-rotation",
+  title: PARTIAL_ROTATION_FAILURE_TITLE,
+  message:
+    "A run stopped during its key exchange before it could save the updated " +
+    "secret on this device, and a run since then did not meet your partner. " +
+    "Your partner probably saved a secret this device does not have. " +
+    "Re-invite your partner to reconnect; the exchange keeps your terms and " +
+    "only replaces the secret.",
+  recovery: "reinvite",
+};
+
 /** The Tier-1 restore/import state: this exchange was restored from a backup or
  * key file, or taken back from the command line, and has not successfully run
  * since, so it may be one the partnership has already moved past. Plain,
@@ -471,6 +491,8 @@ export function managedRunTierFailure(
       return CUSTODY_UNREADABLE_FAILURE;
     case "storage":
       return STORAGE_FAILURE;
+    case "partial-rotation":
+      return PARTIAL_ROTATION_FAILURE;
     case "imported":
       return IMPORTED_FAILURE;
     case "unexplained":
@@ -495,6 +517,7 @@ export function managedRunTierFailure(
 const MISSED_OUTRANKED_BY: ReadonlyArray<ManagedFailureTier> = [
   "expired",
   "storage",
+  "partial-rotation",
   "imported",
 ];
 
@@ -509,7 +532,10 @@ const MISSED_OUTRANKED_BY: ReadonlyArray<ManagedFailureTier> = [
  * the marker: a record whose last run was itself a no-show tiers as `"missed"`
  * while still holding a standing restore. The tier is checked first since it
  * also includes the lapse check and the recorded persist failure, which the
- * marker alone does not. */
+ * marker alone does not.
+ *
+ * A rotation-in-flight marker on the launch record is read the same way: this
+ * run found a key exchange that never saved its rotation, and met no partner. */
 function missedFailure(
   atLaunch: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
@@ -519,6 +545,8 @@ function missedFailure(
   if (MISSED_OUTRANKED_BY.includes(tier))
     return managedRunTierFailure(tier, atLaunch);
   if (importedSinceLastSuccess(local)) return IMPORTED_FAILURE;
+  if (atLaunch.rotationInFlightSince !== undefined)
+    return PARTIAL_ROTATION_FAILURE;
   return MISSED_FAILURE;
 }
 
@@ -570,6 +598,7 @@ export const MANAGED_RUN_NON_DISCLOSURE_ATTESTATION: Readonly<
   input: "none",
   missed: "none",
   storage: "none",
+  "partial-rotation": "none",
   imported: "none",
   transport: "none",
   unexplained: "none",
@@ -634,6 +663,7 @@ const MANAGED_RUN_CAUSE_PLACEMENT: Record<
   "already-running": "withheld",
   missed: "withheld",
   storage: "withheld",
+  "partial-rotation": "withheld",
   imported: "withheld",
   unexplained: "withheld",
 };

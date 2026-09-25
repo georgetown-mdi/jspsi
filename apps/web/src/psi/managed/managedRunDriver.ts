@@ -247,7 +247,7 @@ export function runManagedExchangeInBrowser(
       },
       // Inside the lock: open the side-dispatched rendezvous, authenticate the
       // partner, and yield the rotated secret plus the held exchange resources.
-      handshake: async (input) => {
+      handshake: async (input, markRotationInFlight) => {
         const psiPromise = loadPsiBackend(
           { loadWasm: () => PSI() as Promise<PSILibrary> },
           { isNode: false },
@@ -311,6 +311,10 @@ export function runManagedExchangeInBrowser(
           // this party on the retired secret while the partner holds the new
           // one. Inbound frames wait in the message connection meanwhile.
           const psiLibrary = await psiPromise;
+          // Durable before the key exchange can rotate anything, so a run cut
+          // between the handshake and the rotation write leaves the marker the
+          // next visit reads.
+          await markRotationInFlight();
           // record.expires stays enforced at the handshake (core's pre- and
           // post-handshake guards), covering a bound that lapses between the
           // pre-connection expiry check and here; the orchestration re-maps that

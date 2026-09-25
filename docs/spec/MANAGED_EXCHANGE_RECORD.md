@@ -72,8 +72,8 @@ no-parallel-format contract in [EXCHANGE_FILE.md](EXCHANGE_FILE.md) exists to
 prevent. `camelCase` on the TypeScript side; the persisted key names below are
 the normative field names.
 
-The three bookkeeping fields, `schedule`, `lastRun`, and `standingCondition`,
-hold **no free text**: every field of each is a timestamp, an integer duration,
+The four bookkeeping fields, `schedule`, `lastRun`, `standingCondition`, and
+`rotationInFlightSince`, hold **no free text**: every field of each is a timestamp, an integer duration,
 a closed enum, or a marker admitted only as `true`, so none can accumulate
 narrative, a match result, a count, or a row value. The constraint is the type,
 not a prose promise.
@@ -107,6 +107,7 @@ are the standing definition of the managed exchange.
 | `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). It is a **local field** the operator may edit in place without a re-invite; what the edit does to `expires` is [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires). |
 | `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Absent for an exchange run attended-only. The field-by-field layout is in [The `schedule` object](#the-schedule-object). |
 | `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"` \| `"skipped"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"custody-unreadable"` \| `"input"` \| `"terms-shortfall"` \| `"consent"` \| `"handed-off"` \| `"too-large"` \| `"cancelled"`). A `"missed"` outcome records a no-show: the wait for the other party's runner spent its whole budget with nobody arriving, so no handshake ran. A scheduled run reaches it when an agreed window passes without a completed handshake; an attended run reaches it when its own wait for the partner expires. It has no `failureKind` -- the outcome is the whole account, and it is held apart from `"transport"` (a connection that was made and broke, whose remedy is retrying the connection) and from `"cancelled"` (the operator stopped the run). It is benign, retried at the next window or whenever the operator runs the exchange again, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). A `"skipped"` outcome records an agreed window the scheduled runner declined to open because the operator's [compromise response](#the-operators-response-to-it) stood on the record: nothing connected and nothing rotated, so it is neither a run nor a no-show, it has no `failureKind`, and it leaves the miss count where it stood (see [A due window under the operator's compromise response](#a-due-window-under-the-operators-compromise-response)). An `"input"` failure records a benign pre-run acquisition problem -- the handle's file missing, moved, or unreadable at run start -- detected before any connection, likewise never routed through that framing; putting the file back clears it, so its surface offers the run again. A `"terms-shortfall"` failure records the other benign pre-run input state, held apart from it because its remedy is not another attempt: the file was read and cannot satisfy every linkage key the standing terms declare, so the run is refused before connecting (by the run-start input guard, or by the run boundary's own `assertLinkageTermsSatisfiable` inside the pre-connection prepare), and the same file refuses identically at the next window. Its remedy is a file covering every agreed key, or terms re-agreed with the partner out of band -- never a retry or a bare re-pick. A `"terms-shortfall"` entry additionally holds `singleColumnInput`, admitted only as `true` and omitted rather than written `false`, when the file the run-start input guard read came out as ONE column -- the shape a file separated by something other than this record's `csvDelimiter` comes out as. The reading is what tells the delimiter remedy apart from a real shortfall of the agreed keys, and by the next visit the launch error that held it is gone, so the next visit's summary and the between-visit notification read it off the entry: where it is set both state the delimiter remedy, and where it is absent both state the agreed-keys copy. A `"consent"` failure records the third pre-connection refusal: a send-side disclosure gate refused because the set this run would send is not the one the exchange recorded agreeing to send (see [What the setup consent covers across runs](../MANAGED_EXCHANGE.md#what-the-setup-consent-covers-across-runs)). It is likewise benign and outside that framing. A `"handed-off"` failure records the fourth: the run found this device's copy [spent](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) by an export and refused inside the run+rotate lock, before reading the input file and before connecting, rather than rotating a secret whose owner is now elsewhere. It is the single-owner invariant holding rather than a fault, so it too stays outside the desync/attack framing, and it is the record's own account of a run -- attended or scheduled -- that met a hand-off nobody was present to answer for. A `"custody-unreadable"` failure records the fifth, and it is that same refusal failing to read the entry it decides on: the sibling entry did not validate, or its store did not answer, so the run stopped in the same place rather than rotating on custody it could not establish. It is held apart from `"storage"` because the two leave different states behind -- a `"storage"` failure rotated a secret it could not save, which can leave the two parties holding different ones and is recovered by re-inviting, while this refusal precedes the handshake and rotates nothing, so nothing here is a desync and a fresh secret would replace one nothing moved. A `"too-large"` failure records a refusal to send a PSI set over the bound one WebRTC message holds ([PROTOCOL.md](PROTOCOL.md#the-memory-ceiling-and-the-csv-intake-cap)): the pre-connection first-round check, or a round's own check on the frame it built, which sends the partner an abort in the set's place. It is benign and outside the desync/attack framing, but unlike the five above it can follow the handshake and earlier rounds, so it states nothing about what this run sent. The entry holds no size, as no entry holds a count: the next visit and the between-visit notification state the bound and the remedy -- split the input into smaller exchanges -- and only a live launch shows the refusal's own message, with the size. `"consent"`, `"terms-shortfall"`, `"too-large"`, `"handed-off"`, and `"custody-unreadable"` are the failure kinds a surface must **not** present as retryable: the same input determines the same disclosure, falls the same way short of the same keys, and builds the same too-large set, a handed-off copy refuses identically at every later run, and a run reads the same unreadable entry every time, so the remedy is the operator's, not another attempt's. A record written before a value was added to either enum still reads -- an entry with `"input"` for a shortfall loads and tiers as the generic input state; the converse is the reader-rejects-unknown rule's consequence, an artifact with an outcome or kind this reader does not know being refused whole rather than read with the value dropped. Widening either enum therefore leaves `schemaVersion` where it is: the version moves for a member an older build would read past and lose state by, not for a value it refuses, and not for `singleColumnInput`, whose absence is the agreed-keys copy every build states: a build that does not know it gives worse advice rather than reading a state wrongly. A **re-invite clears `lastRun`** in the same rotation transaction that advances the fresh secret: the re-invite is the recovery for the failure the entry recorded, so leaving it would re-derive a consumed tier at the next visit -- and once the import marker is cleared alongside, a stale `"auth"` failure would re-derive as the attack tier rather than the benign import one. A successful run instead advances `lastRun` to `"succeeded"`; only the re-invite recovery drops it. Which of two runs' entries the store keeps is [Recording a run outcome](#recording-a-run-outcome). |
+| `rotationInFlightSince` | string (ISO 8601, UTC `Z`) or absent | The instant a run began a key exchange that has not saved its rotated secret: written durably after the partner connects and before the key exchange starts, and removed by the rotation write that stores the rotated secret, so a record still holding it outside a run records a key exchange that stopped between the two. What writes and reads it: [The rotation-in-flight marker](#the-rotation-in-flight-marker). Absent in a [configuration-only record](#the-configuration-only-record), and never in the export artifact or the command-line key file this app writes. |
 | `standingCondition` | object | The unanswered **standing condition**: evidence that this device's secret may no longer be the partnership's, raised by a run and not answered since. It holds one of two forms, neither with free text: a raised condition, `since` (ISO 8601 UTC, the instant of the run that raised it) and `kind` (`"auth"` \| `"storage"`), the two `failureKind`s whose remedy is out-of-band rather than an act on this device; or `{"kind": "none"}` while none stands. A raised condition additionally holds the operator's `response` where one has been given -- `kind` (`"compromise"`) and `at` (ISO 8601 UTC, the instant they answered) -- nested inside the condition it answers rather than beside it, so the acts that clear the condition clear the response with it (see [The standing condition](#the-standing-condition)). The field is **required**, so a reader never has to tell a record holding none from one written without the field: a record stored under `alcove-managed-exchange/v1`, which has no such field, is rejected whole and re-established by re-invite, as is one under `alcove-managed-exchange/v2`, whose condition cannot hold a response (see [Versioning](#versioning-an-app-upgrade-can-invalidate-a-stored-record)). It stands BESIDE `lastRun` rather than inside it because `lastRun` holds one run: the next run's stamp replaces it, so a no-show or a later success would otherwise carry the evidence off with the entry that held it and the operator would never again be asked for the confirmation the design requires (see [A standing condition outlives the run that raised it](../MANAGED_EXCHANGE.md#a-standing-condition-outlives-the-run-that-raised-it)). What raises and clears it is [The standing condition](#the-standing-condition). |
 
 Everything in this table except `sharedSecret` is non-secret but not
@@ -1232,19 +1233,22 @@ handshake completion, and the exchange's terminal act is a fire-and-forget final
 send, so the data exchange itself is what the persist must precede. Concretely,
 within a single run:
 
-1. The handshake completes and yields the `AuthResult`
+1. Once the partner has connected, and before the key exchange starts, the
+   [rotation-in-flight marker](#the-rotation-in-flight-marker) is written in a
+   strict-durability transaction awaited to `complete`.
+2. The handshake completes and yields the `AuthResult`
    (`{ sessionKey, rotatedSecret, applyEncryption }`; see
    [PROTOCOL.md](PROTOCOL.md#shared-secret-rotation)).
-2. `sharedSecret` (and `expires`, refreshed from `tokenMaxAgeDays` when a
-   policy is set) is written to
+3. `sharedSecret` (and `expires`, refreshed from `tokenMaxAgeDays` when a
+   policy is set) is written, and the marker removed, in one write to
    IndexedDB in a transaction opened with **`{ durability: "strict" }`**, and the
-   write is awaited to the transaction's `complete` event, before step 3. Strict
+   write is awaited to the transaction's `complete` event, before step 4. Strict
    durability requests OS writeback before `complete` fires; the default
    (relaxed) durability fires `complete` once the write is visible in-process,
    **before** OS writeback -- surviving a tab or renderer crash but not an OS
    crash or power loss. Strict narrows that gap without closing it (it is
    honored variably across engines and is still not a forced media flush).
-3. Only then does the party begin the data exchange and, on completion, mark
+4. Only then does the party begin the data exchange and, on completion, mark
    `lastRun.outcome = "succeeded"`.
 
 This is the browser analog of the CLI's persist-then-exchange ordering, where the
@@ -1259,6 +1263,43 @@ key-file write fails after rotation -- nor an OS crash or power loss under the
 durability limits above, nor wholesale storage eviction (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#surviving-storage-eviction)). That
 residual is covered by fast re-invite, not a stronger at-rest guarantee.
+
+### The rotation-in-flight marker
+
+The persist-before-success ordering cannot close the one-sided window between
+the handshake and the rotation write: a tab killed there leaves the partner on
+the rotated secret and this device on the old one, and on WebRTC the rendezvous
+ids and the relay key both derive from the secret, so each side then records a
+no-show at every window. The `rotationInFlightSince` marker makes that window
+visible after the fact. It changes nothing about the secret: the record still
+holds exactly one live `sharedSecret`, and no previous secret is kept.
+
+- **Written** by the run, inside its run+rotate lock, once the partner has
+  connected and before the key exchange starts
+  (`markManagedExchangeRotationInFlight`,
+  `apps/web/src/psi/managed/managedExchangeStore.ts`), as a strict-durability,
+  field-scoped write awaited to `complete`. A marker already present keeps its
+  first instant. A no-show never reaches it, and a write that fails stops the
+  run before the key exchange, with nothing rotated.
+- **Removed** by the rotation write that stores the rotated secret -- the run's
+  own and a re-invite's -- in the same transaction, and by a take-back that
+  replaces the secret. A run's bookkeeping write does not touch it, so a failed
+  or cut key exchange leaves it standing, as does every no-show after it.
+- **Read** as the `"partial-rotation"` failure tier
+  (`apps/web/src/psi/managed/managedFailureTiers.ts`) only where a no-show is
+  the record's last run, the marker predates that run, and no standing
+  condition is raised: the pattern a secret the partner saved and this device
+  did not produces. A live no-show is read the same way against the record as
+  it stood at launch. The tier is Tier 1, recovered by re-invite with no attack
+  checklist. It never displaces a standing condition, and a failed-closed
+  handshake beside a marker stays the unexplained tier: the marker is evidence
+  for the benign reading only alongside the no-shows it predicts.
+- **Not carried** between devices or applications: the export artifact and the
+  command-line key file this app writes hold none, and a command-line key file
+  holding the CLI's own marker (see
+  [EXCHANGE_FILE.md](EXCHANGE_FILE.md#the-rotation-in-flight-marker)) is read
+  and the marker dropped, since an import is already read through the import
+  marker.
 
 ## Derived, never stored
 

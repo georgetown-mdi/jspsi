@@ -562,6 +562,12 @@ already defines:
   misses stop firing individually while that state stands (the in-app state
   holds it), so a dead partnership on a short cadence does not become a daily
   nag.
+- **This did not run, and it is probably out of sync.** A missed window after
+  a key exchange that never saved its rotated secret (see [A missed window is
+  neither desync nor attack](#a-missed-window-is-neither-desync-nor-attack))
+  names the probable partial rotation and the re-invite in place of the miss
+  notice, once while the state stands, since another automatic retry cannot
+  reach a partner holding a different secret.
 - **This did not run: the window was skipped.** While a compromise response
   stands on the exchange, every due window is skipped rather than attempted (see
   [Telling a desync from an attack](#telling-a-desync-from-an-attack)), so the
@@ -1363,6 +1369,18 @@ no-show state names the persistent case in its own copy, so a partner who was
 demonstrably at their machine at an agreed time and still never arrived is
 pointed at a re-invite rather than at another wait.
 
+One standing reason is left by a run rather than recorded by one: a key exchange
+that began and never saved its rotated secret. The run writes a
+rotation-in-flight marker once the partner connects and before the key exchange
+starts, and the write that stores the rotated secret removes it, so a tab closed
+or killed between the handshake and that write leaves the marker behind -- the
+one-sided rotation the persist-before-success ordering cannot rule out. A
+no-show after it reads as a probable partial rotation, with the re-invite
+recovery and no attack checklist. The marker counts only beside the no-shows it
+predicts: a handshake that failed closed stays the unexplained state whatever the
+marker says, and a standing condition keeps its own reading. Its fields and
+write order are in [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-rotation-in-flight-marker).
+
 That outranking belongs to the run that meets the no-show, and it weighs the
 standing reason as the stored record holds it at that run's launch -- read
 before the run, so the run's own bookkeeping is never what it reads. The
@@ -1444,7 +1462,9 @@ briefly also accept the **previous** rotated secret, so a one-sided persist
 failure self-heals on the next run instead of forcing a re-invite -- is a
 core-level change deferred to a later, separately-reviewed step, and is **not
 implemented anywhere** (neither the CLI nor core accepts a previous secret; the
-only current handling is the re-invite recovery procedure). The first managed
+only current handling is the re-invite recovery procedure, with the
+rotation-in-flight marker that names a probable partial rotation; see [A missed
+window is neither desync nor attack](#a-missed-window-is-neither-desync-nor-attack)). The first managed
 release ships with implicit-only detection plus the explicit recovery
 affordance below.
 
