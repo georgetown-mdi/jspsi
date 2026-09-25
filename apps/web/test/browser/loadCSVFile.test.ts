@@ -7,9 +7,10 @@ import Papa from "papaparse";
 import { loadCSVFile } from "@alcove/core";
 
 // Pin the no-silent-truncation invariant directly. loadCSVFile parses inline
-// (not `worker: true`; see file.ts), but PapaParse still streams a local File in
-// LocalChunkSize chunks, handing `complete` `undefined` once a `chunk` callback
-// is present -- so the rows live only in what the `chunk` handler accumulates.
+// (not `worker: true`; see file.ts), but PapaParse still parses a local File's
+// byte stream chunk by chunk, handing `complete` `undefined` once a `chunk`
+// callback is present -- so the rows live only in what the `chunk` handler
+// accumulates.
 // Before that, a file spanning more than one chunk parsed to a silently
 // truncated subset: a wrong intersection in a record-linkage tool.
 describe("loadCSVFile multi-chunk parsing", () => {
@@ -81,6 +82,27 @@ describe("loadCSVFile multi-chunk parsing", () => {
       value: pad,
     });
   });
+
+  test("reads a multi-byte character that falls on a chunk boundary", async () => {
+    // Rows of 3-byte characters past one LocalChunkSize, with the header
+    // padded so byte LocalChunkSize is the second byte of a character: a read
+    // that decodes each LocalChunkSize slice on its own splits it.
+    const value = "€".repeat(1000);
+    const rowBytes = value.length * 3 + 1;
+    let header = "sym";
+    while (((Papa.LocalChunkSize - header.length - 1) % rowBytes) % 3 !== 1)
+      header += "_";
+    const rowCount = Math.ceil(Papa.LocalChunkSize / rowBytes) + 10;
+    const file = new File(
+      [`${header}\n${Array(rowCount).fill(value).join("\n")}\n`],
+      "euro.csv",
+      { type: "text/csv" },
+    );
+    expect(file.size).toBeGreaterThan(Papa.LocalChunkSize);
+    const result = await loadCSVFile(file);
+    expect(result.data).toHaveLength(rowCount);
+    expect(result.data.filter((row) => row[header] !== value)).toEqual([]);
+  });
 });
 
 describe("loadCSVFile rejects a malformed header", () => {
@@ -125,7 +147,7 @@ describe("loadCSVFile rejects a malformed header", () => {
 });
 
 // The non-stream (browser File) byte-ceiling bound, exercised end to end in a real
-// browser where FileReader exists. loadCSVFile's stream `data`-event counter is
+// browser. loadCSVFile's stream `data`-event counter is
 // inert for a File, so a bounded pre-read of the leading line enforces the ceiling
 // for the web path; the core unit suite pins the pre-read's branches directly,
 // these confirm it is wired through loadCSVFile against a genuine File.

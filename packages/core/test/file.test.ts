@@ -477,10 +477,9 @@ test("loadCSVFile: a header-only file parses to zero rows rather than refusing",
 });
 
 // The non-stream (browser File) bound. loadCSVFile's data-event counter is inert
-// for a File -- PapaParse reads it whole through FileReader, which Node lacks -- so
-// the leading-line pre-read enforces the ceiling there instead. These exercise the
-// pre-read directly (no FileReader needed); the end-to-end parse of a real File is
-// pinned in apps/web's browser suite, where FileReader exists.
+// for a File, which exposes no data events, so the leading-line pre-read enforces
+// the ceiling there instead. These exercise the pre-read directly; the end-to-end
+// parse of a real File is pinned in apps/web's browser suite.
 
 test("assertLeadingLineWithinByteCeiling: a File whose leading line exceeds the ceiling rejects", async () => {
   // No terminator anywhere and a body past the ceiling: the header (here, the whole
