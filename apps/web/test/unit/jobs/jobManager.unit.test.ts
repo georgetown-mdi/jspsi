@@ -104,6 +104,7 @@ function makeManager(options: {
   ignoreSigint?: boolean;
   ignoreSigterm?: boolean;
   readyFile?: string;
+  cancelSigkillGraceMs?: number;
   eventBufferCap?: number;
   jobInputDir?: string;
   jobRendezvousDir?: string;
@@ -148,7 +149,7 @@ function makeManager(options: {
     dataRoot: root,
     binaryPath: STUB_CLI_PATH,
     cancelSigtermGraceMs: 40,
-    cancelSigkillGraceMs: 40,
+    cancelSigkillGraceMs: options.cancelSigkillGraceMs ?? 40,
     eventBufferCap: options.eventBufferCap,
     jobInputDir: options.jobInputDir,
     jobRendezvousDir: rendezvousDir,
@@ -756,10 +757,13 @@ describe("cancellation and deletion", () => {
     const readyFile = path.join(tempDataRoot("sigint-ready"), "ready");
     fs.mkdirSync(path.dirname(readyFile), { recursive: true });
     roots.push(path.dirname(readyFile));
+    // A SIGKILL grace far above the child's SIGTERM exit, so a loaded host
+    // cannot turn the escalation under test into a kill.
     const manager = makeManager({
       delayMs: 5000,
       ignoreSigint: true,
       readyFile,
+      cancelSigkillGraceMs: 4000,
     });
     const id = await manager.createJob(validIntent());
     const record = manager.getJob(id)!;
