@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,7 +25,9 @@ afterEach(() => {
 // agent worktrees use, so the ordering and the nesting are read from real git
 // rather than from a fixture that assumes them.
 function makeRepoWithNestedWorktree() {
-  const root = mkdtempSync(join(tmpdir(), "hook-worktrees-"));
+  // Resolved, as git lists it, since the temporary directory can itself sit
+  // behind a symlink.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "hook-worktrees-")));
   temporary.push(root);
   const run = (...args) => execFileSync("git", args, { cwd: root });
   run("init", "-q", "-b", "primary");
