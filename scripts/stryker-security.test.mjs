@@ -193,6 +193,22 @@ describe("evaluateFloors", () => {
     ]);
   });
 
+  it("lists each zero-tests survivor's line once, in ascending order", () => {
+    const survivorAt = (line) => ({
+      status: "Survived",
+      testsCompleted: 0,
+      location: { start: { line, column: 1 } },
+    });
+    const report = {
+      files: { [FILE]: { mutants: [50, 42, 42].map(survivorAt) } },
+    };
+    const { failures } = evaluateFloors(report, { [FILE]: 0 });
+    expect(failures).toHaveLength(1);
+    expect(failures[0]).toContain(
+      "3 surviving mutants ran zero tests (lines 42, 50).",
+    );
+  });
+
   it("passes survivors that ran tests and uncovered mutants that ran none", () => {
     const report = {
       files: {

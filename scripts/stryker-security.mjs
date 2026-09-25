@@ -216,7 +216,7 @@ export function evaluateFloors(report, scoreFloors) {
       const lines = unexercised
         .map((mutant) => mutant.location?.start?.line)
         .filter((line) => line !== undefined);
-      const distinctLines = [...new Set(lines)];
+      const distinctLines = [...new Set(lines)].sort((a, b) => a - b);
       const where =
         distinctLines.length > 0
           ? ` (${distinctLines.length === 1 ? "line" : "lines"} ${distinctLines.join(", ")})`
