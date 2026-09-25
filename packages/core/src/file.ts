@@ -3,6 +3,7 @@ import Papa from "papaparse";
 import type { LocalFile } from "papaparse";
 
 import { CSV_DELIMITER_DETECT, DEFAULT_CSV_DELIMITER } from "./csvDelimiter.js";
+import { decodedCSVTextSource } from "./csvTextSource.js";
 import { UsageError } from "./errors.js";
 import { stripNameControlChars } from "./utils/nameControls.js";
 
@@ -110,7 +111,7 @@ function rowParseFaultError(error: Papa.ParseError): CsvRowParseError {
  * Reject if the LEADING logical line of a materialized (non-stream) CSV
  * exceeds `byteCeiling` -- the bound {@link loadCSVFile}'s stream guard
  * cannot enforce on a source it does not stream. The web caller passes a
- * browser `File`, read whole through FileReader with no `data` events to
+ * browser `File`, read through its byte stream with no `data` events to
  * scan, so this pre-read scans forward from the start for the first line
  * terminator (LF or CR) before parsing. Finding none within `byteCeiling`
  * bytes means the header -- or the whole file, if it holds no terminator at
@@ -126,9 +127,7 @@ function rowParseFaultError(error: Papa.ParseError): CsvRowParseError {
  * in one pass) returns at once.
  *
  * @internal exported only so the unit tests can drive its resolve cases
- * directly: loadCSVFile cannot reach them in Node, where a File hits
- * PapaParse's FileReader path (absent there). Not re-exported from the
- * package entry point.
+ * directly. Not re-exported from the package entry point.
  */
 export async function assertLeadingLineWithinByteCeiling(
   file: LocalFile,
@@ -253,16 +252,35 @@ export function guardStreamLineByteCeiling(
 }
 
 /**
- * Detach the line-ceiling guard and release the source once a parse settles.
- * PapaParse's teardown -- whether a natural `complete`, an early `parser.abort()`,
- * or an `error` -- does not close the underlying stream, so an
- * `fs.createReadStream` descriptor would otherwise linger until GC; `destroy` is a
- * no-op once a natural EOF has closed it, and skipped for a non-stream LocalFile
- * (no `destroy`).
+ * Open `file` for one PapaParse read: attach the line-ceiling guard to the raw
+ * source ({@link guardStreamLineByteCeiling}), and decode its bytes as one UTF-8
+ * stream ({@link decodedCSVTextSource}), which is the `input` handed to
+ * PapaParse.
+ *
+ * `release` detaches the guard, stops the decoded read, and destroys a Node
+ * source once a parse settles. PapaParse's teardown -- whether a natural
+ * `complete`, an early `parser.abort()`, or an `error` -- does not close the
+ * underlying stream, so an `fs.createReadStream` descriptor would otherwise
+ * linger until GC; `destroy` is a no-op once a natural EOF has closed it, and
+ * skipped for a non-stream LocalFile (no `destroy`).
  */
-function releaseSource(detachGuard: () => void, source: StreamSource): void {
-  detachGuard();
-  source.destroy?.();
+function openCSVSource(
+  file: LocalFile,
+  byteCeiling: number,
+): { input: LocalFile; release: () => void } {
+  const source = file as StreamSource;
+  const detachGuard = guardStreamLineByteCeiling(source, byteCeiling);
+  const text = decodedCSVTextSource(file);
+  return {
+    // PapaParse selects its stream reader by the `readable`/`read`/`on` shape
+    // the decoded source has, not by type.
+    input: text === undefined ? file : (text as unknown as LocalFile),
+    release: () => {
+      detachGuard();
+      text?.release();
+      source.destroy?.();
+    },
+  };
 }
 
 /**
@@ -475,8 +493,8 @@ async function runSharedCSVParse(
   ) => void,
 ): Promise<CSVParseMeta> {
   // Bound the non-stream (browser File) path's leading line before parsing: a File
-  // exposes no `data` events for the stream guard below to scan, since PapaParse
-  // reads it whole through FileReader. A Node stream or string is a no-op here.
+  // exposes no `data` events for the stream guard below to scan. A Node stream or
+  // string is a no-op here.
   await assertLeadingLineWithinByteCeiling(file, byteCeiling);
   return new Promise((resolve, reject) => {
     let meta: Papa.ParseMeta | undefined;
@@ -485,14 +503,13 @@ async function runSharedCSVParse(
 
     // Bound a single logical line on the Node stream path (CLI file/stdin, or the
     // server's opened input file): the guard scans the source's own `data` events
-    // and destroys it past the ceiling, which PapaParse -- reading the same source
-    // -- reports through the `error` callback below. Inert for a non-stream
-    // LocalFile (a browser File has no `data` events); that path is bounded by the
-    // pre-read above instead.
-    const source = file as StreamSource;
-    const detachGuard = guardStreamLineByteCeiling(source, byteCeiling);
+    // and destroys it past the ceiling, which PapaParse -- reading the decoded
+    // source -- reports through the `error` callback below. Inert for a
+    // non-stream LocalFile (a browser File has no `data` events); that path is
+    // bounded by the pre-read above instead.
+    const { input, release } = openCSVSource(file, byteCeiling);
 
-    Papa.parse(file, {
+    Papa.parse(input, {
       ...SHARED_CSV_PARSE_CONFIG,
       delimiter: papaParseDelimiter(delimiter),
       transformHeader: sanitizingHeaderTransform(sanitizedColumnPositions),
@@ -511,7 +528,7 @@ async function runSharedCSVParse(
         if (fault !== undefined) {
           faulted = true;
           parser.abort();
-          releaseSource(detachGuard, source);
+          release();
           reject(rowParseFaultError(fault));
           return;
         }
@@ -528,7 +545,7 @@ async function runSharedCSVParse(
         meta = results.meta;
       },
       complete: () => {
-        releaseSource(detachGuard, source);
+        release();
         // The abort above settles this promise itself and leaves `meta` unset when
         // the fault fell in the first chunk, so stop here rather than fall into the
         // no-chunk invariant below, which that abort would otherwise trip.
@@ -564,7 +581,7 @@ async function runSharedCSVParse(
         // The guard's ceiling trip surfaces here -- it destroys the source with
         // singleLineCeilingError, which PapaParse reports as a read error -- as does
         // a genuine read/stream error.
-        releaseSource(detachGuard, source);
+        release();
         reject(error);
       },
     });
@@ -673,7 +690,9 @@ export async function streamCSVRows(
  * For a well-formed CSV this holds peak memory to the header plus one parse
  * chunk. Two bounds enforce that: `sampleLimit` caps the retained rows, and
  * `byteCeiling` bounds a single logical line, enforced by
- * {@link guardStreamLineByteCeiling}; see {@link CSV_LINE_BYTE_CEILING}.
+ * {@link guardStreamLineByteCeiling} for a Node stream and by
+ * {@link assertLeadingLineWithinByteCeiling} for a browser `File`; see
+ * {@link CSV_LINE_BYTE_CEILING}.
  *
  * `selectColumn` is invoked with the header field list and returns the name
  * of the column to sample (the DOB column, for date-format inference) or
@@ -708,12 +727,35 @@ export function loadCSVColumnSample(
   sampleLimit: number,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
   delimiter?: string,
-): Promise<{
+): Promise<CSVColumnSample> {
+  const read = (): Promise<CSVColumnSample> =>
+    readCSVColumnSample(
+      file,
+      selectColumn,
+      sampleLimit,
+      byteCeiling,
+      delimiter,
+    );
+  // A Node stream is opened synchronously so the parse's listeners attach
+  // before the stream can emit an error; a File's leading line is bounded first.
+  if (typeof (file as StreamSource).on === "function") return read();
+  return assertLeadingLineWithinByteCeiling(file, byteCeiling).then(read);
+}
+
+type CSVColumnSample = {
   columns: Array<string>;
   sanitizedColumnPositions: Array<number>;
   sampledColumn: string | undefined;
   sample: Array<string>;
-}> {
+};
+
+function readCSVColumnSample(
+  file: LocalFile,
+  selectColumn: (columns: Array<string>) => string | undefined,
+  sampleLimit: number,
+  byteCeiling: number,
+  delimiter: string | undefined,
+): Promise<CSVColumnSample> {
   return new Promise((resolve, reject) => {
     let columns: Array<string> | undefined;
     let target: string | undefined;
@@ -725,11 +767,10 @@ export function loadCSVColumnSample(
     // and PapaParse's public `error` contract (see
     // {@link guardStreamLineByteCeiling}). The `sampleLimit` / no-column
     // `parser.abort()` below is a separate, public-API early stop. Inert for
-    // a non-stream LocalFile -- no current caller passes one.
-    const source = file as StreamSource;
-    const detachGuard = guardStreamLineByteCeiling(source, byteCeiling);
+    // a non-stream LocalFile, whose leading line the pre-read above bounds.
+    const { input, release } = openCSVSource(file, byteCeiling);
 
-    Papa.parse(file, {
+    Papa.parse(input, {
       // Inline, never a Web Worker -- same reasoning as loadCSVFile (the bundled
       // worker mis-applies header mode); init runs under Node, where the worker is
       // unavailable regardless.
@@ -778,7 +819,7 @@ export function loadCSVColumnSample(
         }
       },
       complete: () => {
-        releaseSource(detachGuard, source);
+        release();
         // chunk fires at least once for any input -- even an empty or header-only
         // file -- so columns is set unless the parse produced no chunk. Reject that
         // unreachable case rather than mask it, matching loadCSVFile's invariant.
@@ -797,7 +838,7 @@ export function loadCSVColumnSample(
         // The guard's ceiling trip surfaces here -- it destroys the source with
         // singleLineCeilingError, which PapaParse reports as a read error -- as does
         // a genuine read/stream error.
-        releaseSource(detachGuard, source);
+        release();
         reject(error);
       },
     });

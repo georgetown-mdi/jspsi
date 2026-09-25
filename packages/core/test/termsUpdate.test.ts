@@ -133,6 +133,24 @@ describe("terms update", () => {
     expect(err.check).toBe("format");
   });
 
+  test("a padded update is refused by the format check", async () => {
+    // The 32-byte MAC is 43 unpadded characters, so padding adds one "=";
+    // the padded body and MAC still decode to the authentic bytes.
+    const secret = generateSharedSecret();
+    const encoded = await encodeTermsUpdate({ linkageTerms: terms }, secret);
+    const [bodyPart, macPart] = encoded.split(".") as [string, string];
+    const pad = (part: string): string =>
+      part + "=".repeat((4 - (part.length % 4)) % 4);
+    const paddedForms = [`${bodyPart}.${pad(macPart)}`];
+    if (pad(bodyPart) !== bodyPart)
+      paddedForms.push(`${pad(bodyPart)}.${macPart}`);
+    for (const padded of paddedForms) {
+      const err = await refusal(padded, secret);
+      expect(err.check).toBe("format");
+      expect(err.message).toMatch(/"=" padding/);
+    }
+  });
+
   test("an authenticated body with a field outside the format is refused by the format check", async () => {
     // A body only the secret's holder could have authenticated, holding a
     // field a terms update may not: the schema refuses it after the MAC check.

@@ -11,8 +11,8 @@ import { loneSurrogateIndex } from "./wellFormedString.js";
 // implementation, so hashes and signatures over the bytes verify across
 // implementations. Normative spec, reproducible without reading this source:
 // docs/spec/CANONICAL_ENCODING.md. This module is the project's single
-// canonicalization primitive; nothing hashed, committed, or signed may use ad
-// hoc `JSON.stringify` or key-sorting instead.
+// canonicalization primitive; a value another party re-encodes to check a hash
+// or signature may not use ad hoc `JSON.stringify` or key-sorting instead.
 //
 // RFC 8785 itself is delegated to the `canonicalize` package (the scheme
 // author's reference implementation). What this module adds is a strict
@@ -43,8 +43,8 @@ export type CanonicalValue =
  * the reproducible domain (see {@link assertCanonical}). The message names
  * the offending value's JSON path (e.g. `$.linkageKeys[0].elements[1]`), or
  * the root `$` for an error the boundary guard in {@link canonicalString}
- * converts (a throwing getter, or a circular reference overflowing the
- * traversal) -- the precise location is not recoverable there, but the
+ * converts (a circular reference overflowing the traversal, or a throwing
+ * Proxy trap) -- the precise location is not recoverable there, but the
  * original error is preserved on `.cause`.
  *
  * Extends {@link UsageError}: a value outside the canonical domain is a
@@ -99,15 +99,31 @@ function isPlainObject(value: object): boolean {
 }
 
 /**
+ * The own property `key` of `value` as a data property's value. An accessor is
+ * refused: the validator and `canonicalize` each read the property, so a getter
+ * could return an in-domain value to one and anything to the other.
+ */
+function dataPropertyValue(value: object, key: string, path: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor !== undefined && !("value" in descriptor))
+    fail("accessor property; canonical values hold data properties only", path);
+  return descriptor?.value;
+}
+
+/**
  * Reject a value that has a callable `toJSON`. `canonicalize` checks
  * `typeof object.toJSON === "function"` before it inspects `Array.isArray` or
  * enumerates keys, so it would serialize `toJSON()`'s return instead of the
  * array or object actually passed -- a silent coercion, undetectable by an
  * element/property walk (the method may be non-enumerable, and on an array is
- * never an indexed element). The pre-validator mirrors that precedence.
+ * never an indexed element). The pre-validator mirrors that precedence. An
+ * own `toJSON` accessor is refused without running its getter.
  */
 function assertNoToJson(value: object, path: string): void {
-  if (typeof (value as { toJSON?: unknown }).toJSON === "function")
+  const toJson = Object.hasOwn(value, "toJSON")
+    ? dataPropertyValue(value, "toJSON", `${path}.toJSON`)
+    : (value as { toJSON?: unknown }).toJSON;
+  if (typeof toJson === "function")
     fail(
       "value defines a toJSON method, which would replace it during encoding; " +
         "convert it to plain data first",
@@ -152,9 +168,15 @@ function assertCanonical(value: unknown, path: string): void {
     case "object": {
       if (value === null) return;
       if (Array.isArray(value)) {
+        if (Object.getPrototypeOf(value) !== Array.prototype)
+          fail(
+            `unsupported array type (${value.constructor?.name || "unknown"}); ` +
+              "canonical arrays are plain arrays",
+            path,
+          );
         assertNoToJson(value, path);
-        // canonicalize serializes only elements [0, length) (via Array.map),
-        // so any own property it cannot reach -- a non-index string key
+        // canonicalize serializes only elements [0, length), so any own
+        // property it cannot reach -- a non-index string key
         // (`arr.foo`, enumerable or not) or a symbol key -- would be silently
         // dropped. Reject them so the array case is as complete as the object
         // case below. (`length` is the intrinsic own property, not an element.)
@@ -172,16 +194,19 @@ function assertCanonical(value: unknown, path: string): void {
         if (Object.getOwnPropertySymbols(value).length > 0)
           fail("symbol-keyed array property", path);
         // Index loop, not forEach/for-of: both skip sparse holes (`[1,,3]`),
-        // which canonicalize mis-serializes -- its `map`/`join` renders a hole
-        // as an empty element (the string `[1,,3]`, invalid JSON). A hole is a
-        // missing element, so reject it as an explicit `undefined` element is.
+        // which canonicalize writes as `null`. A hole is a missing element, so
+        // reject it as an explicit `undefined` element is.
         for (let index = 0; index < value.length; index++) {
-          if (!(index in value))
+          const elementPath = `${path}[${index}]`;
+          if (!Object.hasOwn(value, index))
             fail(
               "sparse array hole; use null for an explicit gap",
-              `${path}[${index}]`,
+              elementPath,
             );
-          assertCanonical(value[index], `${path}[${index}]`);
+          assertCanonical(
+            dataPropertyValue(value, String(index), elementPath),
+            elementPath,
+          );
         }
         return;
       }
@@ -205,20 +230,19 @@ function assertCanonical(value: unknown, path: string): void {
             "canonical objects use string keys only",
           path,
         );
-      // Object.entries includes a key explicitly set to `undefined`, so the
-      // recursive call rejects it rather than letting canonicalize drop it.
-      // A getter that throws escapes here as its own raw error, not a
-      // CanonicalEncodingError; the boundary try/catch in canonicalString
-      // converts it, holding the module's single-error-type contract even for
-      // non-schema-parsed input. Identifier-like keys extend the path with dot
-      // notation; any other key uses bracket notation, e.g. `$["a.b"]` rather
-      // than `$.a.b`.
-      for (const [key, child] of Object.entries(value)) {
+      // Every own string key, so a non-enumerable one -- which canonicalize's
+      // Object.keys would drop -- is refused, and a key explicitly set to
+      // `undefined` reaches the recursive call's refusal rather than being
+      // dropped. Identifier-like keys extend the path with dot notation; any
+      // other key uses bracket notation, e.g. `$["a.b"]` rather than `$.a.b`.
+      for (const key of Object.getOwnPropertyNames(value)) {
         const childPath = /^[A-Za-z_$][\w$]*$/.test(key)
           ? `${path}.${key}`
           : `${path}[${JSON.stringify(key)}]`;
         assertWellFormedString(key, childPath, "object key");
-        assertCanonical(child, childPath);
+        if (!Object.prototype.propertyIsEnumerable.call(value, key))
+          fail("non-enumerable property", childPath);
+        assertCanonical(dataPropertyValue(value, key, childPath), childPath);
       }
       return;
     }
@@ -226,6 +250,26 @@ function assertCanonical(value: unknown, path: string): void {
       // undefined, bigint, symbol, function
       fail(`unsupported value of type ${typeof value}`, path);
   }
+}
+
+/**
+ * Install `String.prototype.isWellFormed` where the engine lacks it (it is
+ * ES2024: Chrome before 111, Safari before 16.4, Firefox before 119).
+ * `canonicalize` calls it on every string it serializes, so without it every
+ * encoding fails. Checked on each call rather than once at load, so a test that
+ * removes the method reaches this path.
+ */
+function installIsWellFormedIfAbsent(): void {
+  const prototype = String.prototype as { isWellFormed?: unknown };
+  if (typeof prototype.isWellFormed === "function") return;
+  Object.defineProperty(String.prototype, "isWellFormed", {
+    value: function isWellFormed(this: string): boolean {
+      return loneSurrogateIndex(String(this)) === -1;
+    },
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
 }
 
 /**
@@ -240,12 +284,12 @@ function assertCanonical(value: unknown, path: string): void {
 export function canonicalString(value: unknown): string {
   try {
     // assertCanonical MUST run first: the safety of the output rests entirely
-    // on it catching every value canonicalize would coerce. canonicalize does
-    // not uniformly skip out-of-domain values -- e.g. a function-valued
-    // property is stringified to the literal `undefined`, producing invalid
-    // JSON -- so the pre-validator, not canonicalize, guarantees well-formed
-    // output.
+    // on it catching every value canonicalize would coerce. canonicalize
+    // substitutes or drops out-of-domain values -- a function-valued member is
+    // omitted, an array hole is written as `null`, a Date is written through
+    // its toJSON -- so the pre-validator, not canonicalize, holds the domain.
     assertCanonical(value, "$");
+    installIsWellFormedIfAbsent();
     const encoded = canonicalize(value);
     // canonicalize returns undefined for any top-level value that
     // JSON.stringify drops entirely -- undefined, a function, or a symbol.
@@ -256,10 +300,10 @@ export function canonicalString(value: unknown): string {
   } catch (err) {
     // Boundary guard upholding the module's contract that every rejection is
     // a CanonicalEncodingError. Domain rejections hold their precise JSON
-    // path, so re-throw them unchanged. Anything else (a throwing getter, a
-    // circular reference that overflows the recursion) is converted to a
-    // root-pathed CanonicalEncodingError with the original preserved on
-    // `.cause`.
+    // path, so re-throw them unchanged. Anything else (a circular reference
+    // that overflows assertCanonical's recursion, a throwing Proxy trap) is
+    // converted to a root-pathed CanonicalEncodingError with the original
+    // preserved on `.cause`.
     if (err instanceof CanonicalEncodingError) throw err;
     fail(
       `unexpected error during traversal (${

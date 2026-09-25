@@ -339,19 +339,103 @@ describe("values outside the canonical domain are rejected", () => {
   });
 });
 
+describe("values the encoder would read differently from the validator", () => {
+  test("an Array subclass is rejected, not encoded as a plain array", () => {
+    class Tagged extends Array<number> {}
+    const value = { a: Tagged.from([1, 2]) };
+    expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);
+    expect(() => canonicalString(value)).toThrow(
+      /\$\.a: unsupported array type \(Tagged\)/,
+    );
+  });
+
+  test("a non-enumerable string key is rejected, not dropped", () => {
+    const value = { a: 1 };
+    Object.defineProperty(value, "b", { value: 2, enumerable: false });
+    expect(() => canonicalString(value)).toThrow(
+      /\$\.b: non-enumerable property/,
+    );
+  });
+
+  test("a getter is rejected without being read twice", () => {
+    let reads = 0;
+    const value = {
+      get when(): unknown {
+        reads += 1;
+        return reads === 1 ? 1 : new Date(0);
+      },
+    };
+    expect(() => canonicalString(value)).toThrow(/\$\.when: accessor property/);
+    expect(reads).toBe(0);
+  });
+
+  test("a toJSON getter is rejected without being read", () => {
+    let reads = 0;
+    const toJsonGetter = {
+      get: (): unknown => {
+        reads += 1;
+        return undefined;
+      },
+    };
+    const obj = {};
+    Object.defineProperty(obj, "toJSON", { ...toJsonGetter, enumerable: true });
+    const arr: unknown[] = [1];
+    Object.defineProperty(arr, "toJSON", toJsonGetter);
+    expect(() => canonicalString(obj)).toThrow(/\$\.toJSON: accessor property/);
+    expect(() => canonicalString(arr)).toThrow(/\$\.toJSON: accessor property/);
+    expect(reads).toBe(0);
+  });
+
+  test("a getter on an array element is rejected", () => {
+    const arr: unknown[] = [1, 2];
+    Object.defineProperty(arr, 1, { get: () => 2, enumerable: true });
+    expect(() => canonicalString({ a: arr })).toThrow(
+      /\$\.a\[1\]: accessor property/,
+    );
+  });
+});
+
+describe("an engine without String.prototype.isWellFormed", () => {
+  test("still encodes, and still refuses a lone surrogate", () => {
+    const prototype = String.prototype as { isWellFormed?: unknown };
+    const original = Object.getOwnPropertyDescriptor(
+      String.prototype,
+      "isWellFormed",
+    );
+    delete prototype.isWellFormed;
+    try {
+      expect(canonicalString({ b: "x", a: ["\u{1F600}"] })).toBe(
+        '{"a":["\u{1F600}"],"b":"x"}',
+      );
+      expect(() => canonicalString({ a: "\uD800" })).toThrow(
+        /unpaired UTF-16 surrogate/,
+      );
+    } finally {
+      if (original === undefined) delete prototype.isWellFormed;
+      else Object.defineProperty(String.prototype, "isWellFormed", original);
+    }
+  });
+});
+
 // --- boundary guard: every rejection is a CanonicalEncodingError --------------
 
 describe("the boundary guard keeps the single-error-type contract", () => {
-  test("a throwing enumerable getter shows as a CanonicalEncodingError, not the raw error", () => {
-    // Only a non-schema-parsed object can have a throwing getter here: the
-    // traversal in assertCanonical (and canonicalize) reads the getter,
-    // which throws. The boundary try/catch in canonicalString converts the
-    // raw error so callers still see the module's one error type.
-    const value = {
-      get boom(): never {
-        throw new RangeError("getter blew up");
+  /** An object whose own-key enumeration throws `error`. */
+  const throwingKeys = (error: unknown): object =>
+    new Proxy(
+      {},
+      {
+        ownKeys() {
+          throw error;
+        },
       },
-    };
+    );
+
+  test("a throwing Proxy trap shows as a CanonicalEncodingError, not the raw error", () => {
+    // Only a non-schema-parsed value can be a Proxy. The boundary try/catch in
+    // canonicalString converts the raw error so callers still see the module's
+    // one error type.
+    const value = throwingKeys(new RangeError("trap blew up"));
     expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);
     expect(() => canonicalString(value)).toThrow(
       /unexpected error during traversal/,
@@ -360,17 +444,12 @@ describe("the boundary guard keeps the single-error-type contract", () => {
 
   test("the converted error preserves the original as its cause", () => {
     // The boundary message is pathed at the root `$`, so the original error --
-    // attached as `.cause` -- is what still locates the offending property (via
+    // attached as `.cause` -- is what still locates the offending value (via
     // its stack). Guard that the link is not dropped.
-    const original = new RangeError("getter blew up");
-    const value = {
-      get boom(): never {
-        throw original;
-      },
-    };
+    const original = new RangeError("trap blew up");
     let caught: unknown;
     try {
-      canonicalString(value);
+      canonicalString(throwingKeys(original));
     } catch (err) {
       caught = err;
     }
@@ -378,22 +457,15 @@ describe("the boundary guard keeps the single-error-type contract", () => {
     expect((caught as CanonicalEncodingError).cause).toBe(original);
   });
 
-  test("a throwing getter nested below the root is still converted", () => {
-    const value = {
-      outer: {
-        get boom(): never {
-          throw new RangeError("deep getter blew up");
-        },
-      },
-    };
+  test("a throwing trap nested below the root is still converted", () => {
+    const value = { outer: throwingKeys(new RangeError("deep trap")) };
     expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);
   });
 
   test("a circular reference shows as a CanonicalEncodingError, not a raw stack overflow", () => {
     // assertCanonical recurses into the cycle until the stack overflows;
     // the boundary guard converts that RangeError to a
-    // CanonicalEncodingError. Only non-schema-parsed data can form a
-    // cycle, so this shares the throwing-getter reachability.
+    // CanonicalEncodingError. Only non-schema-parsed data can form a cycle.
     const value: Record<string, unknown> = {};
     value.self = value;
     expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);

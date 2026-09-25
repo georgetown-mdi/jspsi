@@ -98,8 +98,8 @@ class FakeCSVParseWorker implements CSVParseWorker {
 
 describe("loadCSVFileOffMainThread: inline fallback", () => {
   test("parses a Node readable stream inline, without a worker", async () => {
-    // The CLI/test input is a Node stream, which is not structured-cloneable and has
-    // no FileReader path, so it always parses inline through core's loadCSVFile.
+    // The CLI/test input is a Node stream, which is not structured-cloneable,
+    // so it always parses inline through core's loadCSVFile.
     const result = await loadCSVFileOffMainThread(Readable.from("a,b\n1,2\n"));
     expect(result.data).toEqual([{ a: "1", b: "2" }]);
     expect(result.meta.fields).toEqual(["a", "b"]);

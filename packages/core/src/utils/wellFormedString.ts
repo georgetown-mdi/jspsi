@@ -12,7 +12,8 @@
  * disagree about which strings are encodable.
  *
  * A code-unit scan rather than `String.prototype.isWellFormed`, which is
- * ES2024 while this package compiles against the ES2022 lib.
+ * ES2024 while this package compiles against the ES2022 lib; the canonical
+ * encoder installs it from this scan where the engine lacks it.
  */
 export function loneSurrogateIndex(value: string): number {
   for (let index = 0; index < value.length; index++) {

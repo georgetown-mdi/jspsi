@@ -55,7 +55,7 @@ export const CSV_WORKER_FILE_BYTE_THRESHOLD = 4 * 1024 * 1024;
 /** Worker request: parse this File, bounding a single logical line at `byteCeiling`
  * (undefined lets core apply its own default) and splitting fields on `delimiter`
  * (undefined lets core's read take a comma). A File is the only input the
- * worker takes -- it is structured-cloneable and read via FileReader in the worker,
+ * worker takes -- it is structured-cloneable and read as a byte stream in the worker,
  * which a Node stream is not. */
 export interface CSVParseRequest {
   file: File;
@@ -131,7 +131,7 @@ export interface CSVParseWorker {
 type SpawnCSVParseWorker = () => CSVParseWorker;
 
 /** Whether `file` is a browser File -- the only input a worker can take
- * (structured-cloneable, and read via FileReader in the worker); a Node stream is
+ * (structured-cloneable, and read as a byte stream in the worker); a Node stream is
  * not. Guards the `File` reference so it never throws where `File` is undefined (an
  * older runtime or SSR). */
 function isBrowserFile(file: CSVParseInput): file is File {

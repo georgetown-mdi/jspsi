@@ -5,6 +5,7 @@ import { expect, test, vi } from "vitest";
 import {
   assertLeadingLineWithinByteCeiling,
   CSV_LINE_BYTE_CEILING,
+  CsvLineByteCeilingError,
   CsvRowParseError,
   guardStreamLineByteCeiling,
   loadCSVColumnSample,
@@ -12,6 +13,7 @@ import {
   streamCSVRows,
 } from "../src/file";
 import { UsageError } from "../src/errors";
+import { inferDateInputFormatFromSource } from "../src/inferDateInputFormat";
 import { inferDateFormat, columnValues } from "../src/utils/date";
 import type { CSVRow } from "../src/file";
 
@@ -477,10 +479,9 @@ test("loadCSVFile: a header-only file parses to zero rows rather than refusing",
 });
 
 // The non-stream (browser File) bound. loadCSVFile's data-event counter is inert
-// for a File -- PapaParse reads it whole through FileReader, which Node lacks -- so
-// the leading-line pre-read enforces the ceiling there instead. These exercise the
-// pre-read directly (no FileReader needed); the end-to-end parse of a real File is
-// pinned in apps/web's browser suite, where FileReader exists.
+// for a File, which exposes no data events, so the leading-line pre-read enforces
+// the ceiling there instead. These exercise the pre-read directly; the end-to-end
+// parse of a real File is pinned in apps/web's browser suite.
 
 test("assertLeadingLineWithinByteCeiling: a File whose leading line exceeds the ceiling rejects", async () => {
   // No terminator anywhere and a body past the ceiling: the header (here, the whole
@@ -510,6 +511,17 @@ test("assertLeadingLineWithinByteCeiling: a terminator within the ceiling resolv
   await expect(
     assertLeadingLineWithinByteCeiling(file, ceiling),
   ).resolves.toBeUndefined();
+});
+
+test("loadCSVColumnSample and inferDateInputFormatFromSource refuse a terminator-free File over the ceiling", async () => {
+  const ceiling = 1024;
+  const file = new File(["x".repeat(4 * 1024 * 1024)], "huge.csv");
+  await expect(
+    loadCSVColumnSample(file, pickDob, 1000, ceiling),
+  ).rejects.toBeInstanceOf(CsvLineByteCeilingError);
+  await expect(
+    inferDateInputFormatFromSource(file, ceiling),
+  ).rejects.toBeInstanceOf(CsvLineByteCeilingError);
 });
 
 test("assertLeadingLineWithinByteCeiling: a File no larger than the ceiling is not read", async () => {
@@ -568,7 +580,7 @@ test("assertLeadingLineWithinByteCeiling: a no-terminator file over a ceiling ab
 
 test("loadCSVFile: a browser File with a no-newline leading line over the ceiling fails fast", async () => {
   // Wires the pre-read into loadCSVFile end to end: the File the web caller passes
-  // rejects before parsing, so PapaParse's FileReader path is never reached. This
+  // rejects before parsing, so openCSVSource never opens a decode source. This
   // bounds the web path, which exposes no `data` events for the stream guard.
   const ceiling = 512;
   const file = new File(["x".repeat(ceiling * 2)], "data.csv", {
