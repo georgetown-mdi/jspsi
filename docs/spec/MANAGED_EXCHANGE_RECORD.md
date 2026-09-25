@@ -949,9 +949,11 @@ attempt.
 A window catch-up lands on and finds open is **occupied**, not waited out in one
 call. The runner makes bounded re-attempts across it: each attempt waits for the
 partner's runner up to the human-timescale budget both one-shot roles share,
-clamped to what is left of the window, and the next attempt begins no sooner than
-a fixed pacing interval after the last one started, up to a cap on attempts per
-window. One window-long wait would put the whole window on a single broker
+clamped to what is left of the window -- as is each seat's registration with the
+signaling server, bounded by the smaller of its own
+[budget](WEBRTC_TRANSPORT.md#budgets) and that remainder -- and the next
+attempt begins no sooner than a fixed pacing interval after the last one
+started, up to a cap on attempts per window. One window-long wait would put the whole window on a single broker
 registration surviving that long; the pacing and the cap are what keep an attempt
 that fails immediately from spending the window in a loop. The pacing interval is
 itself bounded by the close, which ends the occupancy in any case.

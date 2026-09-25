@@ -9,10 +9,10 @@ import {
 } from "@alcove/core";
 
 import {
-  BROKER_REGISTRATION_TIMED_OUT,
   BROKER_REGISTRATION_TIMEOUT_MS,
   WEBRTC_ENDPOINT_HOST_REFUSED,
   WEBRTC_ENDPOINT_PATH_REFUSED,
+  brokerRegistrationTimedOutMessage,
   dialAsAcceptor,
   listenAsInviter,
 } from "../../../src/psi/transport/rendezvous.js";
@@ -404,7 +404,16 @@ describe("dialAsAcceptor", () => {
 describe("a signaling server that never confirms registration", () => {
   test("the spec's 30 s bound is the default", () => {
     expect(BROKER_REGISTRATION_TIMEOUT_MS).toBe(30_000);
-    expect(BROKER_REGISTRATION_TIMED_OUT).toContain("30 seconds");
+    expect(
+      brokerRegistrationTimedOutMessage(BROKER_REGISTRATION_TIMEOUT_MS),
+    ).toContain("within 30 seconds.");
+  });
+
+  test("the timed-out message states the bound that was applied", () => {
+    expect(brokerRegistrationTimedOutMessage(12_000)).toContain(
+      "within 12 seconds.",
+    );
+    expect(brokerRegistrationTimedOutMessage(5)).toContain("within 1 second.");
   });
 
   test("the acceptor gives up at the bound and destroys the peer", async () => {
@@ -419,7 +428,7 @@ describe("a signaling server that never confirms registration", () => {
     expect(rejection).toBeInstanceOf(ConnectionError);
     expect(rejection).toMatchObject({
       kind: "transport",
-      message: BROKER_REGISTRATION_TIMED_OUT,
+      message: brokerRegistrationTimedOutMessage(5),
     });
     expect(rejection).not.toBeInstanceOf(PartnerNoShowError);
     expect(fake.connect).not.toHaveBeenCalled();
@@ -438,7 +447,7 @@ describe("a signaling server that never confirms registration", () => {
 
     expect(rejection).toMatchObject({
       kind: "transport",
-      message: BROKER_REGISTRATION_TIMED_OUT,
+      message: brokerRegistrationTimedOutMessage(5),
     });
     expect(fake.destroy).toHaveBeenCalledTimes(1);
   });

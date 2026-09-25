@@ -66,13 +66,16 @@ const DEFAULT_DIAL_ATTEMPT_TIMEOUT_MS = 30_000;
  */
 export const BROKER_REGISTRATION_TIMEOUT_MS = 30_000;
 
-/** What a party whose registration ran past
- * {@link BROKER_REGISTRATION_TIMEOUT_MS} is told. */
-export const BROKER_REGISTRATION_TIMED_OUT =
-  `The signaling server did not accept the connection within ` +
-  `${BROKER_REGISTRATION_TIMEOUT_MS / 1000} seconds. Check the network ` +
-  `connection and try again; if it keeps happening, the signaling server may ` +
-  `be down.`;
+/** What a party whose registration ran past a `timeoutMs` bound is told. */
+export function brokerRegistrationTimedOutMessage(timeoutMs: number): string {
+  const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+  return (
+    `The signaling server did not accept the connection within ` +
+    `${seconds} second${seconds === 1 ? "" : "s"}. Check the network ` +
+    `connection and try again; if it keeps happening, the signaling server ` +
+    `may be down.`
+  );
+}
 
 /**
  * Backoff between dial attempts while the inviter has not yet registered its
@@ -273,10 +276,10 @@ function acceptorLocationFromEndpoint(
  * Resolves once `peer` is registered with the broker (its `open` event), or
  * rejects on a pre-open `error`, an abort, or `timeoutMs` passing first -- the
  * last as a `transport`-kind {@link ConnectionError} stating
- * {@link BROKER_REGISTRATION_TIMED_OUT}. A settle-once guard detaches every
- * listener and clears the timer exactly once. Does NOT destroy the peer on
- * failure -- the public caller owns that, so the destroy happens in exactly one
- * place.
+ * {@link brokerRegistrationTimedOutMessage} for that bound. A settle-once guard
+ * detaches every listener and clears the timer exactly once. Does NOT destroy
+ * the peer on failure -- the public caller owns that, so the destroy happens in
+ * exactly one place.
  */
 function waitForPeerOpen(
   peer: Peer,
@@ -302,7 +305,12 @@ function waitForPeerOpen(
       );
     const timer = setTimeout(() => {
       settle(() =>
-        reject(new ConnectionError(BROKER_REGISTRATION_TIMED_OUT, "transport")),
+        reject(
+          new ConnectionError(
+            brokerRegistrationTimedOutMessage(options.timeoutMs),
+            "transport",
+          ),
+        ),
       );
     }, options.timeoutMs);
     peer.once("open", onOpen);
