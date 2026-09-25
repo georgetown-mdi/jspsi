@@ -182,6 +182,33 @@ export class OperatorConfigError extends UsageError {
 }
 
 /**
+ * A PSI set too large for one WebRTC message, refused by the party that would
+ * have sent it before it goes on the wire: at the start of a WebRTC exchange,
+ * from this party's own record count, or at a round, from the frame the round
+ * built (docs/spec/PROTOCOL.md, "The memory ceiling, and the CSV intake cap").
+ * The message names the size, the bound, and the remedy, and is composed only
+ * from frame sizes and fixed constants.
+ *
+ * `setOwner` names whose set the frame would have held: `"local"` for this
+ * party's own, `"partner"` for the reply that returns the partner's set to it.
+ * Not an {@link OperatorConfigError}: the reply's size is set by the partner's
+ * set, and that family's messages hold only this party's own configuration.
+ * Holds `alcoveRecoveryHintEmitted`: a retry refuses identically, so the CLI's
+ * generic retry advisory is suppressed.
+ */
+export class WebRtcFrameLimitError extends UsageError {
+  readonly alcoveRecoveryHintEmitted = true;
+
+  constructor(
+    message: string,
+    readonly setOwner: "local" | "partner",
+  ) {
+    super(message);
+    this.name = "WebRtcFrameLimitError";
+  }
+}
+
+/**
  * The family of refusals raised, before any credential, terms, or data are
  * sent, when this party can no longer make the outbound disclosure it
  * recorded agreeing to. The two send-side gates raise it from

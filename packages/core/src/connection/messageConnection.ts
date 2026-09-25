@@ -120,6 +120,14 @@ export interface MessageConnection {
    * beyond network time.
    */
   inboundPollIntervalMs?(): number | undefined;
+  /**
+   * Optional: the frame bound the partner's receive path applies, on a WebRTC
+   * data channel, or `undefined` for a transport with no such bound. A sender
+   * checks a frame it built against it (`webrtcFrameExceedsBound`) before
+   * sending, so a set the partner would refuse on receipt is refused here, with
+   * nothing sent. See docs/spec/CHANNEL_SECURITY.md.
+   */
+  outboundWebRtcFrameBound?(): number | undefined;
 }
 
 /** The transport's interface to push inbound events into the queue. */
@@ -200,6 +208,12 @@ interface TransportHooks {
    * {@link MessageConnection.inboundPollIntervalMs}); a push transport omits it.
    */
   inboundPollIntervalMs?: () => number;
+  /**
+   * Optional: the partner's receive-side frame bound (see
+   * {@link MessageConnection.outboundWebRtcFrameBound}); a transport with no
+   * such bound omits it.
+   */
+  outboundWebRtcFrameBound?: () => number;
 }
 
 type TransportConnect = (controls: TransportControls) => TransportHooks;
@@ -642,6 +656,10 @@ export class QueuedMessageConnection implements MessageConnection {
 
   inboundPollIntervalMs(): number | undefined {
     return this.hooks.inboundPollIntervalMs?.();
+  }
+
+  outboundWebRtcFrameBound(): number | undefined {
+    return this.hooks.outboundWebRtcFrameBound?.();
   }
 }
 

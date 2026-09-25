@@ -214,6 +214,18 @@ export function removeDuplicatesAndUndefineds(
 }
 
 /**
+ * How many values a round over `keyData` sends under the rule that drops a
+ * value several of this party's records hold: the set
+ * {@link removeDuplicatesAndUndefineds} builds, counted. A party that keeps
+ * those values sends each once instead, so this is the fewest values the
+ * round sends whichever cardinality the terms resolve. A record holding a
+ * candidate set contributes each candidate, as the round's own set does.
+ */
+export function droppingRoundSetSize(keyData: Iterable<KeyCandidates>): number {
+  return removeDuplicatesAndUndefineds(Array.from(keyData))[0].length;
+}
+
+/**
  * The deduplicating counterpart of {@link removeDuplicatesAndUndefineds}: a
  * value several of this party's records hold stays in the round, standing
  * for the GROUP of those records rather than being dropped as ambiguous.

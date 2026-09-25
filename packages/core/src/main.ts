@@ -24,6 +24,7 @@ export {
   TransportPublishIndeterminateError,
   UnknownStandardizationFunctionError,
   UsageError,
+  WebRtcFrameLimitError,
   causeChainSome,
   chainDetailCauses,
   isPeerWaitTimeout,
@@ -119,6 +120,9 @@ export type { FrameStructureRefusal } from "./connection/binaryPackBounds";
 // WebRTC transports encode their outbound frames outside this package, and one
 // implementation has to produce the bytes a partner's BinaryPack reads.
 export { encodeBinaryPackValue } from "./connection/binaryPackEncode";
+// The send-side check of the same bound. Barrelled because the CLI's PeerJS
+// framing chunks at the same threshold the check charges for.
+export { PEERJS_CHUNK_MTU } from "./connection/webrtcOutboundBound";
 export {
   getLogger,
   getLoggerForVerbosity,
@@ -621,6 +625,7 @@ export {
   InvitationTermDivergenceError,
   PARTNER_CERTIFICATE_REFUSAL_MESSAGES,
   assertAlgorithmImplemented,
+  assertFirstRoundFitsWebRtcFrame,
   assertLocalCertificateAuthorizesAgreedIdentity,
   assertSigningModeImplemented,
   countIsPartnerReported,

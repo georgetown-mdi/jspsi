@@ -49,6 +49,7 @@ import {
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 import {
+  droppingRoundSetSize,
   linkViaCountOnlyPSI,
   linkViaPSI,
   linkViaSinglePassPSI,
@@ -86,7 +87,18 @@ import {
   exchangeSignedReceipt,
   ReceiptVerificationError,
 } from "./records/signedReceipt.js";
-import { OperatorConfigError, UsageError, causeChainSome } from "./errors.js";
+import {
+  OperatorConfigError,
+  UsageError,
+  WebRtcFrameLimitError,
+  causeChainSome,
+} from "./errors.js";
+import { MAX_WEBRTC_FRAME_BYTES } from "./connection/binaryPackBounds.js";
+import {
+  minimumPsiSetFrameBytes,
+  roundOneSetTooLargeMessage,
+  webrtcFrameExceedsBound,
+} from "./connection/webrtcOutboundBound.js";
 import type { Metadata, OwnColumnSelection } from "./config/metadata.js";
 import { reasonTermsCannotStateIdentity } from "./config/linkageTermsSchema.js";
 import type { LinkageTerms } from "./config/linkageTermsSchema.js";
@@ -1378,6 +1390,75 @@ export function prepareForExchange(
     rawRows,
     rowCount: rawRows.length,
   };
+}
+
+/**
+ * Refuse a WebRTC exchange whose first round alone cannot fit one WebRTC
+ * message, before anything is sent: a {@link WebRtcFrameLimitError} naming
+ * the size, the bound, and the remedy. Call it at the start of a WebRTC
+ * exchange, once {@link prepareForExchange} has returned and before the
+ * connection opens; any other channel has no such bound.
+ *
+ * It refuses only on a certain count: the values the first cascade or
+ * count-only round sends under the rule that drops a value several records
+ * hold ({@link droppingRoundSetSize}), the fewest that round sends whatever
+ * cardinality the terms resolve, taken in both PSI roles, since which one this
+ * party plays is not yet known. Every later round, and a frame this bound
+ * cannot size from a count, is checked on the frame the round builds
+ * (`PSIParticipant`). A single-pass exchange is not checked here: its
+ * dataset ceiling holds every frame it sends under the bound
+ * (docs/spec/PROTOCOL.md, "The single-pass dataset ceiling").
+ *
+ * @param maxFrameBytes - The receiver's bound; lowered only by tests.
+ */
+export function assertFirstRoundFitsWebRtcFrame(
+  prepared: PreparedExchange,
+  maxFrameBytes: number = MAX_WEBRTC_FRAME_BYTES,
+): void {
+  const { linkageTerms, dataset, rowCount } = prepared;
+  if (linkageTerms.linkageStrategy === "single-pass") return;
+  const key = linkageTerms.linkageKeys[0];
+  if (key === undefined) return;
+  const exceeds = (elementCount: number): boolean =>
+    webrtcFrameExceedsBound(
+      minimumPsiSetFrameBytes(elementCount),
+      maxFrameBytes,
+    );
+  // Every row contributes at most the key's declared width of candidates, so
+  // a dataset whose rows cannot reach the count is not read at all. Were a
+  // row to exceed it, the round's own frame check still refuses.
+  const candidateCeiling =
+    rowCount *
+    declaredKeyWidth(key, 0) *
+    localFanOutFactor(dataset.declaresFanOut);
+  if (!exceeds(candidateCeiling)) return;
+  const roundSetSize = (isReceiver: boolean): number | undefined => {
+    try {
+      return droppingRoundSetSize(
+        new StandardizedKeyIterable(
+          key,
+          dataset,
+          rowCount,
+          isReceiver,
+          0,
+          false,
+        ),
+      );
+    } catch {
+      // A row the round would refuse, in a role this party may not play: the
+      // round reports it, and this check refuses nothing it cannot count.
+      return undefined;
+    }
+  };
+  const asSender = roundSetSize(false);
+  if (asSender === undefined || !exceeds(asSender)) return;
+  const asReceiver = roundSetSize(true);
+  if (asReceiver === undefined || !exceeds(asReceiver)) return;
+  const fewest = Math.min(asSender, asReceiver);
+  throw new WebRtcFrameLimitError(
+    roundOneSetTooLargeMessage(fewest, maxFrameBytes),
+    "local",
+  );
 }
 
 // --- Exchange execution ------------------------------------------------------

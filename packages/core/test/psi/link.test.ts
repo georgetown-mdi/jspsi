@@ -17,6 +17,10 @@ import {
 } from "../../src/psi/link";
 import { MAX_WEBRTC_FRAME_BYTES } from "../../src/connection/binaryPackBounds";
 import {
+  binaryPackByteStringLength,
+  webrtcFrameExceedsBound,
+} from "../../src/connection/webrtcOutboundBound";
+import {
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   MAX_KEY_CANDIDATE_WIDTH,
 } from "../../src/fanOutFunctions";
@@ -1031,6 +1035,12 @@ test("singlePassReplyByteCap stays below both transport envelopes at its maximum
   // maximum would pass every bound's own test yet reject legitimate WebRTC replies,
   // so the two must move together.
   expect(worst.bytes).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
+  // And under it once packed and chunked for the data channel, so the sender's
+  // own frame check never refuses a reply the ceiling admits: the reason the
+  // first-round check leaves single-pass alone.
+  expect(webrtcFrameExceedsBound(binaryPackByteStringLength(worst.bytes))).toBe(
+    false,
+  );
 });
 
 test("the single-pass receiver read gate is bounded to the derived reply cap", async () => {
