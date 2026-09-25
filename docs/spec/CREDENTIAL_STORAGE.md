@@ -231,8 +231,10 @@ strip is attempted on the host's real platform" leg. Both facts come from the
 inheritance first -- a control directory and a control file created under the
 same root do have the ACE -- and then finds no ACE on the stripped work
 directory, on the credentials file, or on a file created beside it afterwards.
-No CI runner executes those macOS-gated legs, so they run on demand rather than
-continuously, and a regression in them would be caught at the next such run.
+The nightly platform workflow (`.github/workflows/nightly_platform.yaml`) runs
+the CLI unit suite on a macOS runner and on a Windows runner, so those
+macOS-gated legs, and the Windows-gated ones, run nightly; the pull-request gate
+runs on Linux only, where they skip.
 
 The `--log-file` descriptor is stripped at its own open instead, between that
 open and the installation of the sink that writes the first line -- the same

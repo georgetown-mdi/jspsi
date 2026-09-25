@@ -350,11 +350,14 @@ sender's consented metadata transmits.
 ### Receive-side runtime enforcement (`reconcileReceivedPayload`)
 
 A party holding a locked-in expected set verifies, after the payload exchange and
-before the result or audit record is built, that the partner transmitted exactly
+before the result is returned or written, that the partner transmitted exactly
 that set. A mismatch aborts the exchange as a `ConnectionError` of kind
 `protocol` (CLI exit 69): the partner promised one disclosure and delivered
-another. Because it runs after the payload exchange, it stops the exchange from
-completing rather than stopping the columns from crossing.
+another. The check runs where the exchange record is already owed, so an aborted
+run still writes a record, marked terminated (see
+[EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#when-a-record-is-owed)). Because it
+runs after the payload exchange, it stops the exchange from completing rather
+than stopping the columns from crossing.
 
 The locked-in set is the acceptor's `disclosedPayloadColumns` (consented
 at review time, threaded to `runExchange` as `prepared.expectedPayloadColumns`),
@@ -609,7 +612,7 @@ The applying party derives its own terms from the update with `deriveAcceptedLin
 
 ### Wire format
 
-The encoded update is `BODY.MAC`, two unpadded base64url strings joined by `.`:
+The encoded update is `BODY.MAC`, two base64url strings joined by `.`. Alcove writes both unpadded; the decoder also accepts trailing `=` padding, which does not change the decoded bytes, so the MAC below is unaffected:
 
 - `BODY` encodes the UTF-8 bytes of a JSON object with exactly the keys `kind` (the string `terms-update`), `version` (`"1"`), `partnership`, `linkageTerms`, and optionally `disclosedPayloadColumns`. The object is strict: any other key is refused.
 - `MAC` encodes `HMAC-SHA-256(mac_key, BODY bytes)`, 32 bytes, computed over the exact bytes `BODY` encodes, so no canonical re-serialization is involved.
@@ -708,9 +711,11 @@ file, and each party provisions its own `.alcove.key` from the code:
   (`SHARED_SECRET_REGEX`: 43 base64url characters encoding 32 bytes,
   `packages/core/src/config/connection.ts`) is confidential and travels only on
   the encoded invitation code, over a trusted out-of-band channel.
-- **The three provisioning paths.** `alcove invite` writes the inviter's key
-  file (secret plus expiry); `alcove accept` writes the acceptor's copy
-  (secret, with the invitation expiry stripped); and
+- **The three provisioning paths.** An offline `alcove invite` writes the
+  inviter's key file (secret plus expiry), while an online `invite` writes it
+  only once the partner's handshake succeeds, holding the rotated token with no
+  expiry; `alcove accept` writes the acceptor's copy (secret, with the invitation
+  expiry stripped); and
   `alcove exchange --invitation CODE` provisions the key file for the party that
   composed the exchange in the web app and downloaded a secret-free config,
   writing the inviter-side copy (secret **and** expiry, matching `alcove
