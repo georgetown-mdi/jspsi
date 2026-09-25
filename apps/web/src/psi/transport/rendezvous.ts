@@ -58,6 +58,23 @@ export const PEER_PING_INTERVAL_MS = 5_000;
 const DEFAULT_DIAL_ATTEMPT_TIMEOUT_MS = 30_000;
 
 /**
+ * Ceiling on registering with the signaling server: opening its socket and
+ * receiving `OPEN` (docs/spec/WEBRTC_TRANSPORT.md, "Budgets"). PeerJS sets no
+ * bound of its own, and the rendezvous budget starts only once registered, so
+ * without this a server that accepts the socket and never answers holds the
+ * party until it is cancelled.
+ */
+export const BROKER_REGISTRATION_TIMEOUT_MS = 30_000;
+
+/** What a party whose registration ran past
+ * {@link BROKER_REGISTRATION_TIMEOUT_MS} is told. */
+export const BROKER_REGISTRATION_TIMED_OUT =
+  `The signaling server did not accept the connection within ` +
+  `${BROKER_REGISTRATION_TIMEOUT_MS / 1000} seconds. Check the network ` +
+  `connection and try again; if it keeps happening, the signaling server may ` +
+  `be down.`;
+
+/**
  * Backoff between dial attempts while the inviter has not yet registered its
  * derived id (`peer-unavailable`). Human-timescale polling: the inviter starts
  * listening when its operator begins the exchange, which may be after the
@@ -254,20 +271,24 @@ function acceptorLocationFromEndpoint(
 
 /**
  * Resolves once `peer` is registered with the broker (its `open` event), or
- * rejects on a pre-open `error` or an abort. A settle-once guard detaches every
- * listener exactly once. Does NOT destroy the peer on failure -- the public
- * caller owns that, so the destroy happens in exactly one place.
+ * rejects on a pre-open `error`, an abort, or `timeoutMs` passing first -- the
+ * last as a `transport`-kind {@link ConnectionError} stating
+ * {@link BROKER_REGISTRATION_TIMED_OUT}. A settle-once guard detaches every
+ * listener and clears the timer exactly once. Does NOT destroy the peer on
+ * failure -- the public caller owns that, so the destroy happens in exactly one
+ * place.
  */
 function waitForPeerOpen(
   peer: Peer,
-  options?: { signal?: AbortSignal },
+  options: { signal?: AbortSignal; timeoutMs: number },
 ): Promise<void> {
-  const signal = options?.signal;
+  const signal = options.signal;
   return new Promise<void>((resolve, reject) => {
     let settled = false;
     const settle = (action: () => void) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       peer.off("open", onOpen);
       peer.off("error", onError);
       signal?.removeEventListener("abort", onAbort);
@@ -279,6 +300,11 @@ function waitForPeerOpen(
       settle(() =>
         reject(new Error("connecting to the signaling server was aborted")),
       );
+    const timer = setTimeout(() => {
+      settle(() =>
+        reject(new ConnectionError(BROKER_REGISTRATION_TIMED_OUT, "transport")),
+      );
+    }, options.timeoutMs);
     peer.once("open", onOpen);
     peer.once("error", onError);
     if (signal?.aborted) {
@@ -302,7 +328,9 @@ function waitForPeerOpen(
  * @param options       `signal` cancels the listen before or during broker
  *                      registration; `relay` is the relay this run gathers
  *                      against, none when absent; `peerFactory` injects the
- *                      {@link Peer} constructor for testing.
+ *                      {@link Peer} constructor for testing;
+ *                      `registrationTimeoutMs` overrides
+ *                      {@link BROKER_REGISTRATION_TIMEOUT_MS}.
  */
 export async function listenAsInviter(
   sharedSecret: string,
@@ -310,6 +338,7 @@ export async function listenAsInviter(
     signal?: AbortSignal;
     relay?: RelayLocator;
     peerFactory?: PeerFactory;
+    registrationTimeoutMs?: number;
   },
 ): Promise<Peer> {
   const makePeer = options?.peerFactory ?? defaultPeerFactory;
@@ -337,7 +366,11 @@ export async function listenAsInviter(
     buildPeerOptions(loc, [inviterId, acceptorId], iceServers),
   );
   try {
-    await waitForPeerOpen(peer, { signal });
+    await waitForPeerOpen(peer, {
+      signal,
+      timeoutMs:
+        options?.registrationTimeoutMs ?? BROKER_REGISTRATION_TIMEOUT_MS,
+    });
   } catch (err) {
     peer.destroy();
     // PeerJS embeds a derived id in some emitted errors (e.g. `ID "<id>" is
@@ -539,7 +572,7 @@ async function dialInviterWithRetry(
  *                      `relay` is the relay this run gathers against, none when
  *                      absent; `peerFactory` injects the {@link Peer}
  *                      constructor for testing; the `*Ms` overrides tune the
- *                      retry timing.
+ *                      registration bound and the retry timing.
  */
 export async function dialAsAcceptor(
   sharedSecret: string,
@@ -548,6 +581,7 @@ export async function dialAsAcceptor(
     signal?: AbortSignal;
     relay?: RelayLocator;
     peerFactory?: PeerFactory;
+    registrationTimeoutMs?: number;
     retryDelayMs?: number;
     openTimeoutMs?: number;
     totalTimeoutMs?: number;
@@ -576,7 +610,11 @@ export async function dialAsAcceptor(
     buildPeerOptions(loc, [inviterId, acceptorId], iceServers),
   );
   try {
-    await waitForPeerOpen(peer, { signal });
+    await waitForPeerOpen(peer, {
+      signal,
+      timeoutMs:
+        options?.registrationTimeoutMs ?? BROKER_REGISTRATION_TIMEOUT_MS,
+    });
     const conn = await dialInviterWithRetry(peer, inviterId, {
       retryDelayMs: options?.retryDelayMs ?? DEFAULT_DIAL_RETRY_DELAY_MS,
       openTimeoutMs: options?.openTimeoutMs ?? DEFAULT_DIAL_ATTEMPT_TIMEOUT_MS,

@@ -2,9 +2,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { default as EventEmitter } from "eventemitter3";
 
-import { deriveRendezvousPeerId, generateSharedSecret } from "@alcove/core";
+import {
+  ConnectionError,
+  deriveRendezvousPeerId,
+  generateSharedSecret,
+} from "@alcove/core";
 
 import {
+  BROKER_REGISTRATION_TIMED_OUT,
+  BROKER_REGISTRATION_TIMEOUT_MS,
   WEBRTC_ENDPOINT_HOST_REFUSED,
   WEBRTC_ENDPOINT_PATH_REFUSED,
   dialAsAcceptor,
@@ -391,6 +397,49 @@ describe("dialAsAcceptor", () => {
     const rejection = await promise.catch((e: unknown) => e);
     expect(rejection).toBeInstanceOf(Error);
     expect((rejection as Error).message).not.toContain(inviterId);
+    expect(fake.destroy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a signaling server that never confirms registration", () => {
+  test("the spec's 30 s bound is the default", () => {
+    expect(BROKER_REGISTRATION_TIMEOUT_MS).toBe(30_000);
+    expect(BROKER_REGISTRATION_TIMED_OUT).toContain("30 seconds");
+  });
+
+  test("the acceptor gives up at the bound and destroys the peer", async () => {
+    stubWindow();
+    const fake = new FakePeer();
+    const cap = captureFactory(fake);
+    const rejection = await dialAsAcceptor(generateSharedSecret(), endpoint, {
+      peerFactory: cap.factory,
+      registrationTimeoutMs: 5,
+    }).catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(ConnectionError);
+    expect(rejection).toMatchObject({
+      kind: "transport",
+      message: BROKER_REGISTRATION_TIMED_OUT,
+    });
+    expect(rejection).not.toBeInstanceOf(PartnerNoShowError);
+    expect(fake.connect).not.toHaveBeenCalled();
+    expect(fake.destroy).toHaveBeenCalledTimes(1);
+    expect(fake.listenerCount("open")).toBe(0);
+  });
+
+  test("the inviter gives up at the bound and destroys the peer", async () => {
+    stubWindow();
+    const fake = new FakePeer();
+    const cap = captureFactory(fake);
+    const rejection = await listenAsInviter(generateSharedSecret(), {
+      peerFactory: cap.factory,
+      registrationTimeoutMs: 5,
+    }).catch((error: unknown) => error);
+
+    expect(rejection).toMatchObject({
+      kind: "transport",
+      message: BROKER_REGISTRATION_TIMED_OUT,
+    });
     expect(fake.destroy).toHaveBeenCalledTimes(1);
   });
 });
