@@ -1416,13 +1416,8 @@ export class FileSyncRendezvous {
       // The sentinel holds the hello body so the rename below yields a
       // fully-valid `<id>-hello.json` the peer reads through its gate; the
       // peer itself matches the sentinel by name existence and never reads
-      // it.
-      await deps
-        .client()
-        .put(serializeEnvelope(helloEnvelope(deps.options())), joiningPath, {
-          flags: "w",
-          encoding: "utf-8",
-        });
+      // it. Published temp-then-rename like the hello.
+      await this.publishHello(scope.inboundPath, joiningPath);
       // Track the sentinel only until the peer hello is deleted: before that
       // point a failure leaves the peer hello intact, so cleanup() may safely
       // sweep the sentinel (the peer is no worse off than if we never

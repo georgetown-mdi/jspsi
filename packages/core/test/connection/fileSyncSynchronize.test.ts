@@ -26,6 +26,7 @@ import {
   HELLO_MAX_BYTES,
   peerIdLengthRefusal,
 } from "../../src/connection/fileSyncRendezvous";
+import { isHelloTempName } from "../../src/connection/fileSyncNames";
 
 test("synchronize() cleans up hello and lock files when createExclusive() throws EEXIST", async () => {
   // Simulates the losing party in the lock-file race: createExclusive() throws
@@ -1004,6 +1005,32 @@ test("synchronize() joiner branch: a sentinel put failure leaves the peer hello 
   expect(conn.handshakeRole).toBeUndefined();
 });
 
+test("synchronize() joiner branch: publishes the joining sentinel temp-then-rename, never by a put to its name", async () => {
+  const { conn, client } = await makeJoiner();
+  const joiningPath = `${conn.path}/${conn.id}-joining.json`;
+  const putPaths: string[] = [];
+  const renames: [string, string][] = [];
+  const put = client.put.bind(client);
+  const rename = client.rename.bind(client);
+  client.put = async (src, dest, options) => {
+    putPaths.push(dest);
+    return put(src, dest, options);
+  };
+  client.rename = async (from, to) => {
+    renames.push([from, to]);
+    return rename(from, to);
+  };
+
+  await conn.synchronize();
+
+  expect(putPaths).not.toContain(joiningPath);
+  const intoSentinel = renames.filter(([, to]) => to === joiningPath);
+  expect(intoSentinel).toHaveLength(1);
+  expect(putPaths).toContain(intoSentinel[0][0]);
+  expect(isHelloTempName(intoSentinel[0][0].split("/").pop()!)).toBe(true);
+  await conn.close();
+});
+
 test("synchronize() joiner branch: a failure before the peer hello is deleted tracks the sentinel for cleanup()", async () => {
   // Second failure point, still BEFORE the peer hello is deleted: the sentinel
   // was written but delete(peer hello) throws. The peer hello is intact, so the
@@ -1036,8 +1063,11 @@ test("synchronize() joiner branch: a failure after the peer hello is deleted lea
   // recovers within a bounded window instead of polling to the peer timeout.
   const { conn, client, files, peerHelloName } = await makeJoiner();
   const joiningName = `${conn.id}-joining.json`;
-  client.rename = async () => {
-    throw new Error("synthetic sentinel rename failure");
+  const rename = client.rename.bind(client);
+  client.rename = async (from, to) => {
+    if (from.endsWith(`/${joiningName}`))
+      throw new Error("synthetic sentinel rename failure");
+    return rename(from, to);
   };
 
   await expect(conn.synchronize()).rejects.toThrow(

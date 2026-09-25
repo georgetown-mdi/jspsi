@@ -7,6 +7,7 @@ import {
   TimeoutError,
   redactPrivateKeyMaterial,
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
+  UsageError,
 } from "@alcove/core";
 import type {
   FileInfo,
@@ -51,9 +52,34 @@ const OPEN_FLAGS = {
  * ({@link LocalFSClient.put}, {@link LocalFSClient.createExclusive}) it is
  * the primary defense: their destinations are built from protocol state at
  * predictable names and never pass through `list()`.
+ *
+ * Every exchange file is a regular file, so the open is also non-blocking
+ * (`O_NONBLOCK`, absent on Windows) and the handle is refused, and closed,
+ * unless `fstat` reports a regular file. `O_NONBLOCK` has no effect on reads
+ * and writes of a regular file.
  */
-function openNoFollow(filePath: string, flag: keyof typeof OPEN_FLAGS) {
-  return fs.open(filePath, OPEN_FLAGS[flag] | (fs.constants.O_NOFOLLOW ?? 0));
+async function openNoFollow(filePath: string, flag: keyof typeof OPEN_FLAGS) {
+  const handle = await fs.open(
+    filePath,
+    OPEN_FLAGS[flag] |
+      (fs.constants.O_NOFOLLOW ?? 0) |
+      (fs.constants.O_NONBLOCK ?? 0),
+  );
+  let isRegularFile: boolean;
+  try {
+    isRegularFile = (await handle.stat()).isFile();
+  } catch (err: unknown) {
+    await handle.close().catch(() => {});
+    throw err;
+  }
+  if (!isRegularFile) {
+    await handle.close().catch(() => {});
+    throw new UsageError(
+      `refusing to open ${redactPrivateKeyMaterial(filePath)}: it is not a ` +
+        "regular file. Remove it from the exchange directory.",
+    );
+  }
+  return handle;
 }
 
 /**
