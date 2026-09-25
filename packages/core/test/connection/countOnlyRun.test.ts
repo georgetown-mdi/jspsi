@@ -10,11 +10,13 @@ import PSI from "@openmined/psi.js";
 
 import {
   AlgorithmDivergenceError,
+  exchangeRecordFromFailure,
   prepareForExchange,
   resolveCountOnlyRun,
   runExchange,
 } from "../../src/exchange";
 import { receiveCountReport } from "../../src/protocolSetup";
+import { verifyCommitmentOpening } from "../../src/records/exchangeRecord";
 import { UsageError } from "../../src/errors";
 import { sanitizeErrorForDisplay } from "../../src/utils/sanitizeErrorForDisplay";
 import {
@@ -638,6 +640,25 @@ test("a count-only run refuses an inbound payload column from a non-conforming p
   expect(refusal).toBeInstanceOf(ConnectionError);
   expect((refusal as ConnectionError).kind).toBe("protocol");
   expect((refusal as Error).message).toContain("no payload at all");
+
+  // The victim's terminated record states and commits the empty received
+  // payload, not the frame the partner sent before the refusal.
+  const terminated = exchangeRecordFromFailure(refusal);
+  expect(terminated?.record.outcome).toBe("receipt-swap-terminated");
+  expect(terminated?.record.governance.algorithm).toBe("psi-c");
+  expect(terminated?.record.governance.payloadReceived).toEqual([]);
+  const salt = terminated?.keys.salts.partnerPayloadReceived;
+  const commitment = terminated?.record.commitments.partnerPayloadReceived;
+  expect(salt).toBeDefined();
+  expect(commitment).toBeDefined();
+  expect(
+    await verifyCommitmentOpening(
+      "partnerPayloadReceived",
+      salt as string,
+      { columns: [], rows: [] },
+      commitment as string,
+    ),
+  ).toBe(true);
 
   // The responder is the one forging the frame, not receiving one: its own
   // received payload (the initiator's genuine empty message) still matches its

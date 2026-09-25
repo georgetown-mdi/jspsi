@@ -2592,7 +2592,12 @@ export async function runExchange(
       retentionDisposition,
       associationTable: heldResult ? associationTable : undefined,
       localPayloadSent: toCommittedPayload(localPayload),
-      partnerPayloadReceived: toCommittedPayload(partnerPayload),
+      // A count-only run receives no payload by its terms, so a frame a
+      // non-conforming partner sent before the refusal is not committed as one
+      // (docs/spec/EXCHANGE_RECORD.md, Count-only records).
+      partnerPayloadReceived: toCommittedPayload(
+        countOnly ? { columns: [], rowIndices: [], rows: [] } : partnerPayload,
+      ),
       createdAt: new Date().toISOString(),
       // The run's shared binder, so this record pairs with the receipt the step
       // above produces; omitted on every path that derived none.
