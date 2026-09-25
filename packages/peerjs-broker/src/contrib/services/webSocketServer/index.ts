@@ -443,16 +443,29 @@ export class WebSocketServer extends EventEmitter implements IWebSocketServer {
       detachedSocket.terminate();
     }
 
-    // Cleanup after a socket closes.
+    // Cleanup after a socket closes. The realm entry is removed only while it
+    // is still this client's: a registration removed earlier may have been
+    // taken since by another client under the same id.
     socket.on("close", () => {
       if (client.getSocket() === socket) {
-        this.realm.removeClientById(client.getId());
+        this.realm.removeClient(client);
         this.emit("close", client);
       }
     });
 
     // Handle messages from peers.
     socket.on("message", (data) => {
+      // A socket speaks for its client only while the client holds it and the
+      // realm holds the client. `ws` still delivers frames it had read off a
+      // socket before that socket was terminated, and none of them is relayed
+      // under an id the socket no longer holds.
+      if (
+        client.getSocket() !== socket ||
+        this.realm.getClientById(client.getId()) !== client
+      ) {
+        return;
+      }
+
       // Any inbound frame proves the client is a real, talking peer rather than a
       // socket that registered and went silent, so it graduates from the short
       // unconfirmed reap window to the generous alive_timeout and refreshes the

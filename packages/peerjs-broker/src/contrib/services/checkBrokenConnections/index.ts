@@ -76,11 +76,14 @@ export class CheckBrokenConnections {
 
       if (timeSinceLastPing < timeout) continue;
 
+      // Terminate rather than close: a peer past its liveness window is not
+      // answering, and a close frame it never answers would hold the socket
+      // for the `ws` close timer.
       try {
-        client.getSocket()?.close();
+        client.getSocket()?.terminate();
       } finally {
         this.realm.clearMessageQueue(clientId);
-        this.realm.removeClientById(clientId);
+        this.realm.removeClient(client);
 
         client.setSocket(null);
 
