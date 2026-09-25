@@ -179,7 +179,10 @@ function seamsForDueWindow(record: ManagedExchangeRecord): {
         Promise.resolve({ records: [record], unreadableIds: [] }),
       readRecord: () => Promise.resolve(record),
       listLocalState: () =>
-        Promise.resolve(new Map<string, ManagedLocalState>()),
+        Promise.resolve({
+          states: new Map<string, ManagedLocalState>(),
+          unreadableIds: [],
+        }),
       persistAdvance: () => Promise.resolve(record),
       runAttempt: () => {
         attempts += 1;

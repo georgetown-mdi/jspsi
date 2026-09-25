@@ -89,11 +89,14 @@ import type {
   RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import type {
+  ManagedLocalState,
+  ManagedReadableLocalState,
+} from "./managedLocalStateShape";
+import type {
   ManagedScheduleWindow,
   ManagedScheduleWindowDisposition,
 } from "./managedSchedule";
 import type { ManagedInputSource } from "./managedInputHandle";
-import type { ManagedLocalState } from "./managedLocalStateShape";
 
 /**
  * The wait one attempt gives the partner's runner to arrive, before the attempt
@@ -128,7 +131,7 @@ export const MAX_WINDOW_ATTEMPTS = 64;
  * the object-URL boundary) and calls the same driver the attended surface
  * calls. */
 export interface ManagedScheduleAttempt {
-  /** The record to run, as the store held it when the window was claimed. */
+  /** The record to run, as the store held it just before this attempt. */
   record: RunnableManagedExchangeRecord;
   /** This run's input, always the persisted handle read UNATTENDED: a scheduled
    * run has no operator to answer a permission prompt, so a non-granted
@@ -157,10 +160,11 @@ export interface ManagedScheduleTickSeams {
    * scheduled runs instead of every exchange's (see
    * {@link ManagedExchangeReadableRecords}). */
   listRecords: () => Promise<ManagedExchangeReadableRecords>;
-  /** Read one stored record afresh. The window's attempts read the operator's
-   * compromise response through it before every connect, so an answer written
-   * while the window is being occupied is met by the attempt after it rather
-   * than only by the next window. A read returning nothing is the record
+  /** Read one stored record afresh. Every attempt in a window runs the record
+   * this returns, and reads the operator's compromise response and the plan
+   * through it before it connects, so a write landing while the window is being
+   * occupied is met by the attempt after it rather than only by the next
+   * window (see {@link occupyWindow}). A read returning nothing is the record
    * deleted, which ends the occupancy the same way. A read that rejects ends the
    * tick's bookkeeping, leaving the window unaccounted: an attempt whose answer
    * cannot be read does not connect. */
@@ -169,8 +173,10 @@ export interface ManagedScheduleTickSeams {
    * keeps a handed-off copy from being attempted: a migration export sets it so
    * neither the operator nor the schedule runs the record again. This read is
    * the cheap pre-filter, not the guarantee -- the run path re-reads the marker
-   * inside the run+rotate lock on every attempt ({@link ./managedExchangeRun.ts}). */
-  listLocalState: () => Promise<Map<string, ManagedLocalState>>;
+   * inside the run+rotate lock on every attempt ({@link ./managedExchangeRun.ts}).
+   * Read per entry for the reason {@link listRecords} is: a record whose sibling
+   * entry does not parse is skipped as `"unreadable"`, and no other. */
+  listLocalState: () => Promise<ManagedReadableLocalState>;
   /** The store's one conditioned, atomic schedule write. */
   persistAdvance: (
     id: string,
@@ -263,8 +269,19 @@ export async function tickManagedSchedules(
       skipped: "unreadable" as const,
     }),
   );
+  const unreadableLocalState = new Set(localState.unreadableIds);
   const ticked = await Promise.all(
     records.map((record) => {
+      // An unreadable sibling may be the one recording a hand-off, so the
+      // record is passed over rather than attempted.
+      if (unreadableLocalState.has(record.id))
+        return {
+          id: record.id,
+          caughtUpMisses: 0,
+          caughtUpSkips: 0,
+          attempts: 0,
+          skipped: "unreadable" as const,
+        };
       if (inFlight.has(record.id))
         return {
           id: record.id,
@@ -276,7 +293,7 @@ export async function tickManagedSchedules(
       inFlight.add(record.id);
       return tickManagedScheduleRecord(
         record,
-        localState.get(record.id),
+        localState.states.get(record.id),
         seams,
       ).finally(() => inFlight.delete(record.id));
     }),
@@ -389,9 +406,10 @@ async function occupyDueWindow(
   // unaccounted: it counts as missed at the wake that finds it elapsed.
   if (handle === undefined) return { ...entry, skipped: "no-input-handle" };
 
-  const occupancy = await occupyWindow(claimed, handle, due, seams);
+  const occupancy = await occupyWindow(claimed.id, planned, due, seams);
   entry.attempts = occupancy.attempts;
-  if (occupancy.recordDeleted === true) return { ...entry, skipped: "deleted" };
+  if (occupancy.ended !== undefined)
+    return { ...entry, skipped: occupancy.ended };
   if (occupancy.disposition === undefined)
     return { ...entry, skipped: seams.stopped() ? "stopped" : "window-closed" };
   entry.disposition = occupancy.disposition;
@@ -431,21 +449,27 @@ interface WindowOccupancy {
   /** The first standing condition an attempt raised, carried into the window's
    * own write; absent when none did. */
   standingCondition?: ManagedStandingCondition;
-  /** Set where an attempt found the record gone from the store. There is
-   * nothing left to write the window's bookkeeping onto, so the caller records
-   * the window nowhere rather than attempting a write that would fail. */
-  recordDeleted?: true;
+  /** Set where the per-attempt read ended the occupancy with nothing to record:
+   * the record is gone, its plan no longer holds this window, or it can no
+   * longer run unattended. The caller writes no bookkeeping for the window: a
+   * deleted record has nothing to write onto, and a moved plan would drop the
+   * conditioned write anyway. */
+  ended?: "deleted" | "plan-moved" | "configuration-only" | "no-input-handle";
 }
 
 /**
  * Occupy one open window with bounded re-attempts.
  *
- * Each attempt re-reads the stored record before it connects and ends the
- * occupancy as `"skipped"` where the operator's compromise response stands, so
- * an answer given while the window is open holds the attempts after it. The
- * same read ends the occupancy where the record is no longer there at all: a
- * deletion mid-window stops the attempts after it and leaves the window
- * recorded nowhere, there being no record left to write it onto.
+ * Each attempt re-reads the stored record before it connects and runs THAT
+ * record -- its secret, input handle, document, and max-age policy -- so an
+ * edit or an attended rotation landing mid-window reaches the attempts after
+ * it. The same read ends the occupancy:
+ *
+ * - as `"succeeded"` where another context recorded a success inside this
+ *   window, which is how catch-up reads the same record;
+ * - as `"skipped"` where the operator's compromise response stands;
+ * - with no disposition where the record is gone, its plan no longer holds
+ *   this window, or it has lost its secret or its input handle.
  *
  * Each attempt waits for the partner up to {@link ATTEMPT_PEER_WAIT_MS},
  * clamped to what is left of the window; a retryable failure starts another
@@ -463,16 +487,11 @@ interface WindowOccupancy {
  * evidence at all.
  */
 async function occupyWindow(
-  record: RunnableManagedExchangeRecord,
-  handle: FileSystemFileHandle,
+  id: string,
+  planned: ManagedExchangeSchedule,
   window: ManagedScheduleWindow,
   seams: ManagedScheduleTickSeams,
 ): Promise<WindowOccupancy> {
-  const source: ManagedInputSource = {
-    kind: "handle",
-    handle,
-    attendance: "unattended",
-  };
   let attempts = 0;
   let partnerWasAbsent = false;
   let contactWasProven = false;
@@ -493,20 +512,26 @@ async function occupyWindow(
     // being occupied must stop the attempt after it, not just the next window.
     // The answer rides on a raised condition, so the window's write has no
     // evidence of its own to carry here.
-    const stored = await seams.readRecord(record.id);
-    // A record deleted mid-window is the same stop. A later attempt would run
-    // the snapshot the window was claimed on against a store holding no record
-    // of it -- rotating a secret it could not persist -- and the window's own
-    // write has nothing left to land on.
-    if (stored === undefined) return { attempts, recordDeleted: true };
+    const stored = await seams.readRecord(id);
+    if (stored === undefined) return { attempts, ended: "deleted" };
+    if (!planHoldsWindow(stored.schedule, planned, window))
+      return { attempts, ended: "plan-moved" };
+    // Checked ahead of the answer: a `"skipped"` advance would stamp its
+    // `lastRun` over the success, and the window was met.
+    if (windowMetByRecordedSuccess(stored, window, startedAtMs))
+      return { attempts, disposition: "succeeded" };
     if (standingCompromiseResponse(stored) !== undefined)
       return { attempts, disposition: "skipped" };
+    if (!runnableManagedExchange(stored))
+      return { attempts, ended: "configuration-only" };
+    const handle = stored.inputFileHandle;
+    if (handle === undefined) return { attempts, ended: "no-input-handle" };
     attempts += 1;
     let dataExchangeStarted = false;
     try {
       await seams.runAttempt({
-        record,
-        source,
+        record: stored,
+        source: { kind: "handle", handle, attendance: "unattended" },
         peerWaitTimeoutMs: Math.min(ATTEMPT_PEER_WAIT_MS, remainingMs),
         onDataExchangeStart: () => {
           dataExchangeStarted = true;
@@ -710,6 +735,40 @@ function managedScheduleWindowVerdict(
   )
     return { disposition: "failed", retryable: false, provesContact };
   return { disposition: "failed", retryable, provesContact };
+}
+
+/** Whether the stored schedule still plans `window` on the cadence and miss
+ * count the occupancy was claimed on: the fields the window's own conditioned
+ * write is held to, so an occupancy that went on past a change here would end
+ * in a write the store drops. */
+function planHoldsWindow(
+  stored: ManagedExchangeSchedule | undefined,
+  planned: ManagedExchangeSchedule,
+  window: ManagedScheduleWindow,
+): boolean {
+  return (
+    stored !== undefined &&
+    parseStoredInstant(stored.anchor) === parseStoredInstant(planned.anchor) &&
+    stored.intervalDays === planned.intervalDays &&
+    stored.windowSeconds === planned.windowSeconds &&
+    parseStoredInstant(stored.nextWindow) === window.opensAtMs &&
+    stored.consecutiveMisses === planned.consecutiveMisses
+  );
+}
+
+/** Whether the stored `lastRun` is a success stamped inside `window` and not
+ * after `nowMs`: a run another context completed in a free interval of this
+ * occupancy. Later attempts would find the partner gone and stamp a miss over
+ * it. */
+function windowMetByRecordedSuccess(
+  record: ManagedExchangeRecord,
+  window: ManagedScheduleWindow,
+  nowMs: number,
+): boolean {
+  const lastRun = record.lastRun;
+  if (lastRun?.outcome !== "succeeded") return false;
+  const atMs = parseStoredInstant(lastRun.at);
+  return atMs >= window.opensAtMs && atMs < window.closesAtMs && atMs <= nowMs;
 }
 
 /** Whether a catch-up walk moved the stored plan at all. The planned instant is
