@@ -10,9 +10,12 @@ import {
   MAX_OUTSTANDING_QUEUES,
   MAX_QUEUED_DESTINATIONS_PER_SENDER,
 } from "@alcove/peerjs-broker/models/realm";
+import {
+  MAX_SIGNALING_PAYLOAD_BYTES,
+  SOCKET_RELEASE_TIMEOUT_MS,
+} from "@alcove/peerjs-broker/services/webSocketServer/index";
 import { CreatePeerServerWSOnly } from "@alcove/peerjs-broker";
 import { MAX_RELAY_BUFFERED_BYTES } from "@alcove/peerjs-broker/messageHandler/handlers/transmission/index";
-import { MAX_SIGNALING_PAYLOAD_BYTES } from "@alcove/peerjs-broker/services/webSocketServer/index";
 import { MessageType } from "@alcove/peerjs-broker/enums";
 
 import { KEY } from "../utils/signalingHarness";
@@ -21,7 +24,7 @@ import type { AddressInfo } from "node:net";
 import type { IConfig } from "@alcove/peerjs-broker/config/index";
 import type { IRealm } from "@alcove/peerjs-broker/models/realm";
 
-// The relay's bounds on what it holds for a peer, driven over real sockets
+// The broker's bounds on what it holds for a peer, driven over real sockets
 // against the broker `CreatePeerServerWSOnly` builds -- the one the web app's
 // mount and the standalone runner both use -- so the message handler, the
 // realm and the socket server under test are the shipped ones.
@@ -104,13 +107,10 @@ function connectCollecting(
   });
 }
 
-/** Register `id` over a hand-rolled connection and then stop reading it, so
- * nothing the server writes is taken off the socket: the peer that stops
- * reading while its connection stays up. */
-async function registerThenStopReading(
-  port: number,
-  id: string,
-): Promise<net.Socket> {
+/** Register `id` over a hand-rolled connection that goes on reading what the
+ * server writes and answers none of it -- a close frame included, which a `ws`
+ * client would answer. */
+async function registerRaw(port: number, id: string): Promise<net.Socket> {
   const socket = net.connect(port, "127.0.0.1");
   socket.on("error", () => {});
   cleanups.push(() => {
@@ -138,7 +138,18 @@ async function registerThenStopReading(
   await waitFor(() =>
     Buffer.concat(received).toString("latin1").includes('"type":"OPEN"'),
   );
-  socket.off("data", onData);
+  return socket;
+}
+
+/** Register `id` over a hand-rolled connection and then stop reading it, so
+ * nothing the server writes is taken off the socket: the peer that stops
+ * reading while its connection stays up. */
+async function registerThenStopReading(
+  port: number,
+  id: string,
+): Promise<net.Socket> {
+  const socket = await registerRaw(port, id);
+  socket.removeAllListeners("data");
   socket.pause();
   return socket;
 }
@@ -509,5 +520,22 @@ describe("relay queue refusals", () => {
     );
     expect(broker.realm.getMessageQueueById(RECIPIENT_ID)).toBeUndefined();
     expect(sender.ws.readyState).toBe(WebSocket.OPEN);
+  });
+});
+
+describe("liveness reaper release", () => {
+  test("a reaped peer that answers nothing is released within the release bound", async () => {
+    // Scaled-down reap window; the reaper's own sweep runs every 300 ms.
+    const broker = await startShippedBroker({ unconfirmed_timeout: 200 });
+    const silent = await registerRaw(broker.port, "peer-silent");
+    const released = new Promise<void>((resolve) =>
+      silent.once("close", () => resolve()),
+    );
+
+    await waitFor(
+      () => broker.realm.getClientById("peer-silent") === undefined,
+    );
+    expect(await settlesWithin(released, SOCKET_RELEASE_TIMEOUT_MS)).toBe(true);
+    expect(await openConnections(broker.server)).toBe(0);
   });
 });
