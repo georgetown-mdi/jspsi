@@ -42,6 +42,10 @@
 //                     the wait the process is interruptible.
 //   STUB_IGNORE_SIGINT  When "1", SIGINT is ignored (to test SIGTERM escalation).
 //   STUB_IGNORE_SIGTERM When "1", SIGTERM is ignored (to test SIGKILL).
+//   STUB_SIGTERM_CLEANUP_MS  Milliseconds a handled SIGTERM waits before the
+//                     exit 143, standing in for the real CLI's cleanup on that
+//                     signal (default 0). The pending exit is written to
+//                     STUB_SIGTERM_CLEANUP_FILE, when set, just before it.
 //   STUB_READY_FILE   When set, this path is written once the signal handlers
 //                     above are installed, so a signalling test can wait for the
 //                     child to be ready rather than sleeping.
@@ -274,7 +278,19 @@ function runExchangeStub() {
   if (process.env.STUB_IGNORE_SIGINT !== "1")
     process.on("SIGINT", () => process.exit(130));
   if (process.env.STUB_IGNORE_SIGTERM !== "1")
-    process.on("SIGTERM", () => process.exit(143));
+    process.on("SIGTERM", () => {
+      const cleanupMs = Number.parseInt(
+        process.env.STUB_SIGTERM_CLEANUP_MS ?? "0",
+        10,
+      );
+      const exitCleanedUp = () => {
+        if (process.env.STUB_SIGTERM_CLEANUP_FILE !== undefined)
+          fs.writeFileSync(process.env.STUB_SIGTERM_CLEANUP_FILE, "cleaned up");
+        process.exit(143);
+      };
+      if (cleanupMs > 0) setTimeout(exitCleanedUp, cleanupMs);
+      else exitCleanedUp();
+    });
 
   // Written only once every handler above is installed, so a signalling test can
   // wait for the state it is exercising to actually be in place. Sleeping

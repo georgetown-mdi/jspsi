@@ -150,10 +150,28 @@ export function useJobManager(
 }
 
 /**
- * SIGTERM every running child if a manager exists. Wired into the server
- * lifecycle so no orphaned CLI outlives the server; a no-op when the API was
- * never enabled.
+ * Stop the running child if a manager exists, resolving once its exit has been
+ * observed ({@link JobManager.shutdown}); resolves at once when the API was never
+ * enabled.
  */
-export function shutdownJobManager(): void {
-  globalThis.jobManagerInstance?.shutdown();
+export function shutdownJobManager(): Promise<void> {
+  return globalThis.jobManagerInstance?.shutdown() ?? Promise.resolve();
+}
+
+/** The part of the server's hook registry the shutdown wiring uses. */
+interface ServerCloseHooks {
+  hook: (name: "close", handler: () => Promise<void>) => unknown;
+}
+
+/**
+ * Wire the job manager into the server's shutdown. The running child is
+ * signalled as soon as SIGINT or SIGTERM arrives, and the server's `close` hook,
+ * which the graceful shutdown awaits before the process exits, waits for that
+ * child's exit. Register before the graceful-shutdown handler: signal listeners
+ * run in registration order.
+ */
+export function registerJobManagerShutdown(hooks: ServerCloseHooks): void {
+  for (const signal of ["SIGINT", "SIGTERM"] as const)
+    process.once(signal, () => void shutdownJobManager());
+  hooks.hook("close", shutdownJobManager);
 }

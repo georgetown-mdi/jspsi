@@ -593,6 +593,15 @@ export class JobManager {
    * only, so a restart forgets it.
    */
   private openedConfiguration: OpenedMountedConfiguration | undefined;
+  /**
+   * The shutdown in progress for each record whose child {@link shutdown}
+   * signalled: the promise every shutdown call returns, settled from
+   * {@link reconcileTerminal} once the child's exit is observed.
+   */
+  private readonly shutdownWaits = new WeakMap<
+    JobRecord,
+    { exited: Promise<void>; resolveExited: () => void }
+  >();
 
   constructor(options: JobManagerOptions) {
     this.dataRoot = options.dataRoot;
@@ -1571,6 +1580,7 @@ export class JobManager {
       record.transportTeardownOverran = diagnostics.transportTeardownOverran;
 
     this.maybeFreeSlot(record);
+    this.shutdownWaits.get(record)?.resolveExited();
   }
 
   /**
@@ -1720,15 +1730,34 @@ export class JobManager {
   }
 
   /**
-   * Shutdown hook: SIGTERM the single active record's running child so no orphaned
-   * CLI outlives the server. Called from the server lifecycle on shutdown.
+   * Shutdown hook: SIGTERM the running child, SIGKILL it if it is still running
+   * after the SIGKILL grace, and resolve once its exit has been observed, so the
+   * server exits only after the CLI's own cleanup and no orphaned CLI outlives
+   * it. Resolves at once when no child is running. A repeated call while that
+   * child is stopping signals nothing further and returns the same promise.
    */
-  shutdown(): void {
+  shutdown(): Promise<void> {
     const slot = this.slot;
-    if (slot === null || slot.phase !== "active") return;
+    if (slot === null || slot.phase !== "active") return Promise.resolve();
     const record = slot.record;
+    if (record.terminal !== null || record.handle === null)
+      return Promise.resolve();
+    const inProgress = this.shutdownWaits.get(record);
+    if (inProgress !== undefined) return inProgress.exited;
+
+    let resolveExited = (): void => undefined;
+    const exited = new Promise<void>((resolve) => {
+      resolveExited = resolve;
+    });
+    this.shutdownWaits.set(record, { exited, resolveExited });
     this.clearCancelTimers(record);
-    if (record.handle?.isRunning()) record.handle.signal("SIGTERM");
+    record.handle.signal("SIGTERM");
+    const toSigkill = setTimeout(() => {
+      if (record.handle?.isRunning()) record.handle.signal("SIGKILL");
+    }, this.cancelSigkillGraceMs);
+    record.cancelTimers.push(toSigkill);
+    toSigkill.unref();
+    return exited;
   }
 }
 

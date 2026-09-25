@@ -18,7 +18,7 @@ import { getLogger, setLogLevel } from "@alcove/core";
 
 import {
   bootSftpCredentialScratchDir,
-  shutdownJobManager,
+  registerJobManagerShutdown,
   warnJobApiProfileMismatch,
   warnJobRendezvousProvisioning,
 } from "../src/jobs/index";
@@ -126,12 +126,11 @@ const listener = server.listen(path ? { path } : { port, host }, (err) => {
 // Trap unhandled errors
 trapUnhandledNodeErrors();
 
-// SIGTERM every running CLI child on shutdown so no orphaned CLI outlives the
-// server. A no-op when the job API was never enabled. Registered BEFORE the
-// graceful-shutdown handler: signal listeners run in registration order, and the
-// children must be signalled before any handler that may end the process.
-for (const signal of ["SIGINT", "SIGTERM"] as const)
-  process.once(signal, shutdownJobManager);
+// Stop the running CLI child on shutdown and hold the process until it has
+// exited, so no orphaned CLI outlives the server. A no-op when the job API was
+// never enabled. Registered BEFORE the graceful-shutdown handler, whose signal
+// listener must run after the child has been signalled.
+registerJobManagerShutdown(nitroApp.hooks);
 
 // Graceful shutdown
 setupGracefulShutdown(listener, nitroApp);
