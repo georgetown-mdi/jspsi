@@ -1,6 +1,7 @@
 {
   "name": "alcove-monorepo",
   "version": "0.0.0",
+  "private": true,
   "description": "Alcove: encrypted matching and sharing through private set intersection for record linkage.",
   "license": "Apache-2.0",
   "author": "Vincent Dorie <vdorie@gmail.com>",
