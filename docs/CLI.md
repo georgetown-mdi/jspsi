@@ -26,7 +26,7 @@ The "safe to commit" property protects the author of a configuration, not whoeve
 
 The threat model behind the rule -- what a substituted configuration can do with a reference and why it is not cheaply detected -- is in the [security design](SECURITY_DESIGN.md#configuration-file-trust-boundary).
 
-The `--config-file` and `--key-file` arguments are expected to be available for all relevant commands below, and are thus not explicitly listed.
+The `--config-file` and `--key-file` arguments are expected to be available for all relevant commands below, and are thus not explicitly listed. Every command removes surrounding whitespace from the `--key-file` value, including the carriage return a path read from a Windows-style text file ends in, so the key is read from and saved to the same file; a value that is only whitespace is refused.
 
 `--identity IDENTITY` supplies this party's label in the linkage terms -- what your partner sees as your name there, in the invitation, and in the exchange record.
 

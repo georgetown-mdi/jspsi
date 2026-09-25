@@ -33,6 +33,26 @@ import { resolveHostKeyFingerprintRef } from "./util/atSignRefs";
 export const MAX_PORT = 65535;
 
 /**
+ * Read `--key-file` from parsed `Arguments`, defaulting to
+ * {@link DEFAULT_KEY_PATH}, with surrounding whitespace removed. Trimmed here,
+ * where every command first reads the path, so the key is read from and the
+ * rotated key written to one path: a trailing space or the CR a CRLF file
+ * leaves on `KEY=$(cat path.txt)` would otherwise name a second file. Rejects
+ * a repeat (via {@link singleValue}) and a value that is empty once trimmed.
+ */
+export function keyFileFlag(argv: Arguments): string {
+  const raw = singleValue(argv, "key-file");
+  if (raw === undefined) return DEFAULT_KEY_PATH;
+  const trimmed = String(raw).trim();
+  if (trimmed.length === 0)
+    throw new UsageError(
+      "--key-file is empty; name the key file, or omit the flag to use " +
+        DEFAULT_KEY_PATH,
+    );
+  return trimmed;
+}
+
+/**
  * Read `--server-host-key-fingerprint` from parsed `Arguments`, resolving an
  * `@file` reference and validating the result against
  * {@link HOST_KEY_FINGERPRINT_REGEX} before it reaches a connection -- a
@@ -413,8 +433,7 @@ export function parseCommonBootstrapArgs(
     configFile:
       (singleValue(argv, "config-file") as string | undefined) ??
       DEFAULT_CONFIG_PATH,
-    keyFile:
-      (singleValue(argv, "key-file") as string | undefined) ?? DEFAULT_KEY_PATH,
+    keyFile: keyFileFlag(argv),
     identity: singleValue(argv, "identity") as string | undefined,
     serverPort: nonNegativeIntFlag(argv, "server-port", MAX_PORT),
     serverUsername: singleValue(argv, "server-username") as string | undefined,

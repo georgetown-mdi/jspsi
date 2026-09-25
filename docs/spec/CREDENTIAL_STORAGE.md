@@ -301,8 +301,10 @@ writability check would still fail the durability flush after rotation. The
 pre-flight therefore rejects a writable-but-not-readable parent up front.
 
 The parent's permissions are the last of what it establishes, and not all of it.
-In order, over the trimmed path (the trimmed form is what the caller must then
-write with):
+Every command trims surrounding whitespace from `--key-file` where it reads the
+flag, so the path the key is loaded from is the path the rotated key is saved
+to. The pre-flight trims again and returns the trimmed path, which the caller
+writes with. In order:
 
 1. **A path that is not a non-empty string** is rejected.
 2. **The key path itself is examined without following a link.** A path that

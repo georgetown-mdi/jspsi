@@ -16,7 +16,7 @@ import {
 } from "../config";
 import { assertConfigTermsRunnable } from "../configTermsGuards";
 import { DEFAULT_KEY_PATH } from "../keyFile";
-import { addLoggingOptions } from "../optionDefinitions";
+import { addLoggingOptions, keyFileFlag } from "../optionDefinitions";
 import { resolveTermsUpdateIdentity } from "../partyIdentity";
 import {
   readPartnershipSecret,
@@ -69,9 +69,7 @@ export async function handler(argv: Arguments): Promise<void> {
       const configPath =
         (singleValue(argv, "config-file") as string | undefined) ??
         DEFAULT_CONFIG_PATH;
-      const keyPath =
-        (singleValue(argv, "key-file") as string | undefined) ??
-        DEFAULT_KEY_PATH;
+      const keyPath = keyFileFlag(argv);
 
       const source = readPartnershipTermsSource(configPath);
       const terms = source.linkageTerms;
