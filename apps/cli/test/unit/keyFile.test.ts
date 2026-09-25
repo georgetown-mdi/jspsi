@@ -11,6 +11,7 @@ import type { InvitationToken } from "@alcove/core";
 import {
   buildRotatedKeyFile,
   checkKeyFileExpiry,
+  clearRotationInFlight,
   loadKeyFile,
   markRotationInFlight,
   provisionKeyFileFromInvitation,
@@ -485,4 +486,22 @@ test("rotationInFlightNotice names the instant, the re-invite remedy, and the co
   expect(notice).toContain(
     "confirm with your partner over a channel you trust before re-inviting",
   );
+});
+
+test("clearRotationInFlight removes only the marker, and only beside the run's secret", () => {
+  const keyPath = path.join(dir, ".alcove.key");
+  saveKeyFile(keyPath, {
+    sharedSecret: TOKEN,
+    expires: "2030-01-01T00:00:00.000Z",
+    rotationInFlightSince: "2026-03-01T12:00:00.000Z",
+  });
+  clearRotationInFlight(keyPath, OTHER_SECRET);
+  expect(loadKeyFile(keyPath)?.rotationInFlightSince).toBe(
+    "2026-03-01T12:00:00.000Z",
+  );
+  clearRotationInFlight(keyPath, TOKEN);
+  expect(loadKeyFile(keyPath)).toEqual({
+    sharedSecret: TOKEN,
+    expires: "2030-01-01T00:00:00.000Z",
+  });
 });

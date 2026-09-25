@@ -222,6 +222,10 @@ export function saveKeyFile(
  * path, or when it holds a secret other than `sharedSecret` -- the online
  * `invite` and `accept` write their key file only after the handshake, so there
  * is no stored secret to mark.
+ *
+ * A throw leaves the shared secret unchanged, but not always the file: the
+ * write renames into place before it flushes the directory, so a failed flush
+ * can leave the marker written.
  */
 export function markRotationInFlight(
   keyFilePath: string,
@@ -235,6 +239,24 @@ export function markRotationInFlight(
     ...current,
     rotationInFlightSince: new Date(now).toISOString(),
   });
+}
+
+/**
+ * Remove the rotation-in-flight marker from the key file at `keyFilePath`
+ * through the same atomic owner-only write that set it, once the key exchange
+ * has failed closed: nothing rotated, and that failure is the outcome the
+ * operator reads. Nothing is written when the file holds no marker or a secret
+ * other than `sharedSecret`.
+ */
+export function clearRotationInFlight(
+  keyFilePath: string,
+  sharedSecret: string,
+): void {
+  const current = loadKeyFile(keyFilePath, { warnOnPermissive: false });
+  if (current === undefined || current.sharedSecret !== sharedSecret) return;
+  if (current.rotationInFlightSince === undefined) return;
+  const { rotationInFlightSince: _cleared, ...unmarked } = current;
+  saveKeyFile(keyFilePath, unmarked);
 }
 
 /**

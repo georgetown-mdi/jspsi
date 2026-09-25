@@ -734,7 +734,12 @@ that began and has not saved its rotated secret.
   write that follows the handshake (`buildRotatedKeyFile`) holds no marker, so
   the one atomic write that stores the new secret removes it. A marker already
   present keeps its first instant. A write that fails stops the run before the
-  key exchange, with the secret unchanged.
+  key exchange, with the shared secret unchanged; the file may still hold the
+  marker, since the write renames into place before it flushes the directory.
+- **What supersedes it.** A recorded outcome supersedes the marker: a key
+  exchange that fails closed (a `"security"`-kind `ConnectionError`) removes
+  it through the same write before the run reports that failure, while a
+  crash, a stopped process, or a dropped connection leaves it.
 - **Where it is not written.** It is written only over a key file holding the
   secret the run authenticates with, so the online `invite` and `accept`,
   whose key file is written after the handshake, write none.

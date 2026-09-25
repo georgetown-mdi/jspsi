@@ -317,6 +317,7 @@ import {
   AuthenticationError,
   PeerAbortError,
   ConnectionError,
+  causeChainSome,
   FrameSizeExceededError,
   InternalConsistencyError,
   InvitationTermDivergenceError,
@@ -2723,6 +2724,139 @@ test("a marker that cannot be written stops the run before the key exchange, the
   expect(thrown.message).toContain("The shared secret is unchanged");
   expect(loadKeyFile(keyFileA)).toEqual({ sharedSecret: TOKEN_A });
   expect(mockState.keyFileBeforeRotation[keyFileA]).toBeUndefined();
+}, 20_000);
+
+test("a marker whose directory flush fails after the rename stops the run before the key exchange, the secret unchanged", async () => {
+  // The key file sits in a directory of its own, so the only directory flush
+  // on it is the marker write's, after the rename has landed the marker.
+  const keyDirA = path.join(tmpDir, "key-a");
+  fs.mkdirSync(keyDirA);
+  const keyFileA = path.join(keyDirA, "a.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  const keyDirFds = new Set<number>();
+  const realOpen = fs.openSync;
+  const openSpy = vi
+    .spyOn(fs, "openSync")
+    .mockImplementation((...args: Parameters<typeof fs.openSync>) => {
+      const fd = realOpen(...args);
+      if (String(args[0]) === keyDirA) keyDirFds.add(fd);
+      return fd;
+    });
+  const realFsync = fs.fsyncSync;
+  const fsyncSpy = vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
+    if (keyDirFds.has(fd)) throw new Error("EIO: i/o error, fsync");
+    realFsync(fd);
+  });
+  let results: PromiseSettledResult<unknown>[];
+  try {
+    results = await Promise.allSettled(
+      [keyFileA, keyFileB].map((keyFilePath, index) =>
+        runProtocol({
+          connection: {
+            channel: "filedrop",
+            path: dropDir,
+            options: {
+              ...TWO_PARTY_OPTIONS,
+              peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+            },
+          },
+          auth: { sharedSecret: TOKEN_A, keyFilePath },
+          prepared: minimalPrepared,
+          output: undefined,
+          verbosity: -1,
+          loggerName: `test-${index}`,
+        }),
+      ),
+    );
+  } finally {
+    openSpy.mockRestore();
+    fsyncSpy.mockRestore();
+  }
+  const [resultA] = results;
+  expect(resultA.status).toBe("rejected");
+  const thrown = (resultA as PromiseRejectedResult).reason as Error;
+  expect(thrown.message).toContain("the key exchange did not start");
+  expect(thrown.message).toContain("The shared secret is unchanged");
+  const left = loadKeyFile(keyFileA);
+  expect(left?.sharedSecret).toBe(TOKEN_A);
+  expect(left?.rotationInFlightSince).toBeDefined();
+  expect(mockState.keyFileBeforeRotation[keyFileA]).toBeUndefined();
+}, 20_000);
+
+test("a key exchange that fails closed removes both markers and leaves both secrets", async () => {
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_B });
+
+  const results = await Promise.allSettled(
+    [
+      [keyFileA, TOKEN_A],
+      [keyFileB, TOKEN_B],
+    ].map(([keyFilePath, sharedSecret], index) =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret, keyFilePath },
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: `test-${index}`,
+      }),
+    ),
+  );
+  for (const result of results) {
+    expect(result.status).toBe("rejected");
+    const cause = (result as PromiseRejectedResult).reason as Error;
+    expect(
+      causeChainSome(
+        cause,
+        (link) => link instanceof ConnectionError && link.kind === "security",
+      ),
+    ).toBe(true);
+  }
+  expect(loadKeyFile(keyFileA)).toEqual({ sharedSecret: TOKEN_A });
+  expect(loadKeyFile(keyFileB)).toEqual({ sharedSecret: TOKEN_B });
+}, 20_000);
+
+test("a key exchange the partner never answers leaves the marker set", async () => {
+  const keyFileA = path.join(tmpDir, "a.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+  // The partner stops before its key exchange, so this side's marked key
+  // exchange ends on the transport, not on a failed-closed handshake.
+  mockState.unmarkableKeyFilePath = keyFileB;
+
+  const [resultA] = await Promise.allSettled(
+    [keyFileA, keyFileB].map((keyFilePath, index) =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: {
+            ...TWO_PARTY_OPTIONS,
+            peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+          },
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath },
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: `test-${index}`,
+      }),
+    ),
+  );
+  expect(resultA.status).toBe("rejected");
+  const left = loadKeyFile(keyFileA);
+  expect(left?.sharedSecret).toBe(TOKEN_A);
+  expect(left?.rotationInFlightSince).toBeDefined();
 }, 20_000);
 
 test("a token_max_age_days policy stamps expires onto both rotated key files", async () => {
