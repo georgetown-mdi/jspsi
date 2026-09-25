@@ -33,11 +33,11 @@ import { StatusPanel } from "./StatusPanel";
 import { reattachedRunState } from "./reattachedRunState";
 import { useJobExchangeRecordOffer } from "./useJobExchangeRecordOffer";
 
+import type { AvailableRecordOffer, RunOutputs } from "@psi/runOutputs";
 import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobRunStatus } from "@psi/jobClient/serverJobExchangeDriver";
 import type { RunFailure } from "./useInviterExchange";
-import type { RunOutputs } from "@psi/runOutputs";
 
 /**
  * The inviter's post-create work column, through the run's three phases: the
@@ -54,6 +54,7 @@ export function InviterExchangeSection({
   run,
   outputs,
   failure,
+  runRecord,
   warnings,
   partnerAcceptsByCli,
   onDownloadAcceptKit,
@@ -70,6 +71,10 @@ export function InviterExchangeSection({
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
+  /** The exchange record a failed in-browser run holds (`useFailedRunRecord`),
+   * offered in the record panel a console run's record takes; undefined on
+   * every other run. */
+  runRecord: AvailableRecordOffer | undefined;
   /** The run's accumulated non-fatal warnings (the driver's `onWarning` slot),
    * rendered beside the status panel through every phase. */
   warnings: ReadonlyArray<string>;
@@ -130,11 +135,15 @@ export function InviterExchangeSection({
   // holding the pair, so the ordinary successful run makes no second request. The
   // one answer drives both the record panel and whether the failure recoveries --
   // each of which DELETEs the run's folder -- confirm before doing so.
-  const recordOffer = useJobExchangeRecordOffer(
+  const jobRecordOffer = useJobExchangeRecordOffer(
     serverJob ? jobId : undefined,
     settled && outputs?.record === undefined,
   );
-  const recordConfirm = untakenRecordConfirm(recordOffer);
+  const recordConfirm = untakenRecordConfirm(jobRecordOffer);
+  // A failed browser run's record confirms nothing on recovery: the confirm
+  // speaks of the console's folder, and the panel itself states what discards
+  // this page's copy.
+  const recordOffer = runRecord ?? jobRecordOffer;
 
   // A busy (409) create at start re-attached this surface to an exchange the
   // console already held (a second tab, a navigate-away-and-back, or an orphaned
@@ -342,7 +351,10 @@ export function InviterExchangeSection({
       {phase === "done" && outputs !== undefined && (
         <RunDownloads outputs={outputs} heading="h2" />
       )}
-      <RecordDownload offer={recordOffer} />
+      <RecordDownload
+        offer={recordOffer}
+        heldBy={serverJob ? "console" : "page"}
+      />
       {serverJob && jobId !== undefined && (
         <>
           <ReceiptDownload jobId={jobId} settled={settled} />

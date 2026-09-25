@@ -12,7 +12,9 @@ name: Nightly Platform Tests
 #
 # Two platform jobs, macOS and Windows. Each job runs npm test -w apps/cli (the
 # CLI's unit project) on its own runs-on platform, so a platform-gated test
-# executes rather than skips on the leg that actually has that platform.
+# executes rather than skips on the leg that actually has that platform. The
+# macOS job also runs npm run test:scripts, the repository script and hook
+# suites, which drive real BSD tools there where every per-PR leg has GNU ones.
 #
 # Whether the CLI's native dependency (@openmined/psi.js, a vendored prebuild)
 # installs and builds on a Windows runner at all had never been driven before
@@ -54,7 +56,7 @@ permissions:
 
 jobs:
   macos:
-    name: CLI unit tests (macOS)
+    name: CLI unit and script tests (macOS)
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -71,6 +73,9 @@ jobs:
       - uses: ./.github/actions/setup
       - name: Unit tests (CLI)
         run: npm test -w apps/cli
+      - name: Script and hook tests
+        if: ${{ !cancelled() }}
+        run: npm run test:scripts
 
   windows:
     name: CLI unit tests (Windows)

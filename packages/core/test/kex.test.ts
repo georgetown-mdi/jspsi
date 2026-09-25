@@ -10,7 +10,7 @@ import {
   hmacSha256,
   sha256,
 } from "../src/utils/crypto";
-import { isPeerWaitTimeout } from "../src/errors";
+import { AuthenticationError, isPeerWaitTimeout } from "../src/errors";
 import {
   ConnectionError,
   createMessagePipe,
@@ -522,9 +522,9 @@ test("a mismatched secret fails closed on both sides with the generic error", as
   for (const r of [a, b]) {
     const reason = (r as PromiseRejectedResult).reason as unknown;
     // The trust-boundary classification consumers key on: a security-kind
-    // ConnectionError, with the message byte-identical to the generic string
+    // AuthenticationError, with the message byte-identical to the generic string
     // (the type holds the classification, never the message).
-    expect(reason).toBeInstanceOf(ConnectionError);
+    expect(reason).toBeInstanceOf(AuthenticationError);
     expect((reason as ConnectionError).kind).toBe("security");
     expect((reason as ConnectionError).message).toBe(GENERIC_FAILURE);
   }
@@ -575,7 +575,7 @@ test("responder sends abort when the initiator's msg1 is malformed", async () =>
   // A malformed-frame rejection holds the same security classification as a
   // confirmation mismatch: every authentication-failure site throws the one
   // generic security-kind error.
-  expect(err).toBeInstanceOf(ConnectionError);
+  expect(err).toBeInstanceOf(AuthenticationError);
   expect((err as ConnectionError).kind).toBe("security");
   expect((err as ConnectionError).message).toBe(GENERIC_FAILURE);
   expect(await connA.receive()).toEqual({ kexMsg: "abort" });
@@ -951,7 +951,7 @@ test("a peer on the superseded protocol-version tag fails the handshake closed",
   });
 
   const err = await initiator.catch((e: unknown) => e);
-  expect(err).toBeInstanceOf(ConnectionError);
+  expect(err).toBeInstanceOf(AuthenticationError);
   expect((err as ConnectionError).kind).toBe("security");
   expect((err as ConnectionError).message).toBe(GENERIC_FAILURE);
   // The shipped side aborts rather than sending its own confirmation, so the
