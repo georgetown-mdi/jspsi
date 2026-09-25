@@ -412,6 +412,11 @@ const chunkEnvelopes: Array<{
   },
   { label: "no chunk data", fields: { data: undefined }, refused: true },
   {
+    label: "an empty chunk slice",
+    fields: { data: new Uint8Array(0) },
+    refused: true,
+  },
+  {
     label: "a string message id",
     fields: { __peerData: "1" },
     refused: true,

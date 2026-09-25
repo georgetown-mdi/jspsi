@@ -112,6 +112,7 @@ function readChunkEnvelope(
   const byteLength = binaryByteLength(data);
   if (byteLength === undefined)
     return { malformed: "its chunk payload is not binary" };
+  if (byteLength === 0) return { malformed: "its chunk payload is empty" };
   return { chunk: received as PeerChunk, byteLength };
 }
 

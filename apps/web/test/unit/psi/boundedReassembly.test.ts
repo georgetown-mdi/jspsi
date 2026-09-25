@@ -483,6 +483,23 @@ describe("boundChunkReassembly: chunk envelope shape", () => {
     expect(conn.handledChunks).toBe(1);
   });
 
+  test.each([
+    ["typed-array view", new Uint8Array(0)],
+    ["ArrayBuffer", new ArrayBuffer(0)],
+  ])("refuses an empty %s slice", (_label, data) => {
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn);
+
+    conn._handleChunk({ __peerData: 1, n: 0, total: 2, data } as never);
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame has a malformed chunk envelope: its chunk " +
+        "payload is empty",
+    );
+    expect(conn.handledChunks).toBe(0);
+  });
+
   test("accepts an ArrayBuffer slice as well as a typed-array view", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn);
