@@ -597,6 +597,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.messageLoop.setInboundFrameCap(maxBytes);
   }
 
+  /** Implements `Connection.inboundPollIntervalMs`. */
+  inboundPollIntervalMs(): number {
+    return this.options.pollingFrequency;
+  }
+
   // The last message this party sent, owned by the message loop; close()'s
   // delete-mode drain reads it through this delegating getter so its teardown
   // sequencing is unchanged.
@@ -1287,7 +1292,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     // transport that does not bound reconnections. The abort-marker write also
     // signals this itself, because a catch-path write can precede this close().
     this.client.beginTeardown?.();
-    // Abort-marker decision gate, FIRST -- before stop()/the drain/client.end()
+    // Stop polling before the abort-marker gate below can wait: the decision
+    // it waits for is made locally, and a poll during that wait would consume
+    // a peer message nothing will receive.
+    this.stop();
+    // Abort-marker decision gate -- before the drain/client.end()
     // and before identity/token fields are cleared. On a connection-originated
     // fault the bridge fire-and-forgets this close() BEFORE the error reaches
     // the orchestrator's catch, so a marker write issued from the catch would
@@ -1315,8 +1324,6 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
           /* best-effort; teardown proceeds regardless of write outcome */
         });
     }
-
-    this.stop();
 
     // Cancel any in-flight wait (a rendezvous/send sleep parked between polls)
     // so it rejects promptly instead of resuming against a connection that is

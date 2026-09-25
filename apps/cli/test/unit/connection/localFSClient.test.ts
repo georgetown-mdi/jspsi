@@ -2,12 +2,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import os from "node:os";
+import { execFileSync, spawn } from "node:child_process";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   DirectoryListingBoundsError,
   FrameSizeExceededError,
   TimeoutError,
+  UsageError,
 } from "@alcove/core";
 
 import { LocalFSClient } from "../../../src/connection/localFSClient";
@@ -696,6 +698,73 @@ describe("symlink refusal in the rendezvous directory", () => {
       );
     },
   );
+});
+
+// --- non-regular files -------------------------------------------------------
+
+describe("non-regular entries in the rendezvous directory", () => {
+  // Each case bounds its wait: a child process opens the other end of the FIFO
+  // after RELEASE_MS, so an implementation that waits in open() still settles
+  // (and fails the time assertion) rather than holding the run open.
+  const RELEASE_MS = 3_000;
+  const withRelease = async <T>(
+    shellCommand: string,
+    run: () => Promise<T>,
+  ): Promise<{ outcome: PromiseSettledResult<T>; elapsedMs: number }> => {
+    const child = spawn(
+      "sh",
+      ["-c", `sleep ${RELEASE_MS / 1000}; ${shellCommand}`],
+      {
+        stdio: "ignore",
+      },
+    );
+    const start = Date.now();
+    try {
+      const [outcome] = await Promise.allSettled([run()]);
+      return { outcome, elapsedMs: Date.now() - start };
+    } finally {
+      child.kill("SIGKILL");
+    }
+  };
+
+  test.skipIf(process.platform === "win32")(
+    "get refuses a FIFO promptly, on both read paths",
+    async () => {
+      const fifo = path.join(dir, "peer-10.json");
+      execFileSync("mkfifo", [fifo]);
+      for (const options of [undefined, { maxBytes: 1024 }]) {
+        const { outcome, elapsedMs } = await withRelease(`: > '${fifo}'`, () =>
+          client.get(fifo, options),
+        );
+        expect(outcome.status).toBe("rejected");
+        expect((outcome as PromiseRejectedResult).reason).toBeInstanceOf(
+          UsageError,
+        );
+        expect(elapsedMs).toBeLessThan(RELEASE_MS);
+      }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "put refuses a FIFO at the destination promptly",
+    async () => {
+      const fifo = path.join(dir, "self-joining.json");
+      execFileSync("mkfifo", [fifo]);
+      const { outcome, elapsedMs } = await withRelease(
+        `cat '${fifo}' > /dev/null`,
+        () => client.put(Buffer.from("{}"), fifo, { flags: "w" }),
+      );
+      expect(outcome.status).toBe("rejected");
+      expect(elapsedMs).toBeLessThan(RELEASE_MS);
+      expect((await fs.lstat(fifo)).isFIFO()).toBe(true);
+    },
+  );
+
+  test("get refuses a directory as not a regular file", async () => {
+    const sub = path.join(dir, "sub");
+    await fs.mkdir(sub);
+    await expect(client.get(sub)).rejects.toBeInstanceOf(UsageError);
+  });
 });
 
 // --- connect: retry and timeout ----------------------------------------------

@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { default as EventEmitter } from "eventemitter3";
 
 import {
+  MAX_MESSAGE_SEQ,
   messageFilename,
   resolveUnexpectedFilesPolicy,
   isRecognizedLoopFile,
@@ -21,6 +22,8 @@ import {
 } from "../../src/connection/fileSyncFraming";
 import {
   ackMarkerName,
+  isProtocolGrammarName,
+  parseMessageByteCount,
   parseTimestampedMessageNNN,
 } from "../../src/connection/fileSyncNames";
 import { MAX_FRAME_SIZE_BYTES } from "../../src/connection/frameSize";
@@ -636,6 +639,25 @@ describe("FileSyncMessageLoop counter commit points", () => {
     expect(f.loop.lastSentFile).toBe(
       `${SELF}-${objectMessage({ a: 1 }).length}.json`,
     );
+  });
+
+  test("send() refuses a message past the highest counter a file name holds", async () => {
+    const files = new Map<string, Buffer>();
+    const f = makeLoop({ timestampInFilename: true }, {}, files);
+    f.loop.seq = MAX_MESSAGE_SEQ;
+
+    await f.loop.send({ a: 1 });
+    expect(f.loop.lastSentFile).toMatch(/-999999-\d+\.json$/);
+    const written = [...files.keys()];
+
+    const refusal: unknown = await f.loop.send({ a: 2 }).catch((e) => e);
+    expect(refusal).toBeInstanceOf(UsageError);
+    expect((refusal as Error).message).toBe(
+      "cannot send: this session has already sent 1000000 messages, the " +
+        "most one file-sync session allows",
+    );
+    expect([...files.keys()]).toEqual(written);
+    expect(f.loop.seq).toBe(MAX_MESSAGE_SEQ + 1);
   });
 
   // A virtual clock for the send-wait budget cases below. send() reads the clock
@@ -1953,4 +1975,95 @@ test("retain mode: a peer message with a valid byte count but unparseable NNN is
     expect((errors[0] as Error).message).toContain("NNN");
     expect(pollerActiveBeforeDriverStop).toBe(false);
   }
+});
+
+describe("message-name grammar", () => {
+  test("a digits-terminal name with no <id>- part is foreign, not a message", () => {
+    for (const name of ["2024.json", "7.json"]) {
+      expect(parseMessageByteCount(name)).toBeUndefined();
+      expect(isProtocolGrammarName(name)).toBe(false);
+    }
+    expect(parseMessageByteCount("peer-2024.json")).toBe(2024);
+    expect(isProtocolGrammarName("peer-2024.json")).toBe(true);
+  });
+});
+
+describe("FileSyncMessageLoop delete-mode consume failure", () => {
+  test("a message whose delete fails twice is never delivered and the poller stops", async () => {
+    const f = makeLoop({ pollingFrequency: 1 });
+    plantDeleteMessage(f.files, { hi: true });
+    f.client.delete = async () => {
+      throw new Error("permission denied");
+    };
+
+    f.loop.start();
+    await new Promise((r) => setTimeout(r, 100));
+    f.loop.stop();
+
+    expect(f.emitted.filter((e) => e.event === "data")).toHaveLength(0);
+    const errors = f.emitted.filter((e) => e.event === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].arg).toBeInstanceOf(UsageError);
+    expect(errors[0].pollerActiveAtEmit).toBe(false);
+    const rendered = sanitizeErrorForDisplay(errors[0].arg);
+    expect(rendered).toContain("could not delete a partner message");
+    expect(rendered).toContain("retain_files: true");
+    expect(rendered).toContain("permission denied");
+    expect(f.files.size).toBe(1);
+  });
+
+  test.each([
+    ["local unlink", "ENOENT"],
+    ["SFTP SSH_FX_NO_SUCH_FILE", 2],
+  ])(
+    "a retry that finds the message already deleted (%s) delivers it once",
+    async (_transport, absentCode) => {
+      const f = makeLoop({ pollingFrequency: 1 });
+      plantDeleteMessage(f.files, { hi: true });
+      let deleteCalls = 0;
+      f.client.delete = async (path: string) => {
+        deleteCalls++;
+        f.files.delete(path);
+        if (deleteCalls === 1) throw new Error("connection reset");
+        throw Object.assign(new Error("no such file"), { code: absentCode });
+      };
+
+      f.loop.start();
+      await new Promise((r) => setTimeout(r, 100));
+      const { pollerActive } = f.loop as unknown as LoopInternals;
+      f.loop.stop();
+
+      expect(deleteCalls).toBe(2);
+      const delivered = f.emitted.filter((e) => e.event === "data");
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0].arg).toEqual({ hi: true });
+      expect(f.emitted.filter((e) => e.event === "error")).toHaveLength(0);
+      expect(pollerActive).toBe(true);
+    },
+  );
+});
+
+describe("FileSyncMessageLoop stop during the idle-boundary release", () => {
+  test("stop() while releaseForIdle is pending arms no further poll", async () => {
+    const f = makeLoop();
+    let releaseStarted!: () => void;
+    const started = new Promise<void>((r) => (releaseStarted = r));
+    let finishRelease!: () => void;
+    f.client.releaseForIdle = () => {
+      releaseStarted();
+      return new Promise<void>((r) => (finishRelease = r));
+    };
+
+    const cycle = f.pollOnce();
+    await started;
+    f.loop.stop();
+    finishRelease();
+    await cycle;
+
+    const { poller } = f.loop as unknown as {
+      poller: NodeJS.Timeout | undefined;
+    };
+    f.loop.stop();
+    expect(poller).toBeUndefined();
+  });
 });

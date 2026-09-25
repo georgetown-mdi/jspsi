@@ -1,7 +1,7 @@
 // Scenario tests for FileSyncConnection.synchronize(), which delegates its
 // rendezvous work to FileSyncRendezvous.
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { FileSyncConnection } from "../../src/connection/fileSyncConnection";
 import type { FileTransportClient } from "../../src/connection/fileSyncConnection";
@@ -22,7 +22,11 @@ import {
   responsibleFilesOf,
   makeRendezvousPair,
 } from "../utils/fileSyncConnectionFixture";
-import { HELLO_MAX_BYTES } from "../../src/connection/fileSyncRendezvous";
+import {
+  HELLO_MAX_BYTES,
+  peerIdLengthRefusal,
+} from "../../src/connection/fileSyncRendezvous";
+import { isHelloTempName } from "../../src/connection/fileSyncNames";
 
 test("synchronize() cleans up hello and lock files when createExclusive() throws EEXIST", async () => {
   // Simulates the losing party in the lock-file race: createExclusive() throws
@@ -235,6 +239,32 @@ test("synchronize() does NOT sweep a leftover abort marker in retain mode; it sh
   await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
   expect(files.has(ownAbortPath)).toBe(true);
 });
+
+for (const sweepExchangeFiles of [false, true]) {
+  test(`synchronize() in delete mode keeps the abort marker of a retain transcript it refuses (sweep flag ${sweepExchangeFiles})`, async () => {
+    const { client, files } = makeMockClient();
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.options.sweepExchangeFiles = sweepExchangeFiles;
+    const [a, b] = [
+      "00000000-0000-4000-8000-00000000000a",
+      "00000000-0000-4000-8000-00000000000b",
+    ];
+    const retainHello = Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: true }),
+    );
+    const message = `${a}-20260102T030405-000-100`;
+    files.set(`${conn.path}/${a}-hello.json`, retainHello);
+    files.set(`${conn.path}/${b}-hello.json`, retainHello);
+    files.set(`${conn.path}/${a}-${b}-hello-ack.json`, Buffer.alloc(0));
+    files.set(`${conn.path}/${message}.json`, Buffer.alloc(100));
+    files.set(`${conn.path}/${b}-${message}-ack.json`, Buffer.alloc(0));
+    const markerPath = `${conn.path}/${a}-abort.json`;
+    files.set(markerPath, Buffer.from("{}"));
+
+    await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+    expect(files.has(markerPath)).toBe(true);
+  });
+}
 
 test("synchronize() reports an over-cap peer hello as a terminal FrameSizeExceededError", async () => {
   // The rendezvous gate (readControlFileWithGate) must treat an over-cap hello
@@ -1001,6 +1031,32 @@ test("synchronize() joiner branch: a sentinel put failure leaves the peer hello 
   expect(conn.handshakeRole).toBeUndefined();
 });
 
+test("synchronize() joiner branch: publishes the joining sentinel temp-then-rename, never by a put to its name", async () => {
+  const { conn, client } = await makeJoiner();
+  const joiningPath = `${conn.path}/${conn.id}-joining.json`;
+  const putPaths: string[] = [];
+  const renames: [string, string][] = [];
+  const put = client.put.bind(client);
+  const rename = client.rename.bind(client);
+  client.put = async (src, dest, options) => {
+    putPaths.push(dest);
+    return put(src, dest, options);
+  };
+  client.rename = async (from, to) => {
+    renames.push([from, to]);
+    return rename(from, to);
+  };
+
+  await conn.synchronize();
+
+  expect(putPaths).not.toContain(joiningPath);
+  const intoSentinel = renames.filter(([, to]) => to === joiningPath);
+  expect(intoSentinel).toHaveLength(1);
+  expect(putPaths).toContain(intoSentinel[0][0]);
+  expect(isHelloTempName(intoSentinel[0][0].split("/").pop()!)).toBe(true);
+  await conn.close();
+});
+
 test("synchronize() joiner branch: a failure before the peer hello is deleted tracks the sentinel for cleanup()", async () => {
   // Second failure point, still BEFORE the peer hello is deleted: the sentinel
   // was written but delete(peer hello) throws. The peer hello is intact, so the
@@ -1033,8 +1089,11 @@ test("synchronize() joiner branch: a failure after the peer hello is deleted lea
   // recovers within a bounded window instead of polling to the peer timeout.
   const { conn, client, files, peerHelloName } = await makeJoiner();
   const joiningName = `${conn.id}-joining.json`;
-  client.rename = async () => {
-    throw new Error("synthetic sentinel rename failure");
+  const rename = client.rename.bind(client);
+  client.rename = async (from, to) => {
+    if (from.endsWith(`/${joiningName}`))
+      throw new Error("synthetic sentinel rename failure");
+    return rename(from, to);
   };
 
   await expect(conn.synchronize()).rejects.toThrow(
@@ -1634,6 +1693,71 @@ test("synchronize() lock path writes hello as <id>-hello.json and self-hello det
   );
   expect(helloInStore).toBeDefined();
 });
+
+// --- synchronize(): id length -------------------------------------------------
+
+test("peerIdLengthRefusal admits ids whose derived names fit in 255 bytes and refuses one byte more", () => {
+  const self = "0".repeat(36);
+  expect(peerIdLengthRefusal(self, "p".repeat(176))).toBeUndefined();
+  expect(peerIdLengthRefusal("p".repeat(176), self)).toBeUndefined();
+  const refusal = peerIdLengthRefusal(self, "p".repeat(177));
+  expect(refusal).toBeInstanceOf(UsageError);
+  expect(refusal!.message).toContain("256 bytes");
+  // Multi-byte characters count in bytes, not characters.
+  const twoByteChar = String.fromCharCode(0xe9);
+  expect(peerIdLengthRefusal(self, twoByteChar.repeat(89))).toBeInstanceOf(
+    UsageError,
+  );
+});
+
+const shortId = "0".repeat(36);
+const longId = "p".repeat(200);
+for (const mode of [
+  {
+    name: "retain",
+    opts: {
+      locklessRendezvous: true,
+      retainFiles: true,
+      timestampInFilename: true,
+    },
+  },
+  { name: "lock", opts: {} },
+]) {
+  for (const arrival of [
+    { name: "together", first: undefined },
+    { name: "long id first", first: longId },
+    { name: "short id first", first: shortId },
+  ]) {
+    test(`synchronize() (${mode.name}, ${arrival.name}) refuses a partner id too long for the names derived from it, on both sides`, async () => {
+      const { connA, connB, files } = makeRendezvousPair(
+        shortId,
+        mode.opts,
+        longId,
+        mode.opts,
+        { timeToLiveMs: 5_000, pollingFrequency: 5 },
+      );
+      const [first, second] =
+        arrival.first === longId ? [connB, connA] : [connA, connB];
+      const firstRun = first.synchronize();
+      if (arrival.first !== undefined)
+        await vi.waitFor(() =>
+          expect(files.has(`${first.path}/${first.id}-hello.json`)).toBe(true),
+        );
+      const results = await Promise.allSettled([
+        firstRun,
+        second.synchronize(),
+      ]);
+      const refusals = results.filter(
+        (r) =>
+          r.status === "rejected" &&
+          r.reason instanceof UsageError &&
+          (r.reason as Error).message.includes("ids are too long together"),
+      );
+      expect(refusals.length).toBe(2);
+      await Promise.all([connA.close(), connB.close()]);
+    });
+  }
+}
 
 // --- synchronize(): lockless mode ---------------------------------------------
 

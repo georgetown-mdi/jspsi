@@ -100,6 +100,16 @@ test("rejects an unrecognized envelope version with IncompatibleEnvelopeVersionE
   );
 });
 
+test("a body shorter than the header with a foreign first byte gets the version error", () => {
+  // `{}` is a complete pre-envelope JSON message, two bytes long.
+  expect(() => deserializeFileSyncMessage(textPayload("{}"))).toThrow(
+    IncompatibleEnvelopeVersionError,
+  );
+  expect(() => deserializeFileSyncMessage(new Uint8Array(0))).toThrow(
+    "message envelope is shorter than its header",
+  );
+});
+
 test("rejects an unknown payload type", () => {
   const whole = serializeFileSyncMessage(
     MESSAGE_TYPE_BINARY,

@@ -136,10 +136,10 @@ export class IncompatibleEnvelopeVersionError extends Error {
 export function deserializeFileSyncMessage(
   raw: Uint8Array,
 ): DeserializedMessage {
+  if (raw.length > 0 && raw[0] !== MESSAGE_ENVELOPE_VERSION)
+    throw new IncompatibleEnvelopeVersionError(raw[0]);
   if (raw.length < MESSAGE_HEADER_BYTES)
     throw new Error("message envelope is shorter than its header");
-  if (raw[0] !== MESSAGE_ENVELOPE_VERSION)
-    throw new IncompatibleEnvelopeVersionError(raw[0]);
   const type = raw[1];
   if (type !== MESSAGE_TYPE_OBJECT && type !== MESSAGE_TYPE_BINARY)
     throw new Error(`unknown message payload type ${type}`);

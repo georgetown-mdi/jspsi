@@ -8,6 +8,10 @@ import type {
 import type { FileDropConnectionConfig } from "../../src/config/connection";
 import { PeerAbortError } from "../../src/errors";
 import {
+  serializeFileSyncMessage,
+  MESSAGE_TYPE_OBJECT,
+} from "../../src/connection/fileSyncFraming";
+import {
   fromEventConnection,
   ConnectionError,
 } from "../../src/connection/messageConnection";
@@ -348,6 +352,29 @@ test("clean completion seals the decision and closes without writing a marker", 
   await conn.close();
 
   expect(files.has(markerPath(conn))).toBe(false);
+});
+
+test("close() stops polling before it waits on the abort decision", async () => {
+  const { client, files } = makeAbortTestClient();
+  const conn = await makeArmedConn(client, { peerId: PEER_ID });
+  conn.start();
+  await new Promise((r) => setTimeout(r, 20));
+
+  const closed = conn.close();
+  // Let a poll already in flight when close() began finish.
+  await new Promise((r) => setTimeout(r, 20));
+  const body = serializeFileSyncMessage(
+    MESSAGE_TYPE_OBJECT,
+    0,
+    Buffer.from(JSON.stringify({ late: true })),
+  );
+  const messagePath = `${TEST_DIR}/${PEER_ID}-${body.length}.json`;
+  files.set(messagePath, body);
+  await new Promise((r) => setTimeout(r, 50));
+
+  expect(files.has(messagePath)).toBe(true);
+  conn.sealAbort();
+  await closed;
 });
 
 // --- short write budget: a hung write is abandoned, teardown still finishes ---

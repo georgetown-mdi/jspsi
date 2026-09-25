@@ -30,6 +30,7 @@ import { parseBoundedJson } from "../utils/boundedJson";
 import type { getLoggerForVerbosity } from "../utils/logger";
 import {
   UsageError,
+  chainDetailCauses,
   FrameSizeExceededError,
   PeerAbortError,
   TransportPublishIndeterminateError,
@@ -67,6 +68,12 @@ const CLEAN_DIRECTORY_RESTART_REMEDY =
   "Re-run the exchange in a clean directory; both parties must start the new " +
   "exchange fresh.";
 
+// The highest per-session send sequence number, so a timestamped message name
+// holds at most a six-digit counter: send() refuses a message past it, and
+// peerIdLengthRefusal sizes the longest name at it.
+/** @internal */
+export const MAX_MESSAGE_SEQ = 999_999;
+
 // Builds an outgoing message filename. The byte count is always the final
 // `-`-delimited segment before `.json` so the receiver can extract it with a
 // right-anchored parse (see parseMessageByteCount). When timestampInFilename
@@ -95,9 +102,9 @@ export function messageFilename({
     .toISOString()
     .replace(/[-:]/g, "")
     .slice(0, 15);
-  // Zero-padded to three digits for the common case; widens to four or more
-  // past message 999, which keeps names unique (the byte count is still the
-  // final segment) at the cost of strict three-digit width on long sessions.
+  // Zero-padded to three digits for the common case; widens past message 999
+  // up to MAX_MESSAGE_SEQ's six digits, which keeps names unique (the byte
+  // count is still the final segment) at the cost of strict three-digit width.
   const counter = String(seq).padStart(3, "0");
   return `${id}-${timestamp}-${counter}-${byteCount}.json`;
 }
@@ -230,6 +237,14 @@ export function isRecognizedLoopFile(
 // peer's cleanup lands in between; two more in a row means the directory
 // listing is not converging, which is pathological.
 const MAX_CONSECUTIVE_ENOENT = 3;
+
+// A delete of a file that is already gone, as each transport reports it: a
+// local unlink's POSIX code "ENOENT", or ssh2-sftp-client's numeric
+// SSH_FX_NO_SUCH_FILE status (2), which the SFTP adapter passes through as is.
+function isDeleteTargetAbsentError(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return code === "ENOENT" || code === 2;
+}
 
 // The message-loop-relevant subset of the connection's Options, read live
 // through the deps `options` accessor. The connection's full Options is a
@@ -386,6 +401,12 @@ export class FileSyncMessageLoop {
           cause: this.indeterminatePublish.error,
           alcoveRecoveryHintEmitted: true,
         },
+      );
+
+    if (this.seq > MAX_MESSAGE_SEQ)
+      throw new UsageError(
+        `cannot send: this session has already sent ${MAX_MESSAGE_SEQ + 1} ` +
+          `messages, the most one file-sync session allows`,
       );
 
     // `path` is the inbound directory: where the peer's ack of our message (and,
@@ -1056,9 +1077,8 @@ export class FileSyncMessageLoop {
               // and must not be swallowed: re-deleting would re-hit the same
               // stall, and emit("data") below would deliver a message whose
               // consume-delete never landed, so the next poll re-emits a
-              // duplicate. Rethrown to poll()'s outer catch. A transient
-              // (non-UsageError) failure falls through to the retry-and-
-              // re-read path below.
+              // duplicate. Rethrown to poll()'s outer catch. Any other
+              // failure gets one retry below.
               if (err instanceof UsageError) throw err;
               // First delete failed (transiently); retry once after a
               // backoff. On abort (close() mid-poll) this.wait rejects here,
@@ -1070,17 +1090,27 @@ export class FileSyncMessageLoop {
               try {
                 await deps.client().delete(inPath);
               } catch (deleteErr: unknown) {
-                // Same terminal-on-UsageError rule for the second attempt: a stall
-                // is terminal, not a "manual cleanup may be required" transient.
                 if (deleteErr instanceof UsageError) throw deleteErr;
-                deps.log().warn(
-                  `[${deps.role()}] failed to delete ` +
-                    `${redactAndSanitizeForDisplay(messageFile.name)}; ` +
-                    "please notify the administrator that manual cleanup " +
-                    // The delete error's message re-embeds the peer filename via
-                    // the operation path; escape it like the name above it.
-                    `may be required: ${redactAndSanitizeForDisplay(errorMessage(deleteErr))}`,
-                );
+                // The first attempt can take effect with its reply lost, so
+                // an absent file on the retry means the message is consumed.
+                if (!isDeleteTargetAbsentError(deleteErr)) {
+                  // Terminal: the delete is the sender's go-ahead, and a
+                  // message left on disk is re-read by the next poll, so
+                  // emitting it here would deliver it again on every cycle.
+                  throw new UsageError(
+                    "could not delete a partner message after reading it " +
+                      "(two attempts). In delete mode each message is deleted " +
+                      "once read, so the account must be allowed to delete " +
+                      "files in the exchange directory. Grant that permission, " +
+                      "or have both parties set retain_files: true.",
+                    {
+                      cause: chainDetailCauses(
+                        [`message file: ${messageFile.name}`],
+                        deleteErr,
+                      ),
+                    },
+                  );
+                }
               }
             }
 
@@ -1133,7 +1163,7 @@ export class FileSyncMessageLoop {
         // Non-TOCTOU failure: a non-ENOENT error, or any error where
         // reachedGet is false (e.g., exists() or message parsing). A
         // delete() failure reaches here only as a terminal UsageError; its
-        // own try/catch swallows and retries a transient failure, and an
+        // own try/catch retries a first failure once, and an
         // abort (ConnectionClosedError) is caught by the !pollerActive guard
         // above instead.
         this.consecutiveEnoentCount = 0;
@@ -1172,10 +1202,13 @@ export class FileSyncMessageLoop {
                 redactAndSanitizeForDisplay(errorMessage(releaseErr)),
             );
         }
-        this.poller = setTimeout(
-          () => this.poll(),
-          deps.options().pollingFrequency,
-        );
+        // stop() may have run during the release await above.
+        if (this.pollerActive) {
+          this.poller = setTimeout(
+            () => this.poll(),
+            deps.options().pollingFrequency,
+          );
+        }
       }
     }
   }

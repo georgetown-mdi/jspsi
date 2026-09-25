@@ -77,6 +77,21 @@ const TIMEOUT_FAILURE = "key exchange handshake timed out";
 // network; exceeding it almost certainly means the peer is gone.
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 
+// A polling transport adds up to one poll interval on each leg of a round
+// trip: the peer finding this party's message, then this party finding the
+// reply.
+const HANDSHAKE_POLL_INTERVALS_PER_ROUND_TRIP = 2;
+
+// The bound on one handshake receive over `conn`. The connection's own
+// inactivity budget still caps the wait (MessageConnection.receive).
+function handshakeReceiveTimeoutMs(conn: MessageConnection): number {
+  const pollIntervalMs = conn.inboundPollIntervalMs?.() ?? 0;
+  return (
+    HANDSHAKE_TIMEOUT_MS +
+    HANDSHAKE_POLL_INTERVALS_PER_ROUND_TRIP * pollIntervalMs
+  );
+}
+
 const EMPTY = new Uint8Array(0);
 
 // --- Wire message schemas ----------------------------------------------------
@@ -400,25 +415,25 @@ async function deriveSharedSecret(
 // --- Receive / abort helpers -------------------------------------------------
 
 // Best-effort abort signal: if the peer is still waiting for our next message,
-// telling them to give up shortens their recovery from the 30 s handshake
+// telling them to give up shortens their recovery from the handshake
 // timeout to immediately. A failure to send the abort is non-fatal -- the peer
 // will time out on its own -- so the send error is swallowed.
 async function sendAbort(conn: MessageConnection): Promise<void> {
   try {
     await conn.send({ kexMsg: "abort" } satisfies KexAbort);
   } catch {
-    // Peer will hit the 30 s handshake timeout if abort delivery fails.
+    // Peer will hit the handshake timeout if abort delivery fails.
   }
 }
 
-// Receive one handshake message, bounded by the 30 s handshake timeout. The
+// Receive one handshake message, bounded by handshakeReceiveTimeoutMs. The
 // receive deadline firing is re-thrown as the distinct timeout error; any other
 // receive failure -- a transport refusal, a dropped link -- is re-thrown as it
 // is, so the operator reads its own class and message. Neither sends an abort:
 // the receive path is what failed, so there is no one to notify over it.
 async function receiveHandshake(conn: MessageConnection): Promise<unknown> {
   try {
-    return await conn.receive(HANDSHAKE_TIMEOUT_MS);
+    return await conn.receive(handshakeReceiveTimeoutMs(conn));
   } catch (e) {
     if (isReceiveDeadlineFailure(e))
       throw markPeerWaitTimeout(new Error(TIMEOUT_FAILURE, { cause: e }));
@@ -471,7 +486,8 @@ interface KexResult {
  *   message `"key exchange authentication failed"`, on any authentication
  *   failure.
  * @throws {Error} `"key exchange handshake timed out"` if a peer does not
- *   respond within 30 seconds -- a transport fault, not a security
+ *   respond within 30 seconds, plus two inbound poll intervals on a polling
+ *   transport -- a transport fault, not a security
  *   classification.
  * @throws {Error} if `psk` is not 32 bytes. Because `runKex` is async this
  *   is a rejected promise, not a synchronous throw.
@@ -507,7 +523,7 @@ export async function runKex(
 
     // Message 2: receive responder's ephemeral + confirmation.
     // Every failure path below sends an abort so the responder stops waiting
-    // immediately rather than blocking until the 30 s handshake timeout.
+    // immediately rather than blocking until the handshake timeout.
     const msg2 = KexMsg2Schema.safeParse(await receiveHandshake(conn));
     if (!msg2.success) {
       await sendAbort(conn);

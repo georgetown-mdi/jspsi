@@ -19,6 +19,7 @@ import {
   ConnectionError,
   createMessagePipe,
   fromEventConnection,
+  type MessageConnection,
 } from "../src/connection/messageConnection";
 
 import { PassthroughConnection } from "./utils/passthroughConnection";
@@ -578,6 +579,38 @@ test("a transport refusal during the handshake is reported as itself, not as a t
   expect((err as Error).message).toBe(refusal.message);
   expect((err as Error).cause).toBe(refusal);
   expect(isPeerWaitTimeout(err)).toBe(false);
+});
+
+describe("the handshake receive bound scales with the transport's poll interval", () => {
+  // A connection whose every receive rejects as a transport fault, recording the
+  // per-receive bound runKex asked for.
+  const recordingConn = (pollIntervalMs?: number) => {
+    const timeouts: (number | undefined)[] = [];
+    const conn: MessageConnection = {
+      send: async () => {},
+      receive: async (timeoutMs?: number) => {
+        timeouts.push(timeoutMs);
+        throw new ConnectionError("idle", "transport");
+      },
+      close: async () => {},
+      ...(pollIntervalMs !== undefined && {
+        inboundPollIntervalMs: () => pollIntervalMs,
+      }),
+    };
+    return { conn, timeouts };
+  };
+
+  test("a push transport gets the 30 s bound", async () => {
+    const { conn, timeouts } = recordingConn();
+    await runKex(conn, "responder", PSK_A, false).catch(() => {});
+    expect(timeouts).toEqual([30_000]);
+  });
+
+  test("a 60 s polling transport gets 30 s plus two intervals", async () => {
+    const { conn, timeouts } = recordingConn(60_000);
+    await runKex(conn, "initiator", PSK_A, false).catch(() => {});
+    expect(timeouts).toEqual([150_000]);
+  });
 });
 
 test("runKex rejects when the psk is not 32 bytes", async () => {

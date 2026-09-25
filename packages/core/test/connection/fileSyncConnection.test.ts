@@ -1312,6 +1312,17 @@ test("open maps pollIntervalMs to pollingFrequency for filedrop config", async (
   expect(conn.options.pollingFrequency).toBe(15_000);
 });
 
+test("the bridged connection reports the configured poll interval", async () => {
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  await conn.open({
+    channel: "filedrop",
+    path: "/mnt/share/drop",
+    options: { pollIntervalMs: 60_000 },
+  });
+  expect(fromEventConnection(conn).inboundPollIntervalMs?.()).toBe(60_000);
+});
+
 test("open defers default timeToLive computation until connect resolves", async () => {
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, { verbose: -1 });

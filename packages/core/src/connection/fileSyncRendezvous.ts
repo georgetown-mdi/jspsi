@@ -63,7 +63,7 @@ import {
   isProtocolGrammarName,
   isRetainMessageAck,
 } from "./fileSyncNames";
-import { messageFilename } from "./fileSyncMessageLoop";
+import { MAX_MESSAGE_SEQ, messageFilename } from "./fileSyncMessageLoop";
 import {
   HelloEnvelopeSchema,
   serializeEnvelope,
@@ -276,6 +276,56 @@ export function bilateralMismatch(
         `use the same setting`,
     );
   return undefined;
+}
+
+/**
+ * The file name byte limit (NAME_MAX) on the filesystems and SFTP servers the
+ * file-sync transport targets: the bound on every name the protocol writes,
+ * and the per-entry bound a transport's directory listing enforces.
+ */
+export const MAX_FILE_NAME_BYTES = 255;
+
+// The longest name either party writes that holds both ids: the retain-mode
+// ack of a timestamped message, sized at the highest counter send() allows and
+// the frame cap's byte count. Its length depends only on the sum of the two
+// ids, so both parties reach the same verdict.
+const longestTwoIdNameBytes = (selfId: string, peerId: string): number =>
+  new TextEncoder().encode(
+    ackMarkerName(
+      selfId,
+      messageFilename({
+        id: peerId,
+        timestampInFilename: true,
+        byteCount: MAX_FRAME_SIZE_BYTES,
+        seq: MAX_MESSAGE_SEQ,
+        ts: 0,
+      }).slice(0, -".json".length),
+    ),
+  ).length;
+
+// Typed so the cleanup sites leave the refusing party's hello in place, as
+// they do for a BilateralModeMismatchError: the peer reaches the same verdict
+// only by reading it.
+class PeerIdsTooLongError extends UsageError {}
+
+// Refuses a peer id that, with this party's id, would make a file name the
+// exchange writes longer than MAX_FILE_NAME_BYTES. Called at every site that
+// reads a peer hello before writing a name derived from it.
+/** @internal */
+export function peerIdLengthRefusal(
+  selfId: string,
+  peerId: string,
+): UsageError | undefined {
+  const bytes = longestTwoIdNameBytes(selfId, peerId);
+  if (bytes <= MAX_FILE_NAME_BYTES) return undefined;
+  const idBytes = (id: string) => new TextEncoder().encode(id).length;
+  return new PeerIdsTooLongError(
+    `the two parties' ids are too long together: the partner's id is ` +
+      `${idBytes(peerId)} bytes and this party's is ${idBytes(selfId)}, so ` +
+      `file names built from them reach ${bytes} bytes, over the ` +
+      `${MAX_FILE_NAME_BYTES}-byte limit. Set a shorter peer_id on the ` +
+      "party that configured a long one.",
+  );
 }
 
 // True when `name` is a peer's hello (`<peerId>-hello.json`): it ends with
@@ -1037,39 +1087,25 @@ export class FileSyncRendezvous {
     // transcript, so a leftover instead falls through to the
     // unexpectedProtocol guard and to sweepProtocolFiles' own
     // --force-retain-sweep gate, reusing that check rather than a parallel
-    // one that could drift from it.
+    // one that could drift from it. In delete mode the markers are deleted
+    // only once entry is otherwise accepted: after the strict-empty guard
+    // with no flag, or by sweepProtocolFiles after its retain inspection, so
+    // a directory either refuses keeps its markers.
     //
-    // Best-effort, like the orphaned-temp sweep: safeDelete swallows a
-    // transport-level failure, so a marker that fails to delete is left on
-    // disk and entry proceeds past it. It is benign: the next exchange's
-    // entry re-runs this sweep, and it cannot forge a PeerAbortError in a
-    // later session, since verifyPeerAbortMarker authenticates the
-    // marker's token against that session's HKDF-derived peer token, which
-    // a stale marker cannot satisfy.
-    if (!deps.options().retainFiles) {
-      const leftoverAbortFiles = files.filter(
-        (file) =>
-          !ignored.has(file.name) &&
-          peerIdFromControlName(file.name, ABORT_SUFFIX) !== undefined,
-      );
-      if (leftoverAbortFiles.length > 0) {
-        deps
-          .log()
-          .info(
-            `[${deps.id()}] sweeping ${leftoverAbortFiles.length} leftover abort ` +
-              "marker(s) from a prior failed exchange: " +
-              `${leftoverAbortFiles
-                .map((f) => redactAndSanitizeForDisplay(f.name))
-                .join(", ")}`,
-          );
-        await Promise.all(
-          leftoverAbortFiles.map((file) =>
-            deps.client().safeDelete(`${inboundPath}/${file.name}`),
-          ),
+    // With no flag the delete is best-effort (safeDelete), so a marker that
+    // fails to delete stays on disk and entry proceeds: the next entry
+    // re-runs this sweep, and verifyPeerAbortMarker's per-session token
+    // check keeps a stale marker from forging a PeerAbortError. Under
+    // --sweep-exchange-files, sweepProtocolFiles deletes it with every other
+    // protocol file, and a failed delete is a terminal transport failure.
+    const leftoverAbortFiles = deps.options().retainFiles
+      ? []
+      : files.filter(
+          (file) =>
+            !ignored.has(file.name) &&
+            peerIdFromControlName(file.name, ABORT_SUFFIX) !== undefined,
         );
-        leftoverAbortFiles.forEach((file) => ignored.add(file.name));
-      }
-    }
+    leftoverAbortFiles.forEach((file) => ignored.add(file.name));
 
     // Single classification (isProtocolGrammarName), two sides: a FOREIGN file
     // fails the protocol grammar; an unexpected PROTOCOL file matches it but is
@@ -1166,11 +1202,10 @@ export class FileSyncRendezvous {
       // peer's) and rendezvous against a clean slate, after a retain-signal
       // inspection that refuses to destroy an audit transcript without
       // --force-retain-sweep. Foreign files are never swept.
-      await this.sweepProtocolFiles(
-        inboundPath,
-        peerHellos,
-        unexpectedProtocol,
-      );
+      await this.sweepProtocolFiles(inboundPath, peerHellos, [
+        ...unexpectedProtocol,
+        ...leftoverAbortFiles.map((file) => ({ file, dir: inboundPath })),
+      ]);
       // Every protocol file was deleted, so rendezvous proceeds as if the
       // directory held only the (untouched) foreign files.
       peerHellos = [];
@@ -1201,9 +1236,82 @@ export class FileSyncRendezvous {
           scope.inboundPath,
           peerHellos.map((f) => f.name),
         );
+
+      if (leftoverAbortFiles.length > 0) {
+        deps
+          .log()
+          .info(
+            `[${deps.id()}] sweeping ${leftoverAbortFiles.length} leftover abort ` +
+              "marker(s) from a prior failed exchange: " +
+              `${leftoverAbortFiles
+                .map((f) => redactAndSanitizeForDisplay(f.name))
+                .join(", ")}`,
+          );
+        await Promise.all(
+          leftoverAbortFiles.map((file) =>
+            deps.client().safeDelete(`${inboundPath}/${file.name}`),
+          ),
+        );
+      }
     }
 
     return peerHellos;
+  }
+
+  // Publishes this party's hello on the lock joiner's refusal path so the
+  // peer reads it and refuses too. The one refusal site needing a new write
+  // at detection time: if every attempt fails, the peer degrades to its peer
+  // timeout. Never throws, so a transport rejection (exit 69) or a close()
+  // cannot mask the refusal (exit 64) the caller throws next.
+  private async advertiseHelloBeforeRefusal(
+    scope: RendezvousScope,
+    helloPath: string,
+  ): Promise<void> {
+    const { deps } = this;
+    for (
+      let attempt = 1;
+      attempt <= ADVERTISE_HELLO_RETRY_ATTEMPTS;
+      attempt++
+    ) {
+      try {
+        await this.publishHello(scope.outboundPath, helloPath);
+        return;
+      } catch (writeErr: unknown) {
+        // The literal `joiner`, not `this.role`: the role is committed only
+        // when rendezvous succeeds, so it still holds "unknown role" here.
+        if (attempt === ADVERTISE_HELLO_RETRY_ATTEMPTS) {
+          deps
+            .log()
+            .debug(
+              `[joiner] could not advertise hello before refusing after ` +
+                `${ADVERTISE_HELLO_RETRY_ATTEMPTS} attempts; peer may time out ` +
+                `instead of fast-failing: ${redactAndSanitizeForDisplay(errorMessage(writeErr))}`,
+            );
+          return;
+        }
+        deps
+          .log()
+          .debug(
+            `[joiner] advertise-hello write failed (attempt ` +
+              `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
+              `${redactAndSanitizeForDisplay(errorMessage(writeErr))}`,
+          );
+        try {
+          await deps.wait(deps.options().pollingFrequency);
+        } catch {
+          // deps.wait rejects only on a concurrent close()'s abort.
+          deps
+            .log()
+            .debug(
+              `[joiner] advertise-hello retry aborted by connection ` +
+                `close after attempt ${attempt}/` +
+                `${ADVERTISE_HELLO_RETRY_ATTEMPTS}; peer may time out ` +
+                `instead of fast-failing`,
+            );
+          return;
+        }
+      }
+    }
   }
 
   // Lock-mode joiner fast-path: a single peer hello is already present and
@@ -1255,96 +1363,23 @@ export class FileSyncRendezvous {
       deps.signal(),
     );
 
-    // Bilateral flag check. A mismatch here means the peer is lockless,
-    // since only a lockless peer leaves its hello in place for a lock
-    // joiner to discover. For symmetric detection the joiner writes its
-    // own advertised hello before throwing (so the lockless peer reads it
-    // and fails too) and must not delete the peer hello: both hellos are
-    // the directory's terminal state, left untracked so close()/cleanup()
-    // does not sweep them. Detection, not negotiation -- neither side
-    // adapts to the other's mode.
-    const mismatch = bilateralMismatch(peerEnvelope, deps.options());
-    if (mismatch) {
-      // Advertise our own hello so the lockless peer reads it and fails
-      // symmetrically -- the one mismatch site needing a new write at
-      // detection time, so it is the single point of asymmetric failure in
-      // the symmetric-detection guarantee: if the put fails here, the peer
-      // degrades to the peer-timeout instead. Retry the write up to
-      // ADVERTISE_HELLO_RETRY_ATTEMPTS at the polling cadence to raise the
-      // odds it lands before the peer times out; this does not change
-      // detection.
-      //
-      // Whatever the write's outcome once the budget is exhausted, this
-      // party still throws the genuine mismatch it detected (a UsageError,
-      // exit 64): the retry must not let a transport rejection escape and
-      // mask the mismatch as a generic Error (exit 69). The operator must
-      // fix the diverging flag regardless of the transport.
-      for (
-        let attempt = 1;
-        attempt <= ADVERTISE_HELLO_RETRY_ATTEMPTS;
-        attempt++
-      ) {
-        try {
-          await this.publishHello(scope.outboundPath, helloPath);
-          break;
-        } catch (writeErr: unknown) {
-          // Label is the literal `joiner`, not `this.role`: the handshake role
-          // this party plays is fixed by reaching this lock-joiner branch, but
-          // `this.role` is not committed until rendezvous succeeds (below the
-          // mismatch gate), so it still holds "unknown role" here. This mirrors
-          // the `[joiner]`/`[starter]` literals used elsewhere in synchronize()
-          // before the role is committed.
-          if (attempt < ADVERTISE_HELLO_RETRY_ATTEMPTS) {
-            deps
-              .log()
-              .debug(
-                `[joiner] advertise-hello write failed (attempt ` +
-                  `${attempt}/${ADVERTISE_HELLO_RETRY_ATTEMPTS}); retrying: ` +
-                  `${redactAndSanitizeForDisplay(errorMessage(writeErr))}`,
-              );
-            try {
-              await deps.wait(deps.options().pollingFrequency);
-            } catch {
-              // this.wait only rejects on an abort from a concurrent
-              // close() -- a plain delay never rejects -- so this catch
-              // cannot swallow a real put() failure (caught and logged
-              // above). Stop retrying and fall through to the reset plus
-              // `throw mismatch` below, so the genuine
-              // BilateralModeMismatchError (exit 64) stays the reported
-              // root cause rather than the close's ConnectionClosedError
-              // (exit 69): the diverging flag is the actionable cause the
-              // operator must fix.
-              // Log the cut-short retry so a close-during-mismatch is
-              // diagnosable in debug logs, mirroring the exhausted-budget
-              // path's degradation message in the else branch below.
-              deps
-                .log()
-                .debug(
-                  `[joiner] advertise-hello retry aborted by connection ` +
-                    `close after attempt ${attempt}/` +
-                    `${ADVERTISE_HELLO_RETRY_ATTEMPTS}; peer may time out ` +
-                    `instead of fast-failing`,
-                );
-              break;
-            }
-          } else {
-            deps
-              .log()
-              .debug(
-                `[joiner] could not advertise hello on mismatch after ` +
-                  `${ADVERTISE_HELLO_RETRY_ATTEMPTS} attempts; peer may time out ` +
-                  `instead of fast-failing: ${redactAndSanitizeForDisplay(errorMessage(writeErr))}`,
-              );
-          }
-        }
-      }
+    // A flag mismatch here means the peer is lockless: only a lockless peer
+    // leaves its hello for a lock joiner to find. On either refusal the joiner
+    // publishes its own hello first, so the peer reads it and refuses too, and
+    // keeps the peer hello: both are the directory's terminal state, untracked
+    // so close()/cleanup() does not sweep them.
+    const refusal =
+      bilateralMismatch(peerEnvelope, deps.options()) ??
+      peerIdLengthRefusal(deps.id(), peerId);
+    if (refusal) {
+      await this.advertiseHelloBeforeRefusal(scope, helloPath);
       // Reset role/peer fields, mirroring the outer catch.
       deps.setPeerId(undefined);
       deps.setRole("unknown role");
       deps.setHandshakeRole(undefined);
       deps.clearAbortMarker();
       deps.resetSessionState();
-      throw mismatch;
+      throw refusal;
     }
 
     // Sentinel-mediated arrival closes the joiner partial-failure window. A
@@ -1370,13 +1405,8 @@ export class FileSyncRendezvous {
       // The sentinel holds the hello body so the rename below yields a
       // fully-valid `<id>-hello.json` the peer reads through its gate; the
       // peer itself matches the sentinel by name existence and never reads
-      // it.
-      await deps
-        .client()
-        .put(serializeEnvelope(helloEnvelope(deps.options())), joiningPath, {
-          flags: "w",
-          encoding: "utf-8",
-        });
+      // it. Published temp-then-rename like the hello.
+      await this.publishHello(scope.inboundPath, joiningPath);
       // Track the sentinel only until the peer hello is deleted: before that
       // point a failure leaves the peer hello intact, so cleanup() may safely
       // sweep the sentinel (the peer is no worse off than if we never
@@ -1566,6 +1596,8 @@ export class FileSyncRendezvous {
             // that read our hello at its own two-hellos branch).
             const mismatch = bilateralMismatch(peerEnvelope, deps.options());
             if (mismatch) throw mismatch;
+            const idTooLong = peerIdLengthRefusal(deps.id(), peerId);
+            if (idTooLong) throw idTooLong;
 
             // Acknowledge the peer's hello with a zero-length marker named
             // after it (`<myId>-<peerHelloStem>-ack.json`). This is a
@@ -1929,12 +1961,14 @@ export class FileSyncRendezvous {
           // peer must read; safeDelete is contractually non-throwing, so it
           // cannot mask the mismatch), and leave our own hello via the
           // outer catch's skip-sweep for the peer to read.
-          const mismatch = bilateralMismatch(peerEnvelope, deps.options());
-          if (mismatch) {
+          const refusal =
+            bilateralMismatch(peerEnvelope, deps.options()) ??
+            peerIdLengthRefusal(deps.id(), otherId);
+          if (refusal) {
             await deps
               .client()
               .safeDelete(`${scope.inboundPath}/${lockFile.name}`);
-            throw mismatch;
+            throw refusal;
           }
 
           // first to arrive => should wait for first message
@@ -2007,6 +2041,11 @@ export class FileSyncRendezvous {
           // and the sweep are both skipped.
           const mismatch = bilateralMismatch(peerEnvelope, deps.options());
           if (mismatch) throw mismatch;
+          const idTooLong = peerIdLengthRefusal(
+            deps.id(),
+            otherFile.name.slice(0, -HELLO_SUFFIX.length),
+          );
+          if (idTooLong) throw idTooLong;
 
           // arrived first, should wait for a message
           deps.setHandshakeRole("responder");
@@ -2070,6 +2109,8 @@ export class FileSyncRendezvous {
           );
           const mismatch = bilateralMismatch(peerEnvelope, deps.options());
           if (mismatch) throw mismatch;
+          const idTooLong = peerIdLengthRefusal(deps.id(), deps.peerId()!);
+          if (idTooLong) throw idTooLong;
 
           const lockName =
             `${arrivedFirst ? deps.id() : deps.peerId()}-` +
@@ -2232,17 +2273,19 @@ export class FileSyncRendezvous {
         );
       return;
     } catch (err: unknown) {
-      // A bilateral-mode mismatch is the one terminal failure that must not
-      // sweep the directory: this party's advertised hello (written before
-      // the loop) is the directory's terminal state, left in place so the
-      // peer reads it through its own peer-hello read and fails too. Skip
-      // the on-disk safeDelete of hello/ack/lock; clearing
-      // responsibleFiles (so a later close()/cleanup() does not delete the
-      // advertised hello) and the in-memory reset still run, so the
-      // instance is not wedged. A rerun against the leftover hellos is
-      // rejected by the entry guard (I0) until the operator clears the
-      // directory and fixes the mismatched flag.
-      if (!(err instanceof BilateralModeMismatchError)) {
+      // A bilateral-mode mismatch and an id-length refusal must not sweep
+      // the directory: this party's advertised hello (written before the
+      // loop) is the directory's terminal state, left in place so the peer
+      // reads it through its own peer-hello read and refuses too. Skip the
+      // on-disk safeDelete of hello/ack/lock; clearing responsibleFiles (so
+      // a later close()/cleanup() does not delete the advertised hello) and
+      // the in-memory reset still run, so the instance is not wedged. A
+      // rerun against the leftover hellos is rejected by the entry guard
+      // (I0) until the operator clears the directory.
+      if (
+        !(err instanceof BilateralModeMismatchError) &&
+        !(err instanceof PeerIdsTooLongError)
+      ) {
         if (lockPath) await deps.client().safeDelete(lockPath);
         if (ackPath) await deps.client().safeDelete(ackPath);
         await deps.client().safeDelete(helloPath);
