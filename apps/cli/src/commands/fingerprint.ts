@@ -428,6 +428,27 @@ function report(
   console.log(fingerprint);
 }
 
+/**
+ * Whether `a` and `b` name one directory entry, the one a rename onto either
+ * would replace. Beyond a lexical match, the entries are compared by device and
+ * inode through `lstat`, which resolves every directory on the way (a
+ * symlinked parent, `/var` against `/private/var`) and the name's case as the
+ * filesystem itself does, but not a symlink in the final component: renaming
+ * onto such a link replaces the link and leaves its target intact.
+ */
+function namesSameDirectoryEntry(a: string, b: string): boolean {
+  if (path.resolve(a) === path.resolve(b)) return true;
+  let statA: fs.Stats;
+  let statB: fs.Stats;
+  try {
+    statA = fs.lstatSync(a);
+    statB = fs.lstatSync(b);
+  } catch {
+    return false;
+  }
+  return statA.ino !== 0 && statA.dev === statB.dev && statA.ino === statB.ino;
+}
+
 /** What the export refusal states behind the path it was asked to write. */
 const EXPORT_OVER_IDENTITY_REMEDY =
   " is the signing identity file itself; refusing to overwrite the private " +
@@ -492,17 +513,10 @@ export async function handler(argv: Arguments): Promise<void> {
 
     if (exportCertificate !== undefined) {
       const exportPath = expandTilde(exportCertificate);
-      // Guard against the destructive fat-finger of pointing --export-certificate
-      // at the identity file itself: that would overwrite the private-key-bearing
-      // file with the public certificate alone, irrecoverably destroying the key
-      // (and every fingerprint a partner has pinned). Compare resolved paths so a
-      // relative or ~-form argument that names the same file is still caught. This
-      // is a lexical compare, not a realpath one, so it does not catch a symlink
-      // whose name differs but resolves to the identity file -- which is fine:
-      // writeFileAtomic finishes with rename(), and renaming onto a symlink path
-      // replaces the link itself, leaving the real target intact, so that variant
-      // is non-destructive even when the lexical check misses it.
-      if (path.resolve(exportPath) === path.resolve(identityPath)) {
+      // Pointing --export-certificate at the identity file would replace the
+      // private key with the public certificate, destroying the key and every
+      // partner's pin.
+      if (namesSameDirectoryEntry(exportPath, identityPath)) {
         const message = messageWithOperatorText`--export-certificate path ${operatorSuppliedText(
           exportPath,
         )}${EXPORT_OVER_IDENTITY_REMEDY}`;

@@ -1243,6 +1243,85 @@ test("handler refuses to export the certificate over the identity file itself", 
   expect(reloaded?.privateKey).toBeDefined();
 });
 
+async function exportCertificate(
+  identityPath: string,
+  exportPath: string,
+): Promise<void> {
+  const exitSpy = captureProcessExit();
+  const cwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await handler({
+      _: [],
+      $0: "alcove",
+      "identity-file": identityPath,
+      "export-certificate": exportPath,
+      "log-level": "silent",
+      force: false,
+    } as unknown as Arguments);
+  } finally {
+    process.chdir(cwd);
+    exitSpy.mockRestore();
+  }
+}
+
+function filesystemIgnoresCase(): boolean {
+  const probe = path.join(dir, "case-probe");
+  fs.writeFileSync(probe, "");
+  try {
+    return fs.existsSync(path.join(dir, "CASE-PROBE"));
+  } finally {
+    fs.rmSync(probe);
+  }
+}
+
+test("handler refuses to export over the identity file named in another case", async (context) => {
+  if (!filesystemIgnoresCase()) context.skip();
+  const idPath = path.join(dir, "id.json");
+  idFile.saveSigningIdentity(idPath, await generateSigningIdentity("Party A"));
+  const before = fs.readFileSync(idPath, "utf8");
+  await expect(
+    exportCertificate(idPath, path.join(dir, "ID.json")),
+  ).rejects.toThrow("exit:64");
+  expect(fs.readFileSync(idPath, "utf8")).toBe(before);
+});
+
+test.skipIf(process.platform === "win32")(
+  "handler refuses to export over the identity file through a symlinked parent",
+  async () => {
+    const real = path.join(dir, "real");
+    fs.mkdirSync(real);
+    fs.symlinkSync(real, path.join(dir, "link"));
+    const idPath = path.join(real, "id.json");
+    idFile.saveSigningIdentity(
+      idPath,
+      await generateSigningIdentity("Party A"),
+    );
+    const before = fs.readFileSync(idPath, "utf8");
+    await expect(
+      exportCertificate(idPath, path.join(dir, "link", "id.json")),
+    ).rejects.toThrow("exit:64");
+    expect(fs.readFileSync(idPath, "utf8")).toBe(before);
+  },
+);
+
+test.skipIf(process.platform === "win32")(
+  "handler exports onto a symlink to the identity file, replacing only the link",
+  async () => {
+    const idPath = path.join(dir, "id.json");
+    idFile.saveSigningIdentity(
+      idPath,
+      await generateSigningIdentity("Party A"),
+    );
+    const before = fs.readFileSync(idPath, "utf8");
+    const linkPath = path.join(dir, "cert.pem");
+    fs.symlinkSync(idPath, linkPath);
+    await exportCertificate(idPath, linkPath);
+    expect(fs.lstatSync(linkPath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(idPath, "utf8")).toBe(before);
+  },
+);
+
 // --- handler: repeated single-value flag -------------------------------------
 
 test("handler rejects a repeated single-value flag with a usage error (exit 64)", async () => {
