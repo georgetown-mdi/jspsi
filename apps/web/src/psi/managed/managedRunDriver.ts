@@ -304,6 +304,11 @@ export function runManagedExchangeInBrowser(
           // listener above with nothing yet to close, and an aborted signal
           // never fires it again, so the state is read once here.
           if (signal.aborted) cutRunOnCancel();
+          // Awaited before the handshake: both parties rotate once it
+          // completes, so a library that failed to load after it would leave
+          // this party on the retired secret while the partner holds the new
+          // one. Inbound frames wait in the message connection meanwhile.
+          const psiLibrary = await psiPromise;
           // record.expires stays enforced at the handshake (core's pre- and
           // post-handshake guards), covering a bound that lapses between the
           // pre-connection expiry check and here; the orchestration re-maps that
@@ -314,7 +319,6 @@ export function runManagedExchangeInBrowser(
             record.sharedSecret,
             record.expires,
           );
-          const psiLibrary = await psiPromise;
           const carried: ManagedRerunCarried = {
             mc,
             psiLibrary,
