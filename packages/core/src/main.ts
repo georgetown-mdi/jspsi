@@ -598,8 +598,15 @@ export {
 
 export {
   inferDateFormat,
+  inferDateFormatWithCounts,
+  createDateFormatInferrer,
   columnValues,
   INFER_DATE_SCAN_CAP,
+} from "./utils/date.js";
+export type {
+  CandidateDateFormat,
+  DateFormatInference,
+  DateFormatInferrer,
 } from "./utils/date.js";
 export {
   computeHostKeyFingerprint,

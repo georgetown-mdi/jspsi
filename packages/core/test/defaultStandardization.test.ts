@@ -1,8 +1,13 @@
 import { expect, test, describe, vi } from "vitest";
 
-import { getDefaultStandardization } from "../src/defaults/builtInStandardization";
 import {
+  dateOfBirthSteps,
+  getDefaultStandardization,
+} from "../src/defaults/builtInStandardization";
+import {
+  createDateFormatInferrer,
   inferDateFormat,
+  inferDateFormatWithCounts,
   columnValues,
   CANDIDATE_DATE_FORMATS,
   INFER_DATE_SCAN_CAP,
@@ -761,10 +766,121 @@ describe("inferDateFormat — edge cases", () => {
     expect(inferDateFormat(["13/32/1990", "14/29/2000"])).toBeUndefined();
   });
 
-  test("YYYYMMDD requires exactly 8 digits — 7-digit values do not match", () => {
-    // Would ambiguously match if variable-width tokens were used for adjacent
-    // tokens.
-    expect(inferDateFormat(["1990115", "2000631"])).toBeUndefined();
+  test("a 7-digit value is read as YYYYMMDD, as the pipeline reads it", () => {
+    expect(inferDateFormat(["1990115", "2000631"])).toBe("YYYYMMDD");
+    expect(runPipeline("1990115", dateOfBirthSteps("YYYYMMDD"))).not.toBeNull();
+  });
+});
+
+describe("inferDateFormat — agreement with the date_of_birth pipeline", () => {
+  const probes = [
+    "01/15/1990",
+    "1/2/1990",
+    "1/2/199",
+    "1/2/90",
+    "01/15/19900",
+    "1990-1-2",
+    "19900102",
+    "1990115",
+    "02/30/1990",
+    "13/01/1990",
+    "31-12-2000",
+    "1990/02/29",
+    " 01/15/1990 ",
+    "01/15/1990\u00a0",
+  ];
+
+  test.each(probes)(
+    "%j infers the first candidate whose pipeline keeps it",
+    (value) => {
+      const kept = CANDIDATE_DATE_FORMATS.find(
+        (format) => runPipeline(value, dateOfBirthSteps(format)) !== null,
+      );
+      expect(inferDateFormat([value])).toBe(kept);
+    },
+  );
+
+  test("a 3-digit year parses under no candidate", () => {
+    expect(inferDateFormat(["1/2/199"])).toBeUndefined();
+  });
+});
+
+describe("inferDateFormat — outliers", () => {
+  // Month/day/4-digit-year values with days above 12, so MM/DD/YYYY is the
+  // only layout that reads all of them.
+  const usDates = (count: number): Array<string> =>
+    Array.from(
+      { length: count },
+      (_, i) => `${(i % 12) + 1}/${(i % 16) + 13}/19${50 + (i % 50)}`,
+    );
+
+  test("one 3-digit-year typo does not select MM/DD/YY", () => {
+    const values = ["01/15/1990", "1/2/199", "02/20/1985", "12/31/1970"];
+    expect(inferDateFormatWithCounts(values)).toEqual({
+      format: "MM/DD/YYYY",
+      scanned: 4,
+      unparsed: 1,
+    });
+  });
+
+  test("one 2-digit-year value does not select MM/DD/YY", () => {
+    const values = [...usDates(20), "3/4/85", ...usDates(20)];
+    expect(inferDateFormatWithCounts(values)).toEqual({
+      format: "MM/DD/YYYY",
+      scanned: 41,
+      unparsed: 1,
+    });
+  });
+
+  test("one day-first value does not select DD/MM/YYYY", () => {
+    const values = ["13/01/1990", ...usDates(20)];
+    expect(inferDateFormatWithCounts(values)).toEqual({
+      format: "MM/DD/YYYY",
+      scanned: 21,
+      unparsed: 1,
+    });
+  });
+
+  test("an outlier late in the scan does not select its format", () => {
+    const values = usDates(1009);
+    values[998] = "1/2/199";
+    expect(inferDateFormatWithCounts(values)).toEqual({
+      format: "MM/DD/YYYY",
+      scanned: INFER_DATE_SCAN_CAP,
+      unparsed: 1,
+    });
+  });
+
+  test("noise supports no candidate and is counted as unparsed", () => {
+    const values = ["unknown", ...usDates(3), "n/a"];
+    expect(inferDateFormatWithCounts(values)).toEqual({
+      format: "MM/DD/YYYY",
+      scanned: 5,
+      unparsed: 2,
+    });
+  });
+
+  test("a column split evenly between two layouts infers no format", () => {
+    const values = ["1990-01-15", "1985-06-28", ...usDates(2)];
+    expect(inferDateFormatWithCounts(values)).toEqual({
+      scanned: 4,
+      unparsed: 4,
+    });
+  });
+
+  test("a format parsing a bare majority of the dates is inferred", () => {
+    const values = ["1990-01-15", "1985-06-28", ...usDates(3)];
+    expect(inferDateFormat(values)).toBe("MM/DD/YYYY");
+  });
+
+  test("the incremental inferrer stops accepting at the scan cap", () => {
+    const inferrer = createDateFormatInferrer();
+    const accepted = usDates(INFER_DATE_SCAN_CAP + 5).map((value) =>
+      inferrer.add(value),
+    );
+    expect(accepted.indexOf(false)).toBe(INFER_DATE_SCAN_CAP - 1);
+    expect(inferrer.add("")).toBe(false);
+    expect(inferrer.result().scanned).toBe(INFER_DATE_SCAN_CAP);
   });
 });
 

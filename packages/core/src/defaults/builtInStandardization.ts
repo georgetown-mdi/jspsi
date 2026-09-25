@@ -72,7 +72,15 @@ const NAME_STEPS: StandardizationStep[] = [
   { function: "filter_regex", params: { pattern: "[A-Z]" } },
 ];
 
-function dateOfBirthSteps(inputFormat: string): StandardizationStep[] {
+/** The `date_of_birth` input format used when none is supplied or inferred. */
+export const DEFAULT_DATE_INPUT_FORMAT = "MM/DD/YYYY";
+
+/**
+ * The default `date_of_birth` pipeline for one input format. Date-format
+ * inference ({@link inferDateFormat}) tests each candidate with this same
+ * pipeline, so a format is inferred only from values the run would keep.
+ */
+export function dateOfBirthSteps(inputFormat: string): StandardizationStep[] {
   return [
     { function: "trim_whitespace" },
     { function: "remove_non_ascii" },
@@ -147,7 +155,9 @@ function stepsForType(
     case "last_name":
       return NAME_STEPS;
     case "date_of_birth":
-      return dateOfBirthSteps(opts.dateInputFormat ?? "MM/DD/YYYY");
+      return dateOfBirthSteps(
+        opts.dateInputFormat ?? DEFAULT_DATE_INPUT_FORMAT,
+      );
     case "phone_number":
       return PHONE_NUMBER_STEPS;
     case "email_address":

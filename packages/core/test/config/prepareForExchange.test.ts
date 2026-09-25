@@ -1,4 +1,4 @@
-import { expect, test, describe } from "vitest";
+import { afterEach, expect, test, describe, vi } from "vitest";
 
 import {
   prepareForExchange,
@@ -32,6 +32,7 @@ import {
 } from "../../src/fanOutFunctions";
 import { DEDUPLICATE_IMPLEMENTED_BY_STRATEGY } from "../../src/linkageTermsPolicy";
 import { MAX_NAME_LENGTH } from "../../src/config/linkageTermsSchema";
+import { getLogger } from "../../src/utils/logger";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -188,6 +189,78 @@ describe("prepareForExchange: consistent and terms-only configs proceed", () => 
     );
     expect(prepared.rowCount).toBe(1);
     expect(prepared.linkageTerms).toBe(terms);
+  });
+});
+
+// --- Date-of-birth format inference -------------------------------------------
+
+describe("prepareForExchange: date-of-birth format inference", () => {
+  const dobTerms: LinkageTerms = {
+    ...terms,
+    linkageFields: [
+      { name: "first_name", type: "first_name" },
+      { name: "date_of_birth", type: "date_of_birth" },
+    ],
+    linkageKeys: [
+      {
+        name: "FN_DOB",
+        elements: [{ field: "first_name" }, { field: "date_of_birth" }],
+      },
+    ],
+  };
+  const dobMetadata: Metadata = [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "dob", type: "date_of_birth", role: "linkage", isPayload: false },
+  ];
+  const dobRows = (dobs: Array<string>): Array<CSVRow> =>
+    dobs.map((dob) => ({ first_name: "Alice", dob }));
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function prepareLogging(
+    rows: Array<CSVRow>,
+    metadataForRun: Metadata = dobMetadata,
+  ) {
+    const logger = getLogger("exchange");
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    prepareForExchange(
+      { linkageTerms: dobTerms, metadata: metadataForRun },
+      "Tester",
+      rows,
+      Object.keys(rows[0]),
+    );
+    const lines = (spy: typeof info) =>
+      spy.mock.calls.map((call) => call.join(" "));
+    return { info: lines(info), warn: lines(warn) };
+  }
+
+  test("reports how many sampled values the inferred format drops", () => {
+    const { info } = prepareLogging(
+      dobRows(["01/15/1990", "1/2/199", "02/20/1985", "12/31/1970"]),
+    );
+    expect(info).toContain(
+      "inferred date of birth format: MM/DD/YYYY (1 of 4 sampled values do not parse and are dropped)",
+    );
+  });
+
+  test("warns when no format parses most of the values", () => {
+    const { info, warn } = prepareLogging(
+      dobRows(["1990-01-15", "1985-06-28", "01/15/1990", "02/20/1985"]),
+    );
+    expect(info.some((line) => line.includes("date of birth format"))).toBe(
+      false,
+    );
+    expect(warn).toContain(
+      "could not infer the date of birth format: no candidate format parses most of the 4 sampled values, so they are parsed as MM/DD/YYYY. Set the parse_date input_format in a standardization to choose the format.",
+    );
   });
 });
 
