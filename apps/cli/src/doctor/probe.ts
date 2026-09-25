@@ -645,18 +645,22 @@ export async function runProbe(
   // a `put` is a bare filename: the local path would otherwise be interpolated
   // into the `-c` command string, where a space or a semicolon anywhere in the
   // temporary directory's path would split the command.
-  const runOnShare = (command: string): Promise<CommandResult> =>
-    deps.runner.run("smbclient", shareArgs(input, authFile, target, command), {
+  const runSmbclient = (args: string[]): Promise<CommandResult> =>
+    deps.runner.run("smbclient", args, {
       cwd: workDir,
       timeoutMs: SMBCLIENT_TIMEOUT_MS,
     });
-  const smb = (command: string): Promise<CommandResult> => {
+  // Every call reading the credentials file outside the sweep goes through
+  // here, so the sweep can wait for whichever one is running.
+  const smbclient = (args: string[]): Promise<CommandResult> => {
     if (interrupted)
       return Promise.reject(new Error("the checks were interrupted."));
-    const pending = runOnShare(command);
+    const pending = runSmbclient(args);
     inFlight = pending.catch(() => undefined);
     return pending;
   };
+  const smb = (command: string): Promise<CommandResult> =>
+    smbclient(shareArgs(input, authFile, target, command));
 
   // One sweep per run, shared by the ordinary exit and an interrupt. It waits
   // for the command in flight, so a put the signal arrived during is deleted
@@ -667,7 +671,10 @@ export async function runProbe(
     (swept ??= (async () => {
       try {
         await inFlight;
-        for (const leftover of litter) await runOnShare(`del ${leftover}`);
+        for (const leftover of litter)
+          await runSmbclient(
+            shareArgs(input, authFile, target, `del ${leftover}`),
+          );
       } finally {
         removeWorkDir();
       }
@@ -703,10 +710,7 @@ export async function runProbe(
   listen(onSignal);
 
   try {
-    const list = await deps.runner.run("smbclient", listArgs(input, authFile), {
-      cwd: workDir,
-      timeoutMs: SMBCLIENT_TIMEOUT_MS,
-    });
+    const list = await smbclient(listArgs(input, authFile));
     if (transportFailed(list)) {
       checks.push(transportFailureCheck("authentication", input.server, list));
       return finish();
@@ -785,10 +789,8 @@ export async function runProbe(
     if (input.subdirectory === "") {
       checks.push(entryCountCheck("using the share root;", listing));
     } else {
-      const subdirectoryList = await deps.runner.run(
-        "smbclient",
+      const subdirectoryList = await smbclient(
         shareArgs(input, authFile, input.subdirectory, "ls"),
-        { cwd: workDir, timeoutMs: SMBCLIENT_TIMEOUT_MS },
       );
       if (transportFailed(subdirectoryList)) {
         checks.push(

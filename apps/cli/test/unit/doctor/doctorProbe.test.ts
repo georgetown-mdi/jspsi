@@ -834,25 +834,36 @@ describe("an interrupt sweeps the share before it re-raises", () => {
   }
 
   /**
-   * A runner answering like a healthy share whose put of the probe file and
-   * delete of it each settle on the next turn after `during` runs, so a signal
-   * delivered there arrives while that command is still in flight.
+   * A runner answering like a healthy share whose share list, subdirectory
+   * listing, put of the probe file, and delete of it each settle on the next
+   * turn after `during` runs, so a signal delivered there arrives while that
+   * command is still in flight. Each landing records whether the credentials
+   * file was still there when the command finished.
    */
   function interruptingRunner(
     events: string[],
-    during: { put?: () => void; del?: () => void },
+    during: {
+      list?: () => void;
+      subdirectory?: () => void;
+      put?: () => void;
+      del?: () => void;
+    },
   ): { runner: CommandRunner; authDir: () => string | undefined } {
     let authDir: string | undefined;
     const settleAfter = (
       hook: (() => void) | undefined,
       landed: string,
+      args: string[],
     ): Promise<CommandResult> =>
       new Promise((resolve) =>
         setImmediate(() => {
           hook?.();
           setImmediate(() => {
             events.push(landed);
-            resolve(RESULT);
+            const authPath = authPathOf(args);
+            if (authPath !== undefined && fs.existsSync(authPath))
+              events.push(`${landed} with credentials`);
+            resolve({ ...RESULT, ...healthyReply(args) });
           });
         }),
       );
@@ -862,17 +873,65 @@ describe("an interrupt sweeps the share before it re-raises", () => {
         run(_file, args): Promise<CommandResult> {
           const authPath = authPathOf(args);
           if (authPath !== undefined) authDir = path.dirname(authPath);
+          if (args.includes("-L")) {
+            events.push("list");
+            return settleAfter(during.list, "list landed", args);
+          }
           const command = commandOf(args) ?? "";
           events.push(command);
+          if (command === "ls" && args.includes("-D"))
+            return settleAfter(
+              during.subdirectory,
+              "subdirectory landed",
+              args,
+            );
           if (command === "put alcove-probe-abc123.tmp alcove-probe-abc123.tmp")
-            return settleAfter(during.put, "put landed");
+            return settleAfter(during.put, "put landed", args);
           if (command === "del alcove-probe-abc123.tmp")
-            return settleAfter(during.del, "del landed");
+            return settleAfter(during.del, "del landed", args);
           return Promise.resolve({ ...RESULT, ...healthyReply(args) });
         },
       },
     };
   }
+
+  test.each([
+    ["the share list", "list", "list landed"],
+    ["the subdirectory listing", "subdirectory", "subdirectory landed"],
+  ] as const)(
+    "an interrupt during %s removes the credentials file only once it finishes",
+    async (_name, stage, landed) => {
+      const before = new Set<unknown>(process.listeners("SIGINT"));
+      const events: string[] = [];
+      const kill = vi
+        .spyOn(process, "kill")
+        .mockImplementation((_pid, signal) => {
+          events.push(`kill ${String(signal)}`);
+          return true;
+        });
+      try {
+        const { runner, authDir } = interruptingRunner(events, {
+          [stage]: () => {
+            for (const listener of addedListeners(before)) listener("SIGINT");
+          },
+        });
+        await expect(
+          runProbe(INPUT, deps(healthyReply, { runner })),
+        ).rejects.toThrow("interrupted");
+        await vi.waitFor(() => expect(events).toContain("kill SIGINT"));
+
+        expect(events).toContain(`${landed} with credentials`);
+        expect(events.indexOf("kill SIGINT")).toBeGreaterThan(
+          events.indexOf(landed),
+        );
+        expect(events.some((event) => event.startsWith("put "))).toBe(false);
+        expect(fs.existsSync(authDir() as string)).toBe(false);
+        expect(addedListeners(before)).toEqual([]);
+      } finally {
+        kill.mockRestore();
+      }
+    },
+  );
 
   test("an interrupt during the put deletes the probe file once the put lands", async () => {
     const before = new Set<unknown>(process.listeners("SIGINT"));
