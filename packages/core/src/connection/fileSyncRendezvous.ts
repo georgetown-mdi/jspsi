@@ -1080,7 +1080,10 @@ export class FileSyncRendezvous {
     // transcript, so a leftover instead falls through to the
     // unexpectedProtocol guard and to sweepProtocolFiles' own
     // --force-retain-sweep gate, reusing that check rather than a parallel
-    // one that could drift from it.
+    // one that could drift from it. In delete mode the markers are deleted
+    // only once entry is otherwise accepted: after the strict-empty guard
+    // with no flag, or by sweepProtocolFiles after its retain inspection, so
+    // a directory either refuses keeps its markers.
     //
     // Best-effort, like the orphaned-temp sweep: safeDelete swallows a
     // transport-level failure, so a marker that fails to delete is left on
@@ -1089,30 +1092,14 @@ export class FileSyncRendezvous {
     // later session, since verifyPeerAbortMarker authenticates the
     // marker's token against that session's HKDF-derived peer token, which
     // a stale marker cannot satisfy.
-    if (!deps.options().retainFiles) {
-      const leftoverAbortFiles = files.filter(
-        (file) =>
-          !ignored.has(file.name) &&
-          peerIdFromControlName(file.name, ABORT_SUFFIX) !== undefined,
-      );
-      if (leftoverAbortFiles.length > 0) {
-        deps
-          .log()
-          .info(
-            `[${deps.id()}] sweeping ${leftoverAbortFiles.length} leftover abort ` +
-              "marker(s) from a prior failed exchange: " +
-              `${leftoverAbortFiles
-                .map((f) => redactAndSanitizeForDisplay(f.name))
-                .join(", ")}`,
-          );
-        await Promise.all(
-          leftoverAbortFiles.map((file) =>
-            deps.client().safeDelete(`${inboundPath}/${file.name}`),
-          ),
+    const leftoverAbortFiles = deps.options().retainFiles
+      ? []
+      : files.filter(
+          (file) =>
+            !ignored.has(file.name) &&
+            peerIdFromControlName(file.name, ABORT_SUFFIX) !== undefined,
         );
-        leftoverAbortFiles.forEach((file) => ignored.add(file.name));
-      }
-    }
+    leftoverAbortFiles.forEach((file) => ignored.add(file.name));
 
     // Single classification (isProtocolGrammarName), two sides: a FOREIGN file
     // fails the protocol grammar; an unexpected PROTOCOL file matches it but is
@@ -1209,11 +1196,10 @@ export class FileSyncRendezvous {
       // peer's) and rendezvous against a clean slate, after a retain-signal
       // inspection that refuses to destroy an audit transcript without
       // --force-retain-sweep. Foreign files are never swept.
-      await this.sweepProtocolFiles(
-        inboundPath,
-        peerHellos,
-        unexpectedProtocol,
-      );
+      await this.sweepProtocolFiles(inboundPath, peerHellos, [
+        ...unexpectedProtocol,
+        ...leftoverAbortFiles.map((file) => ({ file, dir: inboundPath })),
+      ]);
       // Every protocol file was deleted, so rendezvous proceeds as if the
       // directory held only the (untouched) foreign files.
       peerHellos = [];
@@ -1244,6 +1230,23 @@ export class FileSyncRendezvous {
           scope.inboundPath,
           peerHellos.map((f) => f.name),
         );
+
+      if (leftoverAbortFiles.length > 0) {
+        deps
+          .log()
+          .info(
+            `[${deps.id()}] sweeping ${leftoverAbortFiles.length} leftover abort ` +
+              "marker(s) from a prior failed exchange: " +
+              `${leftoverAbortFiles
+                .map((f) => redactAndSanitizeForDisplay(f.name))
+                .join(", ")}`,
+          );
+        await Promise.all(
+          leftoverAbortFiles.map((file) =>
+            deps.client().safeDelete(`${inboundPath}/${file.name}`),
+          ),
+        );
+      }
     }
 
     return peerHellos;

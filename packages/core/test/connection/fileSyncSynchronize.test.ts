@@ -240,6 +240,32 @@ test("synchronize() does NOT sweep a leftover abort marker in retain mode; it sh
   expect(files.has(ownAbortPath)).toBe(true);
 });
 
+for (const sweepExchangeFiles of [false, true]) {
+  test(`synchronize() in delete mode keeps the abort marker of a retain transcript it refuses (sweep flag ${sweepExchangeFiles})`, async () => {
+    const { client, files } = makeMockClient();
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.options.sweepExchangeFiles = sweepExchangeFiles;
+    const [a, b] = [
+      "00000000-0000-4000-8000-00000000000a",
+      "00000000-0000-4000-8000-00000000000b",
+    ];
+    const retainHello = Buffer.from(
+      JSON.stringify({ locklessRendezvous: true, retainFiles: true }),
+    );
+    const message = `${a}-20260102T030405-000-100`;
+    files.set(`${conn.path}/${a}-hello.json`, retainHello);
+    files.set(`${conn.path}/${b}-hello.json`, retainHello);
+    files.set(`${conn.path}/${a}-${b}-hello-ack.json`, Buffer.alloc(0));
+    files.set(`${conn.path}/${message}.json`, Buffer.alloc(100));
+    files.set(`${conn.path}/${b}-${message}-ack.json`, Buffer.alloc(0));
+    const markerPath = `${conn.path}/${a}-abort.json`;
+    files.set(markerPath, Buffer.from("{}"));
+
+    await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+    expect(files.has(markerPath)).toBe(true);
+  });
+}
+
 test("synchronize() reports an over-cap peer hello as a terminal FrameSizeExceededError", async () => {
   // The rendezvous gate (readControlFileWithGate) must treat an over-cap hello
   // control file as terminal rather than retrying it until the deadline: a
