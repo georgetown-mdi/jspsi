@@ -108,7 +108,7 @@ Both `fail`s are the occupied-working-name case, and it is the only `fail` eithe
 
 The record set behind both renderings has three fields the JSON document does not: the check's `summary` headline, a `detail` excerpt of the tool's own output behind a failure, and the marker for a failure that stopped the run.
 
-`detail` is server-controlled text -- `smbclient` can answer with a whole share listing -- so a consumer receives the classified `meaning` and `action` rather than raw bytes to re-render. In the human rendering, where it is shown, a private-key strip runs over the whole excerpt first, before it is bounded. A key block arrives in its canonical multi-line form, so a strip applied to the bounded lines instead would match its `BEGIN` line alone and render the body verbatim, and this rendering's sink does not pass through the logger that would otherwise catch it (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#display-sanitization-escape-format)). The stripped excerpt is then bounded to the first 2,000 characters and the first 24 non-blank lines, with a trailing `... (output truncated)` line when either bound cut it -- measured against the stripped text, so a replacement that shortened the excerpt without either bound dropping anything does not report a cut that did not happen. The operator is asked to send that rendering on to whoever is helping them, so it is capped rather than sprayed. The `subdirectory` check reports a folder's entry count for the same reason and never its filenames: those are the operator's own names on their own share.
+`detail` is server-controlled text -- `smbclient` can answer with a whole share listing -- so a consumer receives the classified `meaning` and `action` rather than raw bytes to re-render. In the human rendering, where it is shown, a private-key strip runs over the whole excerpt first, before it is bounded. A key block arrives in its canonical multi-line form, so a strip applied to the bounded lines instead would match its `BEGIN` line alone and render the body verbatim, and this rendering's sink does not pass through the logger that would otherwise catch it (see [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#display-sanitization-escape-format)). The stripped excerpt is then bounded to the first 2,000 characters and the first 24 non-blank lines, with a trailing `... (output truncated)` line when either bound cut it -- measured against the stripped text, so a replacement that shortened the excerpt without either bound dropping anything does not report a cut that did not happen. The operator is asked to send that rendering on to whoever is helping them, so it is capped rather than sprayed. The `subdirectory` check reports a folder's entry count for the same reason and never its filenames: those are the operator's own names on their own share. For the same reason the excerpt behind a failure drops every directory-listing entry line from the tool's output, so a listing that failed partway -- one the wait cut short included -- leaves only `smbclient`'s own messages in it.
 
 ## Exit codes
 
@@ -133,9 +133,13 @@ A usage error -- a missing or malformed input, or a bad flag -- is not in that s
 Probe cleanup is attempted, never guaranteed. A delete is issued for every
 working file the run created (`alcove-probe-*.tmp*`) on every handled exit
 path, but its outcome is not re-verified: a share that refuses deletes or a
-transport that dies mid-battery leaves the file in place. The next probe run
-sweeps that name mask before its own staged test, which is the designed
-safety check for such residue.
+transport that dies mid-run leaves the file in place. An interrupt (`SIGINT`
+or `SIGTERM`) is a handled exit path: the run waits for the command in
+flight, issues the deletes, removes its local credentials file, and then
+re-raises the signal. A second interrupt during those deletes abandons them,
+removing the credentials file before it re-raises. The next probe run sweeps
+that name mask before its own staged test, which is the designed safety
+check for such residue.
 
 The marker file is the single persistent artifact: the probe
 leaves it behind, and `doctor mount` consumes it on a matching cross-check.

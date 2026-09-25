@@ -143,6 +143,28 @@ export function freeMegabytes(listing: string): number | undefined {
 }
 
 /**
+ * Whether a line of smbclient output is a directory-listing entry. smbclient
+ * indents every entry by two spaces and starts its own messages at the first
+ * column.
+ */
+function isListingEntry(line: string): boolean {
+  return /^ {2}\S/.test(line);
+}
+
+/**
+ * smbclient output with the directory-listing entries removed, for the excerpt
+ * a failing check keeps: the entries are the operator's own filenames, and a
+ * listing cut short by a timeout still has them.
+ * @internal exported for testing
+ */
+export function withoutListingEntries(output: string): string {
+  return output
+    .split("\n")
+    .filter((line) => !isListingEntry(line))
+    .join("\n");
+}
+
+/**
  * Entries in a listing, excluding `.` and `..`. A count by design, not the
  * listing: these are the operator's own filenames on their own share, and the
  * runbook asks them to send this output on to whoever is helping them, who is
@@ -152,7 +174,7 @@ export function freeMegabytes(listing: string): number | undefined {
 export function countEntries(listing: string): number {
   return listing
     .split("\n")
-    .filter((line) => /^ {2}\S/.test(line))
+    .filter(isListingEntry)
     .map((line) => line.trim().split(/\s+/)[0])
     .filter((name) => name !== "." && name !== "..").length;
 }
@@ -259,7 +281,7 @@ function transportFailureCheck(
     "see the troubleshooting page, 'The container cannot reach the server'. A " +
       "firewall or VPN that allows the connection and then drops the traffic " +
       "behaves exactly like this.",
-    { detail: result.output },
+    { detail: withoutListingEntries(result.output) },
   );
 }
 
@@ -577,31 +599,77 @@ export async function runProbe(
     throw err;
   }
 
-  // Ctrl-C is the likely operator response to the very hang this command
-  // exists to diagnose, and it must not leave the credentials file behind.
-  // The signal is re-raised after cleanup so the exit still reports it.
-  const onSignal = (signal: NodeJS.Signals): void => {
+  const removeWorkDir = (): void =>
     fs.rmSync(workDir, { recursive: true, force: true });
-    process.kill(process.pid, signal);
-  };
-  process.once("SIGINT", onSignal);
-  process.once("SIGTERM", onSignal);
 
   // Names this run can leave on the share. The share belongs to someone else and
   // their partner can see it, so anything still there when the run ends -- on a
   // failure, a timeout, or an interrupt -- is swept before returning.
   const litter = new Set<string>();
   let target = "";
+  let interrupted = false;
+  let inFlight: Promise<unknown> = Promise.resolve();
 
   // Every smbclient invocation runs from the work directory so the local side of
   // a `put` is a bare filename: the local path would otherwise be interpolated
   // into the `-c` command string, where a space or a semicolon anywhere in the
   // temporary directory's path would split the command.
-  const smb = (command: string): Promise<CommandResult> =>
+  const runOnShare = (command: string): Promise<CommandResult> =>
     deps.runner.run("smbclient", shareArgs(input, authFile, target, command), {
       cwd: workDir,
       timeoutMs: SMBCLIENT_TIMEOUT_MS,
     });
+  const smb = (command: string): Promise<CommandResult> => {
+    if (interrupted)
+      return Promise.reject(new Error("the checks were interrupted."));
+    const pending = runOnShare(command);
+    inFlight = pending.catch(() => undefined);
+    return pending;
+  };
+
+  // One sweep per run, shared by the ordinary exit and an interrupt. It waits
+  // for the command in flight, so a put the signal arrived during is deleted
+  // after it lands rather than before, and the credentials file the deletes
+  // need is removed only once they are done.
+  let swept: Promise<void> | undefined;
+  const sweep = (): Promise<void> =>
+    (swept ??= (async () => {
+      try {
+        await inFlight;
+        for (const leftover of litter) await runOnShare(`del ${leftover}`);
+      } finally {
+        removeWorkDir();
+      }
+    })());
+
+  const listen = (listener: (signal: NodeJS.Signals) => void): void => {
+    process.on("SIGINT", listener);
+    process.on("SIGTERM", listener);
+  };
+  const stopListening = (listener: (signal: NodeJS.Signals) => void): void => {
+    process.removeListener("SIGINT", listener);
+    process.removeListener("SIGTERM", listener);
+  };
+
+  // Ctrl-C is the likely operator response to the very hang this command
+  // exists to diagnose. The share is swept before the signal is re-raised, so
+  // the exit still reports it; a second signal abandons the sweep but still
+  // removes the credentials file.
+  const onSignal = (signal: NodeJS.Signals): void => {
+    interrupted = true;
+    stopListening(onSignal);
+    const abandon = (again: NodeJS.Signals): void => {
+      removeWorkDir();
+      process.kill(process.pid, again);
+    };
+    listen(abandon);
+    const reraise = (): void => {
+      stopListening(abandon);
+      process.kill(process.pid, signal);
+    };
+    void sweep().then(reraise, reraise);
+  };
+  listen(onSignal);
 
   try {
     const list = await deps.runner.run("smbclient", listArgs(input, authFile), {
@@ -860,11 +928,9 @@ export async function runProbe(
     return finish();
   } finally {
     try {
-      for (const leftover of litter) await smb(`del ${leftover}`);
+      await sweep();
     } finally {
-      fs.rmSync(workDir, { recursive: true, force: true });
-      process.removeListener("SIGINT", onSignal);
-      process.removeListener("SIGTERM", onSignal);
+      stopListening(onSignal);
     }
   }
 }

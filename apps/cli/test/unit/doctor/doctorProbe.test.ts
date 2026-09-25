@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { MAX_DIRECTORY_ENTRIES } from "../../../src/connection/listingGuard";
 import type { CommandResult, CommandRunner } from "../../../src/doctor/runner";
@@ -12,10 +12,16 @@ import {
   runProbe,
   statusOf,
   transportFailed,
+  withoutListingEntries,
 } from "../../../src/doctor/probe";
 import type { ProbeDeps } from "../../../src/doctor/probe";
 import type { SmbProbeInput } from "../../../src/doctor/smbEnvironment";
-import { overallOf, verdictOf } from "../../../src/doctor/verdict";
+import {
+  overallOf,
+  verdictJson,
+  verdictLines,
+  verdictOf,
+} from "../../../src/doctor/verdict";
 import type { DoctorReport } from "../../../src/doctor/verdict";
 import { currentWindowsUser, isOwnerOnly } from "../../windowsAcl";
 
@@ -657,5 +663,178 @@ describe("local cleanup does not depend on the remote", () => {
     expect(during).toBe(before + 1);
     expect(process.listenerCount("SIGINT")).toBe(before);
     expect(process.listenerCount("SIGTERM")).toBe(beforeTerm);
+  });
+});
+
+describe("an interrupt sweeps the share before it re-raises", () => {
+  const RESULT: CommandResult = { code: 0, output: "", timedOut: false };
+
+  /**
+   * The listeners registered since `before` was taken. The probe registers
+   * each of its listeners for both signals, so reading one list finds them.
+   */
+  function addedListeners(
+    before: Set<unknown>,
+  ): ((signal: NodeJS.Signals) => void)[] {
+    return (
+      process.listeners("SIGINT") as ((signal: NodeJS.Signals) => void)[]
+    ).filter((l) => !before.has(l));
+  }
+
+  /**
+   * A runner answering like a healthy share whose put of the probe file and
+   * delete of it each settle on the next turn after `during` runs, so a signal
+   * delivered there arrives while that command is still in flight.
+   */
+  function interruptingRunner(
+    events: string[],
+    during: { put?: () => void; del?: () => void },
+  ): { runner: CommandRunner; authDir: () => string | undefined } {
+    let authDir: string | undefined;
+    const settleAfter = (
+      hook: (() => void) | undefined,
+      landed: string,
+    ): Promise<CommandResult> =>
+      new Promise((resolve) =>
+        setImmediate(() => {
+          hook?.();
+          setImmediate(() => {
+            events.push(landed);
+            resolve(RESULT);
+          });
+        }),
+      );
+    return {
+      authDir: () => authDir,
+      runner: {
+        run(_file, args): Promise<CommandResult> {
+          const authPath = authPathOf(args);
+          if (authPath !== undefined) authDir = path.dirname(authPath);
+          const command = commandOf(args) ?? "";
+          events.push(command);
+          if (command === "put alcove-probe-abc123.tmp alcove-probe-abc123.tmp")
+            return settleAfter(during.put, "put landed");
+          if (command === "del alcove-probe-abc123.tmp")
+            return settleAfter(during.del, "del landed");
+          return Promise.resolve({ ...RESULT, ...healthyReply(args) });
+        },
+      },
+    };
+  }
+
+  test("an interrupt during the put deletes the probe file once the put lands", async () => {
+    const before = new Set<unknown>(process.listeners("SIGINT"));
+    const beforeTerm = process.listenerCount("SIGTERM");
+    const events: string[] = [];
+    const kill = vi
+      .spyOn(process, "kill")
+      .mockImplementation((_pid, signal) => {
+        events.push(`kill ${String(signal)}`);
+        return true;
+      });
+    try {
+      const { runner, authDir } = interruptingRunner(events, {
+        put: () => {
+          for (const listener of addedListeners(before)) listener("SIGINT");
+        },
+      });
+      await expect(
+        runProbe(INPUT, deps(healthyReply, { runner })),
+      ).rejects.toThrow("interrupted");
+      await vi.waitFor(() => expect(events).toContain("kill SIGINT"));
+
+      const del = events.indexOf("del alcove-probe-abc123.tmp");
+      expect(del).toBeGreaterThan(events.indexOf("put landed"));
+      expect(events.indexOf("kill SIGINT")).toBeGreaterThan(
+        events.indexOf("del landed"),
+      );
+      expect(events.some((event) => event.startsWith("rename "))).toBe(false);
+      expect(fs.existsSync(authDir() as string)).toBe(false);
+      expect(addedListeners(before)).toEqual([]);
+      expect(process.listenerCount("SIGTERM")).toBe(beforeTerm);
+    } finally {
+      kill.mockRestore();
+    }
+  });
+
+  test("a second interrupt abandons the sweep and still removes the credentials file", async () => {
+    const before = new Set<unknown>(process.listeners("SIGINT"));
+    const events: string[] = [];
+    let authDirAtSecondKill: boolean | undefined;
+    const { runner, authDir } = interruptingRunner(events, {
+      put: () => {
+        for (const listener of addedListeners(before)) listener("SIGINT");
+      },
+      del: () => {
+        for (const listener of addedListeners(before)) listener("SIGTERM");
+      },
+    });
+    const kill = vi
+      .spyOn(process, "kill")
+      .mockImplementation((_pid, signal) => {
+        events.push(`kill ${String(signal)}`);
+        if (signal === "SIGTERM")
+          authDirAtSecondKill = fs.existsSync(authDir() as string);
+        return true;
+      });
+    try {
+      await expect(
+        runProbe(INPUT, deps(healthyReply, { runner })),
+      ).rejects.toThrow("interrupted");
+      await vi.waitFor(() => expect(events).toContain("kill SIGINT"));
+      expect(events.indexOf("kill SIGTERM")).toBeLessThan(
+        events.indexOf("del landed"),
+      );
+      expect(authDirAtSecondKill).toBe(false);
+      expect(addedListeners(before)).toEqual([]);
+    } finally {
+      kill.mockRestore();
+    }
+  });
+});
+
+describe("a failing listing keeps the operator's filenames out of the output", () => {
+  // A listing the wait cut short: entries streamed before the kill, the last
+  // one partial, and no free-space trailer.
+  const TRUNCATED_LISTING = [
+    "  .                                   D        0  Mon Jan  1 00:00:00 2024",
+    "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
+    "  secret-client-list.csv              A      100  Mon Jan  1 00:00:00 2024",
+    "  q3-payroll-na",
+  ].join("\n");
+
+  function timedOutListing(output: string) {
+    return deps((args) =>
+      commandOf(args) === "ls" && args.includes("-D")
+        ? { code: null, output, timedOut: true }
+        : healthyReply(args),
+    );
+  }
+
+  test("a timed-out subdirectory listing prints no entry in the human verdict", async () => {
+    const report = await runProbe(INPUT, timedOutListing(TRUNCATED_LISTING));
+    const check = checkById(report, "subdirectory");
+    expect(check.status).toBe("fail");
+    expect(check.summary).toContain("stopped responding");
+    const rendered = verdictLines(report).join("\n");
+    expect(rendered).not.toContain("secret-client-list");
+    expect(rendered).not.toContain("q3-payroll");
+  });
+
+  test("the JSON verdict is the same as for a listing that printed nothing", async () => {
+    const withEntries = await runProbe(
+      INPUT,
+      timedOutListing(TRUNCATED_LISTING),
+    );
+    const empty = await runProbe(INPUT, timedOutListing(""));
+    expect(verdictJson(withEntries)).toBe(verdictJson(empty));
+  });
+
+  test("smbclient's own lines stay in the excerpt", () => {
+    expect(
+      withoutListingEntries(
+        `${TRUNCATED_LISTING}\nNT_STATUS_IO_TIMEOUT listing \\dropbox\\*`,
+      ),
+    ).toBe("NT_STATUS_IO_TIMEOUT listing \\dropbox\\*");
   });
 });
