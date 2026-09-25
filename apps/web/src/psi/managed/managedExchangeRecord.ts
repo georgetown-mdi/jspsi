@@ -515,10 +515,10 @@ const persistedExchangeFileSchema = ExchangeSpecSchema.refine(
 );
 
 /**
- * The `.alcove.key` field pair: the current shared secret and, when a bound is in
- * force, the `expires` instant it lapses at. The export/import artifact's key half
- * and the command-line export's key file are both this shape, so a record's secret
- * half maps onto a valid `.alcove.key` and one read back maps onto a record.
+ * The `.alcove.key` fields: `sharedSecret`, `expires`, `rotationInFlightSince`.
+ * The export/import artifact's key half and the command-line export's key file
+ * are both this shape, so a record's secret half maps onto a valid `.alcove.key`
+ * and one read back maps onto a record.
  */
 export interface ManagedExchangeKeyFields {
   /** The current rotated shared secret (base64url, 43 chars / 32 bytes). */
@@ -532,11 +532,10 @@ export interface ManagedExchangeKeyFields {
 }
 
 /**
- * The key pair's validator: a `sharedSecret` matching {@link SHARED_SECRET_REGEX}
- * and an optional ISO 8601 `expires`. Shared by every reader of the pair so none
- * validates against a looser copy, keeping the CLI-separability commitment a single
- * source of truth. Strict, so a reader rejects an unknown key on the pair rather
- * than silently accepting it.
+ * The key fields' validator: `sharedSecret` plus optional ISO 8601 instants.
+ * Shared by every reader of the fields so none validates against a looser copy,
+ * keeping the CLI-separability commitment a single source of truth. Strict, so a
+ * reader rejects an unknown key rather than silently accepting it.
  */
 export const keyFileFieldsSchema: ZodType<ManagedExchangeKeyFields> = z
   .object({
@@ -989,14 +988,15 @@ export function applyManagedExchangeRotation(
 /**
  * Apply a re-invite rotation to a record: advance the rotated secret and the
  * `expires` bound and remove the rotation-in-flight marker exactly as
- * {@link applyManagedExchangeRotation}, AND drop any `lastRun` bookkeeping. A re-invite is the recovery for the failure `lastRun`
- * recorded; leaving that entry in place would re-derive the consumed failure at
- * the next visit, and once the import marker is cleared in the same rotation, a
- * stale `auth` failure would re-derive as the attack tier. Clearing it in the
- * same field-scoped write makes the post-re-invite record treated as holding no
+ * {@link applyManagedExchangeRotation}, AND drop any `lastRun` bookkeeping. A
+ * re-invite is the recovery for the failure `lastRun` recorded; leaving that
+ * entry in place would re-derive the consumed failure at the next visit, and
+ * once the import marker is cleared in the same rotation, a stale `auth`
+ * failure would re-derive as the attack tier. Clearing it in the same
+ * field-scoped write makes the post-re-invite record treated as holding no
  * failure to tier (see {@link ./managedFailureTiers.ts}). The document, the
- * label, the schedule, and the handle remain untouched; the input
- * record is not mutated.
+ * label, the schedule, and the handle remain untouched; the input record is not
+ * mutated.
  *
  * @throws {ZodError} if the rotated record is invalid (a malformed secret).
  */
