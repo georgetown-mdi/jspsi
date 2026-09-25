@@ -1748,13 +1748,11 @@ async function writeExchangeOutputs(params: {
     signedReceipt,
   } = outcome;
 
-  // The result-write failure, held until the audit artifacts below have been
-  // written. A box rather than the error itself, since a thrower may raise any
-  // value, `undefined` included.
-  let undelivered: { error: unknown } | undefined;
-  // A result table that could not be built from the partner's payload, held
-  // the same way: the disclosure before it is still owed its record.
-  let unbuilt: { error: unknown } | undefined;
+  // The result's failure -- a table that could not be built from the partner's
+  // payload, or a write that did not deliver it -- held until the audit
+  // artifacts below have been written. A box rather than the error itself,
+  // since a thrower may raise any value, `undefined` included.
+  let resultFailure: { error: unknown; notice: string } | undefined;
 
   // A count-only exchange produces no matched pairing for either party,
   // so there is no result file to write and nothing was withheld from
@@ -1816,7 +1814,12 @@ async function writeExchangeOutputs(params: {
         resultDelimiter,
       );
     } catch (err) {
-      unbuilt = { error: err };
+      resultFailure = {
+        error: err,
+        notice:
+          "the result could not be built from your partner's payload, so " +
+          "no result was written",
+      };
     }
     try {
       if (table !== undefined)
@@ -1851,7 +1854,10 @@ async function writeExchangeOutputs(params: {
       // occurred is owed its record whatever became of the result
       // (docs/notes/record-durability-point.md), and a result the reader of
       // a pipe refused leaves the disk the record goes to untouched.
-      undelivered = { error: err };
+      resultFailure = {
+        error: err,
+        notice: "the result was not delivered",
+      };
     }
   }
 
@@ -1863,11 +1869,7 @@ async function writeExchangeOutputs(params: {
   // is core's own composition over integers it formats itself -- the same one
   // the browser seat renders, so no two sinks drift -- and holds no
   // partner-authored text.
-  if (
-    entityClusters !== undefined &&
-    undelivered === undefined &&
-    unbuilt === undefined
-  )
+  if (entityClusters !== undefined && resultFailure === undefined)
     log.info(describeEntityClusters(entityClusters));
 
   // Every audit artifact this run was asked for and could not produce,
@@ -1934,18 +1936,16 @@ async function writeExchangeOutputs(params: {
 
   let everyArtifactOnDisk = missingArtifacts.length === 0;
 
-  if (unbuilt !== undefined) throw unbuilt.error;
-
   // The result went nowhere, so the run fails on it and the caller's own
   // persistence below does not run: it writes configuration for a run whose
   // operator never received the result. What it would have saved is named
   // before the throw, on the same two channels every other completed-run loss
   // takes, since the partner may hold the recurring setup this side skipped
   // and the terminal error alone names only the result.
-  if (undelivered !== undefined) {
+  if (resultFailure !== undefined) {
     if (onOutputComplete !== undefined) {
       const skipped =
-        "the result was not delivered, so the post-exchange persistence " +
+        `${resultFailure.notice}, so the post-exchange persistence ` +
         "step did not run: what this run would have saved after the result " +
         "-- a configuration, a key file, or the payload set recorded for a " +
         "later run -- did not reach disk, and your partner may have saved a " +
@@ -1955,7 +1955,7 @@ async function writeExchangeOutputs(params: {
       log.error(skipped);
       reportPersistenceLoss(skipped, eventStream);
     }
-    throw undelivered.error;
+    throw resultFailure.error;
   }
 
   // The caller's own last persistence, run here rather than after this function

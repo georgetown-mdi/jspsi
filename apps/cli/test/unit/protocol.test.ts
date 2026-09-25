@@ -1692,6 +1692,80 @@ test("a partner-shaped output-phase fault exits 69, not the local write-loss cod
   expect(terminal.category).toBe("output");
 }, 20_000);
 
+test("a partner-shaped output-phase fault reports the post-exchange persistence it skipped", async () => {
+  // A --save or online invite/accept run whose result table cannot be built
+  // never writes its configuration or key, and the partner may have saved
+  // theirs, so the skipped step is named on fd 3 before the terminal error.
+  const { buildOutputTable: coreBuildOutputTable } =
+    await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
+  vi.mocked(buildOutputTable).mockImplementation(() =>
+    coreBuildOutputTable([[0], [7]], [], [], {
+      columns: ["dob"],
+      rowIndices: [5],
+      rows: [["1990-01-02"]],
+    }),
+  );
+  const onOutputComplete = vi.fn(() => ({ persisted: true }));
+
+  mockFd3Open();
+  let outcome: PromiseSettledResult<unknown>;
+  try {
+    [outcome] = await Promise.allSettled([
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true, onOutputComplete },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+    vi.mocked(buildOutputTable).mockReturnValue({ headers: [], rows: [] });
+  }
+
+  expect(outcome.status).toBe("rejected");
+  expect(exitCodeForError((outcome as PromiseRejectedResult).reason)).toBe(69);
+  expect(onOutputComplete).not.toHaveBeenCalled();
+
+  const lines = takeFd3Lines();
+  const terminal = lines[lines.length - 1];
+  expect(terminal.type).toBe("error");
+  expect(terminal.category).toBe("output");
+  const warnings = lines.filter((line) => line.type === "warning");
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0].source).toBe("persistenceLoss");
+  expect(String(warnings[0].message)).toContain(
+    "could not be built from your partner's payload",
+  );
+  expect(String(warnings[0].message)).toContain(
+    "the post-exchange persistence step did not run",
+  );
+  expect(
+    mockState.errors.some((line) =>
+      line.includes("the post-exchange persistence step did not run"),
+    ),
+  ).toBe(true);
+}, 20_000);
+
 test("a partner payload missing a matched row still leaves the record and the receipt", async () => {
   // runExchange completed and returned its audit and the dual-signed receipt,
   // so the disclosure happened; the partner payload then fails the real core
