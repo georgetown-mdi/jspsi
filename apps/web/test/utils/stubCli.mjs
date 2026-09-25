@@ -130,10 +130,23 @@ function flagValue(argv, flag) {
 if (process.env.STUB_ARGV_FILE !== undefined)
   fs.writeFileSync(process.env.STUB_ARGV_FILE, JSON.stringify(process.argv));
 
+// Writes to stdout and stderr still queued at exit. A pipe write is
+// asynchronous on macOS, so a process.exit taken while one is queued cuts the
+// stream short of what the stub was told to write.
+const pendingStdioWrites = [];
+
+function writeStdio(stream, text) {
+  pendingStdioWrites.push(
+    new Promise((resolve) => stream.write(text, () => resolve())),
+  );
+}
+
 function exitAfterDelay(code) {
   const delayMs = Number.parseInt(process.env.STUB_DELAY_MS ?? "0", 10);
-  if (delayMs > 0) setTimeout(() => process.exit(code), delayMs);
-  else process.exit(code);
+  const exitOnceFlushed = () =>
+    void Promise.all(pendingStdioWrites).then(() => process.exit(code));
+  if (delayMs > 0) setTimeout(exitOnceFlushed, delayMs);
+  else exitOnceFlushed();
 }
 
 // The probe-host-key subcommand the console's host-key probe driver spawns is
@@ -145,7 +158,10 @@ if (process.argv[2] === "probe-host-key") {
     process.on("SIGTERM", () => {
       /* swallow: force escalation to SIGKILL */
     });
-  process.stdout.write(process.env.STUB_PROBE_STDOUT ?? DEFAULT_PROBE_LINE);
+  writeStdio(
+    process.stdout,
+    process.env.STUB_PROBE_STDOUT ?? DEFAULT_PROBE_LINE,
+  );
   exitAfterDelay(Number.parseInt(process.env.STUB_EXIT_CODE ?? "0", 10));
 } else if (process.argv[2] === "fingerprint") {
   if (process.env.STUB_IGNORE_SIGTERM === "1")
@@ -174,7 +190,8 @@ if (process.argv[2] === "probe-host-key") {
       const exportFile = flagValue(process.argv, "--export-certificate");
       if (exportFile !== undefined)
         fs.writeFileSync(exportFile, JSON.stringify({ stub: "certificate" }));
-      process.stdout.write(
+      writeStdio(
+        process.stdout,
         process.env.STUB_FINGERPRINT_STDOUT ?? DEFAULT_FINGERPRINT_LINE,
       );
     }
@@ -237,9 +254,9 @@ function runExchangeStub() {
   for (const event of events) writeFd3(JSON.stringify(event) + "\n");
 
   if (process.env.STUB_STDERR !== undefined)
-    process.stderr.write(withConfigFile(process.env.STUB_STDERR));
+    writeStdio(process.stderr, withConfigFile(process.env.STUB_STDERR));
   if (process.env.STUB_STDOUT !== undefined)
-    process.stdout.write(process.env.STUB_STDOUT);
+    writeStdio(process.stdout, process.env.STUB_STDOUT);
 
   const exitCode = Number.parseInt(process.env.STUB_EXIT_CODE ?? "0", 10);
 
