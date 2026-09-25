@@ -47,7 +47,7 @@ async function serveThroughBridge(
   handler: (request: Request) => Promise<Response> | Response,
 ): Promise<number> {
   const app = createApp({ onRequest: attachRequestAbortSignal });
-  app.use(fromWebHandler(handler));
+  app.use(fromWebHandler(async (request) => handler(request)));
   const server = http.createServer(toNodeListener(app));
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
