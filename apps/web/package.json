@@ -1,6 +1,7 @@
 {
   "name": "alcove-web",
   "version": "0.0.0",
+  "private": true,
   "description": "Alcove web app: private set intersection for record linkage over peer-to-peer connections.",
   "license": "Apache-2.0",
   "author": "Vincent Dorie <vdorie@gmail.com>",
