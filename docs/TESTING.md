@@ -895,8 +895,10 @@ tests for each mutant by name, joining a `describe` title and a test title with
 a space, while Vitest 5 matches the name filter against the titles joined with
 ` > `. Without the plugin every nested test is filtered out of every mutant
 run: on `abortMarker.ts` the same 21 tests score 55% nested and 91% at the top
-level. A surviving mutant whose report entry shows no tests completed is the
-sign that this selection has broken.
+level. The leg fails, naming the file and the mutated lines, when a mutant
+survives with no tests completed against it: Stryker had tests selected for
+that mutant, so zero completed means the runner executed none, whatever the
+file's score reads.
 
 ### The floors
 
