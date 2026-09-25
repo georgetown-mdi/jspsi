@@ -21,6 +21,8 @@ import {
 } from "../../src/connection/fileSyncFraming";
 import {
   ackMarkerName,
+  isProtocolGrammarName,
+  parseMessageByteCount,
   parseTimestampedMessageNNN,
 } from "../../src/connection/fileSyncNames";
 import { MAX_FRAME_SIZE_BYTES } from "../../src/connection/frameSize";
@@ -1953,6 +1955,17 @@ test("retain mode: a peer message with a valid byte count but unparseable NNN is
     expect((errors[0] as Error).message).toContain("NNN");
     expect(pollerActiveBeforeDriverStop).toBe(false);
   }
+});
+
+describe("message-name grammar", () => {
+  test("a digits-terminal name with no <id>- part is foreign, not a message", () => {
+    for (const name of ["2024.json", "7.json"]) {
+      expect(parseMessageByteCount(name)).toBeUndefined();
+      expect(isProtocolGrammarName(name)).toBe(false);
+    }
+    expect(parseMessageByteCount("peer-2024.json")).toBe(2024);
+    expect(isProtocolGrammarName("peer-2024.json")).toBe(true);
+  });
 });
 
 describe("FileSyncMessageLoop delete-mode consume failure", () => {

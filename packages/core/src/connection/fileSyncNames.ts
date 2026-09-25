@@ -57,11 +57,14 @@ export const ABORT_SUFFIX = "-abort.json";
 // `-`-delimited segment before `.json`. Parsing is right-anchored so an id
 // containing hyphens (a UUID, or a configured peer id) cannot corrupt the
 // result regardless of how many segments precede the count. Returns undefined
-// when that segment is not a non-negative integer.
+// when the name has no `-` (so it has no `<id>-` part) or that segment is not
+// a non-negative integer.
 /** @internal */
 export const parseMessageByteCount = (name: string): number | undefined => {
   const stem = name.slice(0, -".json".length);
-  const lastSegment = stem.slice(stem.lastIndexOf("-") + 1);
+  const lastDash = stem.lastIndexOf("-");
+  if (lastDash < 0) return undefined;
+  const lastSegment = stem.slice(lastDash + 1);
   if (!/^\d+$/.test(lastSegment)) return undefined;
   return Number(lastSegment);
 };
