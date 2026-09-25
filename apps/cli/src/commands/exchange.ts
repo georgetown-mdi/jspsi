@@ -9,6 +9,7 @@ import {
   parseExchangeSpec,
   getLogger,
   OperatorConfigError,
+  PLACEHOLDER_SSH_USERNAME,
   prepareForExchange,
   resolveExchangeInputs,
   sanitizeErrorForDisplay,
@@ -537,6 +538,19 @@ export function loadConfig(options: ExchangeOptions): {
       `the ${(unsupported as { channel: string }).channel} channel is not ` +
         `supported in the CLI`,
     );
+  }
+
+  // A minted or seeded SFTP connection holds this placeholder until the
+  // operator names their SSH account; refused here rather than sent to the
+  // server as a login attempt.
+  if (
+    connection.channel === "sftp" &&
+    connection.server.username === PLACEHOLDER_SSH_USERNAME
+  ) {
+    const message = messageWithOperatorText`config file ${operatorSuppliedText(
+      options.configFile,
+    )} still has the placeholder ${PLACEHOLDER_SSH_USERNAME} as connection.server.username. Set it to your account on the SFTP server, or pass --server-username, before running the exchange.`;
+    throw keepOperatorSuppliedText(new UsageError(message.text), message);
   }
 
   // Warn when connection-per-poll is paired with a short poll interval, so a

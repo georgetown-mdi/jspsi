@@ -107,8 +107,9 @@ obligation, not a property of the artifact.
   supply, `username`, with the shared placeholder constant
   `PLACEHOLDER_SSH_USERNAME` = `REPLACE_WITH_SSH_USERNAME`
   (`packages/core/src/config/endpointProducer.ts`). The placeholder is
-  not a valid credential, so a downloaded config run before the
-  operator fills it in fails loudly rather than connecting anonymously. The same
+  not a valid credential: `alcove exchange` refuses a configuration that still
+  holds it as `connection.server.username` before it connects, naming the
+  field, unless `--server-username` replaces it for the run. The same
   constant is used by the CLI's `connectionFromEndpoint`, so the "fill this in"
   marker is identical wherever a config was minted.
 

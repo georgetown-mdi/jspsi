@@ -313,6 +313,29 @@ test("parseArgs refuses a --key-file that is only whitespace", () => {
   ).toThrow(UsageError);
 });
 
+const placeholderUsernameConfig = {
+  ...minimalSFTPConfig,
+  connection: {
+    channel: "sftp",
+    server: { host: "sftp.example.org", username: "REPLACE_WITH_SSH_USERNAME" },
+  },
+};
+
+test("loadConfig refuses the placeholder SSH username before reading the key", () => {
+  fs.writeFileSync(configFile, YAML.stringify(placeholderUsernameConfig));
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  expect(() => loadConfig(baseOptions())).toThrow(
+    "still has the placeholder REPLACE_WITH_SSH_USERNAME as connection.server.username",
+  );
+});
+
+test("loadConfig runs a placeholder username that --server-username replaces", () => {
+  fs.writeFileSync(configFile, YAML.stringify(placeholderUsernameConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  const result = loadConfig({ ...baseOptions(), serverUsername: "alice" });
+  expect(result.connection.channel).toBe("sftp");
+});
+
 // --- happy path --------------------------------------------------------------
 
 test("returns connection and injects sharedSecret from key file", () => {
