@@ -4,7 +4,8 @@ import { ZodError } from "zod";
 
 import {
   MAX_ERROR_CAUSE_DEPTH,
-  UsageError,
+  NestingDepthExceededError,
+  NodeCountExceededError,
   errorWithPartnerCauseLinks,
   sanitizeForDisplay,
 } from "@alcove/core";
@@ -250,9 +251,9 @@ export class JobIntentUncomposableError extends Error {
 
 /**
  * Run one composition step, turning core's refusal of what it composed into a
- * {@link JobIntentUncomposableError}. A schema issue is described through the
- * shared formatter, and a {@link UsageError}'s message is core's fixed text,
- * so neither detail repeats a value the intent supplied.
+ * {@link JobIntentUncomposableError}: a schema issue described through the
+ * shared formatter, or one of the key-rewrite size bounds. Any other throw
+ * propagates unchanged.
  */
 function composedFromIntent<TComposed>(compose: () => TComposed): TComposed {
   try {
@@ -262,7 +263,10 @@ function composedFromIntent<TComposed>(compose: () => TComposed): TComposed {
       throw new JobIntentUncomposableError(formatFirstIssue(error.issues), {
         cause: error,
       });
-    if (error instanceof UsageError)
+    if (
+      error instanceof NodeCountExceededError ||
+      error instanceof NestingDepthExceededError
+    )
       throw new JobIntentUncomposableError(error.message, { cause: error });
     throw error;
   }
