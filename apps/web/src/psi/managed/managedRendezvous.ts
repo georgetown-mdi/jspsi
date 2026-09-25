@@ -29,7 +29,11 @@
  * per-run peer-id derivation are unit-testable without a real broker.
  */
 
-import { dialAsAcceptor, listenAsInviter } from "../transport/rendezvous";
+import {
+  BROKER_REGISTRATION_TIMEOUT_MS,
+  dialAsAcceptor,
+  listenAsInviter,
+} from "../transport/rendezvous";
 import { invitationLocation } from "../invitationLocation";
 import { relayForRun } from "../transport/ownRelaySetting";
 import { webrtcEndpointFromLocation } from "../invitation";
@@ -94,8 +98,10 @@ type ManagedRendezvousAcquisition =
  * keeps retrying an inviter that has not registered. The inviter half of the
  * same budget is not this function's -- it returns its registered peer before
  * the inbound wait begins, and the caller bounds that wait itself (see
- * {@link ./managedRunDriver.ts}). Absent, the dial keeps the flows' shared
- * default.
+ * {@link ./managedRunDriver.ts}). It also caps both sides' broker registration
+ * at the smaller of itself and {@link BROKER_REGISTRATION_TIMEOUT_MS}, so a
+ * scheduled attempt near its window's close cannot sit on a silent signaling
+ * server past that close. Absent, both flows keep their shared defaults.
  *
  * Both flows gather against the relay {@link relayForRun} selects from the
  * stored connection's `invitationRelay` and this browser's own setting, read at
@@ -118,16 +124,31 @@ export async function beginManagedRendezvous(
   const relay = relayForRun(
     connection.channel === "webrtc" ? connection.invitationRelay : undefined,
   );
+  const peerWaitTimeoutMs = options.peerWaitTimeoutMs;
+  const registrationBound =
+    peerWaitTimeoutMs !== undefined
+      ? {
+          registrationTimeoutMs: Math.min(
+            BROKER_REGISTRATION_TIMEOUT_MS,
+            peerWaitTimeoutMs,
+          ),
+        }
+      : {};
   if (side === "inviter") {
-    const peer = await flows.listenAsInviter(sharedSecret, { signal, relay });
+    const peer = await flows.listenAsInviter(sharedSecret, {
+      signal,
+      relay,
+      ...registrationBound,
+    });
     return { side: "inviter", peer };
   }
   const endpoint = webrtcEndpointFromLocation(invitationLocation());
   const [peer, conn] = await flows.dialAsAcceptor(sharedSecret, endpoint, {
     signal,
     relay,
-    ...(options.peerWaitTimeoutMs !== undefined
-      ? { totalTimeoutMs: options.peerWaitTimeoutMs }
+    ...registrationBound,
+    ...(peerWaitTimeoutMs !== undefined
+      ? { totalTimeoutMs: peerWaitTimeoutMs }
       : {}),
   });
   return { side: "acceptor", peer, conn };

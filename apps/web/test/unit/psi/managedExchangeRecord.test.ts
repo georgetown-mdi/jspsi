@@ -888,6 +888,24 @@ describe("applyManagedExchangeLastRun", () => {
     ).toEqual(newerRun);
   });
 
+  test("a stored entry stamped after the writer's clock holds nothing off", () => {
+    // A success stamped while the clock ran a day fast, since corrected.
+    const nowMs = Date.parse("2026-07-14T12:00:00.000Z");
+    const record = applyStamped(buildManagedExchangeRecord(newExchange()), {
+      at: "2026-07-15T12:00:00.000Z",
+      outcome: "succeeded",
+    });
+    const failure: ManagedExchangeLastRun = {
+      at: "2026-07-14T12:00:00.000Z",
+      outcome: "failed",
+      failureKind: "transport",
+    };
+    expect(
+      applyManagedExchangeLastRun(record, failure, nowMs - 60_000, nowMs)
+        .lastRun,
+    ).toEqual(failure);
+  });
+
   test("staleness compares instants, not strings, across ISO precisions", () => {
     // A whole-second ISO stamp sorts lexicographically AFTER a fractional stamp
     // of a later instant ("...00Z" > "...00.500Z" as strings); the guard must
@@ -940,6 +958,24 @@ describe("applyManagedExchangeScheduleAdvance", () => {
     expect(advanced.exchangeFile).toEqual(record.exchangeFile);
     // The input record is not mutated.
     expect(record.schedule).toEqual(schedule);
+  });
+
+  test("lands its entry over a stored one stamped after the writer's clock", () => {
+    const record = parseManagedExchangeRecord({
+      ...scheduled(),
+      lastRun: { at: "2026-02-13T17:00:00.000Z", outcome: "succeeded" },
+    });
+    const advanced = applyManagedExchangeScheduleAdvance(
+      record,
+      {
+        schedule: advancedSchedule,
+        fromNextWindow: schedule.nextWindow,
+        fromConsecutiveMisses: schedule.consecutiveMisses,
+        lastRun: missedRun,
+      },
+      Date.parse("2026-01-14T00:00:00.000Z"),
+    );
+    expect(advanced.lastRun).toEqual(missedRun);
   });
 
   test("advances the schedule alone when the window produced no bookkeeping", () => {

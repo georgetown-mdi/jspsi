@@ -653,6 +653,38 @@ describe("catch-up on wake", () => {
     expect(caught.missedWindows).toBe(0);
   });
 
+  test("a success stamped after an elapsed window closed is that window's", () => {
+    // The stamp is the run's completion: a run met inside the window can end
+    // past its close, and must not leave the window counted as a miss.
+    const caught = catchUpManagedSchedule(
+      {
+        ...weekly,
+        nextWindow: "2026-01-27T14:00:00.000Z",
+        consecutiveMisses: 2,
+      },
+      { at: "2026-01-27T17:20:00.000Z", outcome: "succeeded" },
+      at("2026-01-28T00:00:00.000Z"),
+    );
+    expect(caught.schedule.consecutiveMisses).toBe(0);
+    expect(caught.missedWindows).toBe(0);
+    expect(caught.caughtUpLastRun).toBeUndefined();
+    expect(caught.schedule.nextWindow).toBe("2026-02-03T14:00:00.000Z");
+  });
+
+  test("a failure stamped after an elapsed window closed still leaves it a miss", () => {
+    const caught = catchUpManagedSchedule(
+      {
+        ...weekly,
+        nextWindow: "2026-01-27T14:00:00.000Z",
+        consecutiveMisses: 2,
+      },
+      { at: "2026-01-27T17:20:00.000Z", outcome: "failed" },
+      at("2026-01-28T00:00:00.000Z"),
+    );
+    expect(caught.schedule.consecutiveMisses).toBe(3);
+    expect(caught.missedWindows).toBe(1);
+  });
+
   test("a success inside the open window satisfies it and is advanced past", () => {
     const caught = catchUpManagedSchedule(
       { ...weekly, nextWindow: "2026-01-27T14:00:00.000Z" },
@@ -855,6 +887,17 @@ describe("catch-up on wake", () => {
       expect(caught.schedule.consecutiveMisses).toBe(0);
       expect(caught.schedule.nextWindow).toBe("2026-01-13T14:00:00.000Z");
       expect(caught.missedWindows).toBe(0);
+    });
+
+    test("ends the miss run when that run succeeded after the window closed", () => {
+      // The run held the lock across the close, so its completion stamp lands
+      // in the gap after window 0.
+      const caught = catchUpManagedSchedule(
+        advancedPastWindowZero,
+        { at: "2026-01-06T17:05:00.000Z", outcome: "succeeded" },
+        at("2026-01-06T18:00:00.000Z"),
+      );
+      expect(caught.schedule.consecutiveMisses).toBe(0);
     });
 
     test("leaves the count alone when that run did not succeed", () => {

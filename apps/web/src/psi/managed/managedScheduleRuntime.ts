@@ -74,7 +74,7 @@ import {
   listReadableManagedExchanges,
   persistManagedExchangeScheduleAdvance,
 } from "./managedExchangeStore";
-import { listManagedLocalState } from "./managedLocalState";
+import { listReadableManagedLocalState } from "./managedLocalState";
 import { runManagedExchangeInBrowser } from "./managedRunDriver";
 import { tickManagedSchedules } from "./managedScheduleRunner";
 
@@ -234,7 +234,7 @@ export function browserScheduleTickSeams(
     now: () => Date.now(),
     listRecords: listReadableManagedExchanges,
     readRecord: getManagedExchange,
-    listLocalState: listManagedLocalState,
+    listLocalState: listReadableManagedLocalState,
     persistAdvance: persistManagedExchangeScheduleAdvance,
     delay: (ms) => delayUntilAborted(ms, signal),
     stopped: () => signal.aborted,
@@ -248,7 +248,7 @@ export function browserBetweenVisitNoticeSeams(): BetweenVisitNoticeSeams {
   return {
     now: () => Date.now(),
     listRecords: listReadableManagedExchanges,
-    listLocalState: listManagedLocalState,
+    listLocalState: async () => (await listReadableManagedLocalState()).states,
     armed: betweenVisitNotificationsArmed,
     show: showBetweenVisitNotice,
   };

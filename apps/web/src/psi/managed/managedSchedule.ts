@@ -213,16 +213,41 @@ function windowAt(
   return { index, opensAtMs, closesAtMs: opensAtMs + geometry.widthMs };
 }
 
+/** The index of the last window opened at or before `atMs`, or `undefined` when
+ * the instant falls before the first window. */
+function windowIndexOpenedBy(
+  geometry: ScheduleGeometry,
+  atMs: number,
+): number | undefined {
+  if (Number.isNaN(atMs)) return undefined;
+  const index = Math.floor((atMs - geometry.anchorMs) / geometry.periodMs);
+  return index < 0 ? undefined : index;
+}
+
 /** The index of the window containing `atMs`, or `undefined` when the instant
  * falls before the first window or in the gap after one closed. */
 function windowIndexContaining(
   geometry: ScheduleGeometry,
   atMs: number,
 ): number | undefined {
-  if (Number.isNaN(atMs)) return undefined;
-  const index = Math.floor((atMs - geometry.anchorMs) / geometry.periodMs);
-  if (index < 0) return undefined;
+  const index = windowIndexOpenedBy(geometry, atMs);
+  if (index === undefined) return undefined;
   return atMs < windowAt(geometry, index).closesAtMs ? index : undefined;
+}
+
+/** The window a recorded run speaks for. A success is credited to the last
+ * window opened by its stamp even when stamped after that window closed: the
+ * stamp is the run's completion, so a run met inside the window can finish past
+ * the close, and a success in the gap follows that window's verdict anyway.
+ * Any other outcome speaks only for the window containing it. */
+function windowIndexRecorded(
+  geometry: ScheduleGeometry,
+  lastRun: ManagedExchangeLastRun,
+  atMs: number,
+): number | undefined {
+  return lastRun.outcome === "succeeded"
+    ? windowIndexOpenedBy(geometry, atMs)
+    : windowIndexContaining(geometry, atMs);
 }
 
 /**
@@ -355,9 +380,11 @@ export function advanceManagedScheduleAfterWindow(
  * an elapsed window with no recorded run is one miss; an elapsed window with one
  * takes that run's own outcome; an open window with a `"succeeded"` run is
  * satisfied and advanced past without an attempt; an open window with no success
- * is the one to attempt. The window immediately before `nextWindow`, which the
- * walk itself does not visit, is read the same way before the walk starts,
- * crediting a concurrent run's outcome recorded there.
+ * is the one to attempt. A success stamped in the gap after a window closed is
+ * that window's (see {@link windowIndexRecorded}). The window immediately
+ * before `nextWindow`, which the walk itself does not visit, is read the same
+ * way before the walk starts, crediting a concurrent run's outcome recorded
+ * there.
  *
  * An elapsed window with no recorded run that opened at or after
  * `respondedAtMs` is `"skipped"` instead of missed: the operator's compromise
@@ -412,14 +439,14 @@ export function catchUpManagedSchedule(
     Math.ceil((plannedMs - geometry.anchorMs) / geometry.periodMs),
   );
   // The one window the recorded run speaks for. A run whose stamp does not
-  // parse, that landed in the gap between two windows, or that is stamped ahead
-  // of the wake speaks for none.
+  // parse, that is stamped ahead of the wake, or that is not a success and
+  // landed in the gap between two windows speaks for none.
   const recordedMs =
     lastRun === undefined ? Number.NaN : parseStoredInstant(lastRun.at);
   const recordedIndex =
-    recordedMs > nowMs
+    lastRun === undefined || recordedMs > nowMs
       ? undefined
-      : windowIndexContaining(geometry, recordedMs);
+      : windowIndexRecorded(geometry, lastRun, recordedMs);
 
   // A completed run inside the window the plan last advanced PAST still ends the
   // miss run: the advance can pass over a window whose run is still in flight
@@ -534,14 +561,18 @@ export function foldElapsedWindowsUnderResponse(
   } catch {
     return record;
   }
-  return applyManagedExchangeScheduleAdvance(record, {
-    schedule: caughtUp.schedule,
-    fromNextWindow: caughtUp.fromNextWindow,
-    fromConsecutiveMisses: caughtUp.fromConsecutiveMisses,
-    ...(caughtUp.caughtUpLastRun !== undefined
-      ? { lastRun: caughtUp.caughtUpLastRun }
-      : {}),
-  });
+  return applyManagedExchangeScheduleAdvance(
+    record,
+    {
+      schedule: caughtUp.schedule,
+      fromNextWindow: caughtUp.fromNextWindow,
+      fromConsecutiveMisses: caughtUp.fromConsecutiveMisses,
+      ...(caughtUp.caughtUpLastRun !== undefined
+        ? { lastRun: caughtUp.caughtUpLastRun }
+        : {}),
+    },
+    nowMs,
+  );
 }
 
 /**

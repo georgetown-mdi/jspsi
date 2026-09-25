@@ -12,6 +12,7 @@ import {
   assertManagedRerunDispatchable,
   beginManagedRendezvous,
 } from "@psi/managed/managedRendezvous";
+import { BROKER_REGISTRATION_TIMEOUT_MS } from "@psi/transport/rendezvous";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import type {
@@ -219,6 +220,81 @@ describe("beginManagedRendezvous: side dispatch", () => {
     expect(inviterCalls).toHaveLength(0);
     expect(acceptorCalls).toHaveLength(0);
   });
+});
+
+describe("beginManagedRendezvous: registration bound", () => {
+  function registrationBoundFlows(): {
+    flows: ManagedRendezvousFlows;
+    options: Array<{ registrationTimeoutMs?: number } | undefined>;
+  } {
+    const options: Array<{ registrationTimeoutMs?: number } | undefined> = [];
+    const flows: ManagedRendezvousFlows = {
+      listenAsInviter: (_secret, flowOptions) => {
+        options.push(flowOptions);
+        return Promise.resolve(fakePeer("inviter"));
+      },
+      dialAsAcceptor: (_secret, _endpoint, flowOptions) => {
+        options.push(flowOptions);
+        return Promise.resolve([fakePeer("acceptor"), fakeConn()]);
+      },
+    };
+    return { flows, options };
+  }
+
+  test.each(["inviter", "acceptor"] as const)(
+    "the %s's registration ends with a peer wait shorter than its default",
+    async (side) => {
+      stubAppLocation();
+      const { flows, options } = registrationBoundFlows();
+      const peerWaitTimeoutMs = BROKER_REGISTRATION_TIMEOUT_MS - 18_000;
+
+      await beginManagedRendezvous(
+        side,
+        generateSharedSecret(),
+        exchangeFile(),
+        { flows, peerWaitTimeoutMs },
+      );
+
+      expect(options).toHaveLength(1);
+      expect(options[0]?.registrationTimeoutMs).toBe(peerWaitTimeoutMs);
+    },
+  );
+
+  test.each(["inviter", "acceptor"] as const)(
+    "the %s's registration keeps its default under a longer peer wait",
+    async (side) => {
+      stubAppLocation();
+      const { flows, options } = registrationBoundFlows();
+
+      await beginManagedRendezvous(
+        side,
+        generateSharedSecret(),
+        exchangeFile(),
+        { flows, peerWaitTimeoutMs: 90_000 },
+      );
+
+      expect(options[0]?.registrationTimeoutMs).toBe(
+        BROKER_REGISTRATION_TIMEOUT_MS,
+      );
+    },
+  );
+
+  test.each(["inviter", "acceptor"] as const)(
+    "the %s's registration bound is left to the flow with no peer wait",
+    async (side) => {
+      stubAppLocation();
+      const { flows, options } = registrationBoundFlows();
+
+      await beginManagedRendezvous(
+        side,
+        generateSharedSecret(),
+        exchangeFile(),
+        { flows },
+      );
+
+      expect(options[0]).not.toHaveProperty("registrationTimeoutMs");
+    },
+  );
 });
 
 describe("assertManagedRerunDispatchable", () => {

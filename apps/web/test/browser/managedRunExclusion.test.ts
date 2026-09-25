@@ -13,7 +13,7 @@ import {
 } from "@psi/managed/managedExchangeStore";
 import { ManagedExchangeLockUnavailableError } from "@psi/managed/managedExchangeLock";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
-import { listManagedLocalState } from "@psi/managed/managedLocalState";
+import { listReadableManagedLocalState } from "@psi/managed/managedLocalState";
 import { runManagedRerun } from "@psi/managed/managedRun";
 import { tickManagedSchedules } from "@psi/managed/managedScheduleRunner";
 
@@ -90,7 +90,7 @@ function scheduleTickSeams(attempt: {
     now: Date.now,
     listRecords: listReadableManagedExchanges,
     readRecord: getManagedExchange,
-    listLocalState: listManagedLocalState,
+    listLocalState: listReadableManagedLocalState,
     persistAdvance: persistManagedExchangeScheduleAdvance,
     delay: () => Promise.resolve(),
     stopped: () => false,

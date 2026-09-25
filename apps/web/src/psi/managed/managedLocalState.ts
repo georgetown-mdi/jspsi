@@ -6,7 +6,8 @@
  *
  * - The backup marker is derived-currency input the record must not hold -- a
  *   secret-derived or record-embedded "when I last backed up" would either force a
- *   new record `schemaVersion` (reader-rejects-unknown) or leak into the artifact;
+ *   new record `schemaVersion` (an older build drops a member it does not name)
+ *   or leak into the artifact;
  *   keeping it a sibling makes its non-inclusion structural (see
  *   {@link ./managedBackupState.ts}).
  * - The spent state is this device's own status after a hand-off export, and an
@@ -29,20 +30,28 @@
  * {@link ./managedBackupState.ts}. Every read and write validates through
  * {@link managedLocalStateSchema}, so a corrupted or app-upgrade-invalidated sibling
  * entry rejects loudly rather than loading, the same discipline the record store
- * follows.
+ * follows; the unattended wake's read reports such an entry by key instead
+ * ({@link listReadableManagedLocalState}).
  */
 
 import {
   MANAGED_EXCHANGE_LOCAL_STORE_NAME,
   openManagedExchangeDatabase,
 } from "./managedExchangeStore";
-import { managedLocalStateSchema } from "./managedLocalStateShape";
+import {
+  managedLocalStateSchema,
+  partitionReadableManagedLocalState,
+} from "./managedLocalStateShape";
 
-import type { ManagedLocalState } from "./managedLocalStateShape";
+import type {
+  ManagedLocalState,
+  ManagedReadableLocalState,
+} from "./managedLocalStateShape";
 
 export type {
   ManagedImportMarker,
   ManagedLocalState,
+  ManagedReadableLocalState,
   ManagedSpendOutcome,
   ManagedSpentHandoff,
   ManagedSpentState,
@@ -144,6 +153,40 @@ export async function listManagedLocalState(): Promise<
         transaction.onabort = () => reject(transaction.error);
       },
     );
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Read every record id's local sibling state one entry at a time: the entries
+ * that parse, and the keys of those that do not. The unattended wake's read, so
+ * one entry this build cannot parse costs its own exchange's scheduled runs
+ * rather than every exchange's (see {@link partitionReadableManagedLocalState});
+ * the attended list keeps the strict {@link listManagedLocalState}.
+ */
+export async function listReadableManagedLocalState(): Promise<ManagedReadableLocalState> {
+  const db = await openManagedExchangeDatabase();
+  try {
+    return await new Promise<ManagedReadableLocalState>((resolve, reject) => {
+      const transaction = db.transaction(
+        MANAGED_EXCHANGE_LOCAL_STORE_NAME,
+        "readonly",
+      );
+      const store = transaction.objectStore(MANAGED_EXCHANGE_LOCAL_STORE_NAME);
+      const keysRequest = store.getAllKeys();
+      const valuesRequest = store.getAll();
+      transaction.oncomplete = () => {
+        resolve(
+          partitionReadableManagedLocalState(
+            keysRequest.result,
+            valuesRequest.result,
+          ),
+        );
+      };
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
   } finally {
     db.close();
   }

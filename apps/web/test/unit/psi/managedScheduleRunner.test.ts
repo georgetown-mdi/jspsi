@@ -38,6 +38,7 @@ import { ManagedInputError } from "@psi/managed/managedInputGuard";
 import { PartnerNoShowError } from "@psi/transport/waitForConnection";
 import { RotationPersistError } from "@psi/managed/managedRunRotate";
 import { managedScheduleWindow } from "@psi/managed/managedSchedule";
+import { partitionReadableManagedLocalState } from "@psi/managed/managedLocalStateShape";
 import { repeatedMissCoordination } from "@psi/managed/managedFailureCopy";
 
 import type {
@@ -112,6 +113,7 @@ function recordWith(
 /** One recorded attempt: what the tick handed the run seam. */
 interface RecordedAttempt {
   id: string;
+  record: ManagedScheduleAttempt["record"];
   source: ManagedScheduleAttempt["source"];
   peerWaitTimeoutMs: number;
   startedAtMs: number;
@@ -158,6 +160,8 @@ function harness(options: {
   /** Stored keys the per-entry read could not parse, as the store reports them
    * beside the records it could. */
   unreadableIds?: Array<string>;
+  /** Record ids whose local sibling entry the per-entry read could not parse. */
+  unreadableLocalStateIds?: Array<string>;
   stopAfterAttempts?: number;
   failAdvanceFor?: string;
   /** A write applied to the stored record immediately before the conditioned
@@ -199,9 +203,10 @@ function harness(options: {
       }),
     readRecord: (id) => Promise.resolve(stored.get(id)),
     listLocalState: () =>
-      Promise.resolve(
-        options.localState ?? new Map<string, ManagedLocalState>(),
-      ),
+      Promise.resolve({
+        states: options.localState ?? new Map<string, ManagedLocalState>(),
+        unreadableIds: options.unreadableLocalStateIds ?? [],
+      }),
     persistAdvance: (id, advance) => {
       order.push("advance");
       advances.push({ id, advance });
@@ -211,7 +216,11 @@ function harness(options: {
       if (existing === undefined)
         return Promise.reject(new Error(`no record ${id}`));
       const current = options.concurrentEdit?.(existing) ?? existing;
-      const next = applyManagedExchangeScheduleAdvance(current, advance);
+      const next = applyManagedExchangeScheduleAdvance(
+        current,
+        advance,
+        clockMs,
+      );
       stored.set(id, next);
       return Promise.resolve(next);
     },
@@ -219,6 +228,7 @@ function harness(options: {
       order.push("attempt");
       attempts.push({
         id: attempt.record.id,
+        record: attempt.record,
         source: attempt.source,
         peerWaitTimeoutMs: attempt.peerWaitTimeoutMs,
         startedAtMs: clockMs,
@@ -1397,6 +1407,44 @@ describe("a stored entry the read could not parse", () => {
   });
 });
 
+describe("a local sibling entry the read could not parse", () => {
+  test("skips its own record while every other due record still runs", async () => {
+    const stranded = recordWith();
+    const healthy = recordWith();
+    const runner = harness({
+      records: [stranded, healthy],
+      startAt: "2026-01-06T14:30:00.000Z",
+      script: [{ kind: "succeed" }],
+      unreadableLocalStateIds: [stranded.id],
+    });
+
+    const entries = await tickManagedSchedules(runner.seams);
+
+    expect(entries.find((entry) => entry.id === stranded.id)).toMatchObject({
+      attempts: 0,
+      skipped: "unreadable",
+    });
+    expect(entries.find((entry) => entry.id === healthy.id)?.disposition).toBe(
+      "succeeded",
+    );
+    expect(runner.attempts.map((attempt) => attempt.id)).toEqual([healthy.id]);
+  });
+
+  test("is read per entry, so one a later build wrote costs only its own", () => {
+    // A member a later build adds is refused by this build's strict schema.
+    const read = partitionReadableManagedLocalState(
+      ["newer-build", "current"],
+      [
+        { imported: { importedAt: "2026-01-01T00:00:00.000Z" }, retake: {} },
+        { backup: { backedUpAt: "2026-01-01T00:00:00.000Z" } },
+      ],
+    );
+
+    expect(read.unreadableIds).toEqual(["newer-build"]);
+    expect([...read.states.keys()]).toEqual(["current"]);
+  });
+});
+
 describe("the runtime going away mid-window", () => {
   test("leaves the window unresolved rather than recording a disposition", async () => {
     const record = recordWith();
@@ -1440,6 +1488,138 @@ describe("a record deleted mid-window", () => {
     expect(entry.error).toBeUndefined();
     expect(runner.advances).toHaveLength(0);
     expect(runner.stored.has(record.id)).toBe(false);
+  });
+});
+
+describe("a record written mid-window", () => {
+  test("runs each later attempt against the record the store holds", async () => {
+    // An attended Run rotates the secret and the operator re-points the input
+    // and shortens the max-age policy while the first attempt waits.
+    const record = recordWith();
+    const rotatedSecret = generateSharedSecret();
+    const repointed = {} as FileSystemFileHandle;
+    let writes = 0;
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [
+        { kind: "fail", error: new Error("the channel dropped") },
+        { kind: "succeed" },
+      ],
+      writeDuringAttempt: (held) => {
+        writes += 1;
+        if (writes > 1) return held;
+        return parseManagedExchangeRecord({
+          ...held,
+          sharedSecret: rotatedSecret,
+          inputFileHandle: repointed,
+          tokenMaxAgeDays: 30,
+        });
+      },
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 2, disposition: "succeeded" });
+    expect(runner.attempts[0].record.sharedSecret).toBe(record.sharedSecret);
+    expect(runner.attempts[1].record.sharedSecret).toBe(rotatedSecret);
+    expect(runner.attempts[1].record.tokenMaxAgeDays).toBe(30);
+    const source = runner.attempts[1].source;
+    expect(source.kind === "handle" ? source.handle : undefined).toBe(
+      repointed,
+    );
+  });
+
+  test("stops once the operator drops the schedule", async () => {
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+      writeDuringAttempt: (held) =>
+        applyManagedExchangeLocalEdits(held, { schedule: null }),
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, skipped: "plan-moved" });
+    expect(entry.disposition).toBeUndefined();
+    expect(runner.advances).toHaveLength(0);
+  });
+
+  test("stops once the operator re-plans the cadence", async () => {
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+      writeDuringAttempt: (held) =>
+        applyManagedExchangeLocalEdits(held, {
+          schedule: {
+            ...weekly,
+            intervalDays: 14,
+            nextWindow: "2026-01-20T14:00:00.000Z",
+          },
+        }),
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, skipped: "plan-moved" });
+    expect(runner.advances).toHaveLength(0);
+  });
+
+  test("stops once the input handle is dropped", async () => {
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+      writeDuringAttempt: (held) => {
+        const { inputFileHandle: _dropped, ...rest } = held;
+        return parseManagedExchangeRecord(rest);
+      },
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, skipped: "no-input-handle" });
+    expect(runner.advances).toHaveLength(0);
+  });
+
+  test("takes an attended Run's success inside the window as the window's", async () => {
+    // The Run completes in the pacing gap after a fast failure. Attempting
+    // again would find the partner gone and stamp a miss over its success.
+    const record = recordWith();
+    let succeededAt: string | undefined;
+    const runner = harness({
+      records: [record],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: [{ kind: "fail", error: new Error("the channel dropped") }],
+      writeDuringAttempt: (held) => {
+        succeededAt = new Date(runner.nowMs() + 1000).toISOString();
+        return applyManagedExchangeLastRun(
+          held,
+          { at: succeededAt, outcome: "succeeded" },
+          runner.nowMs(),
+        );
+      },
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    expect(entry).toMatchObject({ attempts: 1, disposition: "succeeded" });
+    expect(runner.advances[0].advance).toMatchObject({
+      schedule: {
+        nextWindow: "2026-01-13T14:00:00.000Z",
+        consecutiveMisses: 0,
+      },
+    });
+    expect(runner.advances[0].advance.lastRun).toBeUndefined();
+    expect(runner.stored.get(record.id)?.lastRun).toEqual({
+      at: succeededAt,
+      outcome: "succeeded",
+    });
   });
 });
 

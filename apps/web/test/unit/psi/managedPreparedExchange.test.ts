@@ -48,6 +48,33 @@ describe("prepareManagedRerunExchange", () => {
     expect(prepared.expectedPayloadColumns).toEqual(["shared_id"]);
   });
 
+  test("a record with no commitment holds the terms' payload.receive names", () => {
+    // An authored command-line document holding the data dictionary alone: the
+    // command line's recurring run enforces these names, so the web run does too.
+    const terms = standingTerms("County Health Dept");
+    const document = composeManagedExchangeFile({
+      connection: { channel: "webrtc", host: "signaling.example.org" },
+      linkageTerms: {
+        ...terms,
+        payload: { receive: [{ name: "shared_id" }, { name: "zip" }] },
+      },
+    });
+    expect(document.expectedPayloadColumns).toBeUndefined();
+    const prepared = prepareManagedRerunExchange(document, rows, columns);
+    expect(prepared.expectedPayloadColumns).toEqual(["shared_id", "zip"]);
+  });
+
+  test("the persisted commitment wins over payload.receive", () => {
+    const terms = standingTerms("County Health Dept");
+    const document = composeManagedExchangeFile({
+      connection: { channel: "webrtc", host: "signaling.example.org" },
+      linkageTerms: { ...terms, payload: { receive: [{ name: "shared_id" }] } },
+      expectedPayloadColumns: [],
+    });
+    const prepared = prepareManagedRerunExchange(document, rows, columns);
+    expect(prepared.expectedPayloadColumns).toEqual([]);
+  });
+
   test("a record with no commitment leaves it undefined (lazy reconciliation)", () => {
     const prepared = prepareManagedRerunExchange(exchangeFile(), rows, columns);
     expect(prepared.expectedPayloadColumns).toBeUndefined();

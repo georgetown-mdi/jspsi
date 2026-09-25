@@ -29,6 +29,8 @@
  * unattended rule -- query, never prompt -- rather than restating it.
  */
 
+import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
+
 import { loadCSVFileOffMainThread } from "../workers/csvParseController";
 
 import {
@@ -255,7 +257,8 @@ export type ManagedInputSource =
  * Read a run's input through its source and parse its column names, throwing a
  * benign {@link ManagedInputError} `"acquire"` rejection on any failure BEFORE
  * the column guard or any connection: a missing entry, a gone or refused read
- * permission, or an unreadable file. The `File` is read at THIS run start and
+ * permission, a file over the intake cap (`MAX_CSV_FILE_BYTES`), or an
+ * unreadable file. The `File` is read at THIS run start and
  * never retained across runs. On the handle path, permission is secured first.
  *
  * `csvDelimiter` is the field-delimiter choice the record stored for this
@@ -288,6 +291,17 @@ export async function acquireManagedInput(
     }
   } catch (cause) {
     throw new ManagedInputError({ reason: "acquire", cause });
+  }
+  // The intake cap every attended file selection applies, held here for the
+  // file a persisted handle or a re-selection hands the run.
+  if (file.size > MAX_CSV_FILE_BYTES) {
+    const maxMb = MAX_CSV_FILE_BYTES / 1024 ** 2;
+    throw new ManagedInputError({
+      reason: "acquire",
+      cause: new Error(
+        `The input file is larger than the ${maxMb} MB maximum. Choose a CSV file under ${maxMb} MB.`,
+      ),
+    });
   }
 
   let rows: CSVParseRows;

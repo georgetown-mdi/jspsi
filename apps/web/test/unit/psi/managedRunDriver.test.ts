@@ -9,6 +9,7 @@ import {
   exchangeRecordOwedButUnbuilt,
   getDefaultLinkageTerms,
   getLogger,
+  loadPsiBackend,
   runExchange,
 } from "@alcove/core";
 import {
@@ -523,6 +524,23 @@ describe("runManagedExchangeInBrowser", () => {
     controller.abort();
 
     await expect(running).resolves.toMatchObject({ exchange: OUTPUTS });
+  });
+
+  test("a PSI library that fails to load stops the run before the handshake rotates", async () => {
+    // Both parties rotate on the handshake's completion, so a load failing
+    // after it would strand this party on the retired secret.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    vi.mocked(loadPsiBackend).mockRejectedValueOnce(
+      new Error("the PSI library did not load"),
+    );
+
+    await expect(runDriver(new AbortController().signal)).rejects.toThrow(
+      "the PSI library did not load",
+    );
+
+    expect(mockedAuthenticate).not.toHaveBeenCalled();
   });
 
   test("frees the broker id before a handshake failure reaches the caller", async () => {

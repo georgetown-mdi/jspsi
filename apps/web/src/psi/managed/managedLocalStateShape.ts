@@ -111,3 +111,33 @@ export const managedLocalStateSchema: ZodType<ManagedLocalState> = z
 export function parseManagedLocalState(raw: unknown): ManagedLocalState {
   return managedLocalStateSchema.parse(raw);
 }
+
+/** The sibling entries a per-entry read could parse, and the stored keys of
+ * those it could not. */
+export interface ManagedReadableLocalState {
+  /** Each parsed entry, keyed by the record id it is stored under. */
+  states: Map<string, ManagedLocalState>;
+  /** The stored keys of the entries that did not parse. */
+  unreadableIds: Array<string>;
+}
+
+/**
+ * Partition a sibling store's parallel key and value arrays into the entries
+ * that parse and the keys of those that do not: the tolerant counterpart of
+ * mapping {@link parseManagedLocalState} over the values, for the unattended
+ * read (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Every admitted schedule
+ * renders"). Never throws.
+ */
+export function partitionReadableManagedLocalState(
+  keys: ReadonlyArray<IDBValidKey>,
+  values: ReadonlyArray<unknown>,
+): ManagedReadableLocalState {
+  const states = new Map<string, ManagedLocalState>();
+  const unreadableIds: Array<string> = [];
+  for (let index = 0; index < keys.length; index += 1) {
+    const parsed = managedLocalStateSchema.safeParse(values[index]);
+    if (parsed.success) states.set(String(keys[index]), parsed.data);
+    else unreadableIds.push(String(keys[index]));
+  }
+  return { states, unreadableIds };
+}

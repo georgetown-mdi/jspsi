@@ -1078,14 +1078,19 @@ export function clearHandedOffLastRun(
  * success in between, leaving the failure as the newer stamp that would land
  * over it. A success is the unrecoverable entry -- nothing re-derives it once
  * overwritten, and a scheduled window that then folds to a miss counts one that
- * was met -- so a stamp sharing the run's start instant is kept too. */
+ * was met -- so a stamp sharing the run's start instant is kept too.
+ *
+ * Neither rule holds for a stored stamp later than `nowMs`, the writer's clock:
+ * a stamp from the future (a clock since corrected, or an imported record)
+ * would otherwise drop every outcome until wall time passed it. */
 export function applyManagedExchangeLastRun(
   record: ManagedExchangeRecord,
   lastRun: ManagedExchangeLastRun,
   runStartedAtMs: number,
+  nowMs: number = Date.now(),
 ): ManagedExchangeRecord {
   const raised = withStandingCondition(record, standingConditionFrom(lastRun));
-  const stored = record.lastRun;
+  const stored = lastRunNotAfter(record.lastRun, nowMs);
   if (stored !== undefined && Date.parse(stored.at) > Date.parse(lastRun.at))
     return parseManagedExchangeRecord(raised);
   if (
@@ -1095,6 +1100,17 @@ export function applyManagedExchangeLastRun(
   )
     return parseManagedExchangeRecord(raised);
   return parseManagedExchangeRecord({ ...raised, lastRun });
+}
+
+/** The stored entry the `lastRun` write rules compare against: `undefined`
+ * where it is stamped later than `nowMs`, so the incoming entry replaces it. */
+function lastRunNotAfter(
+  stored: ManagedExchangeLastRun | undefined,
+  nowMs: number,
+): ManagedExchangeLastRun | undefined {
+  return stored !== undefined && Date.parse(stored.at) > nowMs
+    ? undefined
+    : stored;
 }
 
 /** The standing condition a `lastRun` entry raises, or `undefined` for an entry
@@ -1255,7 +1271,9 @@ export interface ManagedExchangeScheduleAdvance {
  * is no run start to state.
  * Both stamps are read through {@link parseStoredInstant} rather than
  * `Date.parse`, so a stamp having no UTC designator compares as no run at all,
- * letting the window's own bookkeeping land over it.
+ * letting the window's own bookkeeping land over it. A stored stamp later than
+ * `nowMs` holds nothing off, for the reason {@link applyManagedExchangeLastRun}
+ * gives.
  *
  * A standing condition the advance carries is raised under the same plan
  * condition as the rest -- it is this write's second chance at evidence the
@@ -1263,6 +1281,7 @@ export interface ManagedExchangeScheduleAdvance {
 export function applyManagedExchangeScheduleAdvance(
   record: ManagedExchangeRecord,
   advance: ManagedExchangeScheduleAdvance,
+  nowMs: number = Date.now(),
 ): ManagedExchangeRecord {
   const stored = record.schedule;
   if (
@@ -1278,12 +1297,14 @@ export function applyManagedExchangeScheduleAdvance(
     ...withStandingCondition(record, advance.standingCondition),
     schedule: advance.schedule,
   };
+  const storedAtMs =
+    record.lastRun === undefined
+      ? Number.NaN
+      : parseStoredInstant(record.lastRun.at);
   if (
     advance.lastRun !== undefined &&
     !(
-      record.lastRun !== undefined &&
-      parseStoredInstant(record.lastRun.at) >
-        parseStoredInstant(advance.lastRun.at)
+      storedAtMs > parseStoredInstant(advance.lastRun.at) && storedAtMs <= nowMs
     )
   )
     next.lastRun = advance.lastRun;

@@ -69,5 +69,15 @@ export function rendezvousMock() {
   return {
     dialAsAcceptor: vi.fn(),
     listenAsInviter: vi.fn(),
+    BROKER_REGISTRATION_TIMEOUT_MS: 30_000,
+    brokerRegistrationTimedOutMessage: (timeoutMs: number) => {
+      const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+      return (
+        `The signaling server did not accept the connection within ` +
+        `${seconds} second${seconds === 1 ? "" : "s"}. Check the network ` +
+        `connection and try again; if it keeps happening, the signaling server ` +
+        `may be down.`
+      );
+    },
   };
 }
