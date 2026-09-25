@@ -23,6 +23,7 @@ import {
   warnJobRendezvousProvisioning,
 } from "../src/jobs/index";
 import { ConfigManager } from "../src/utils/serverConfig";
+import { jobApiRequestTimeoutMs } from "../src/jobs/routeSupport";
 import { registerServer } from "../src/httpServer";
 
 import { attachRequestAbortSignal } from "./requestAbortSignal";
@@ -53,8 +54,13 @@ const server =
       new HttpServer(toNodeListener(nitroApp.h3App));
 
 // Bound a slow or partial signaling upgrade handshake (slowloris) on the shared
-// HTTP server; post-101 reaping is the signaling layer's job.
-hardenUpgradeSurface(server);
+// HTTP server; post-101 reaping is the signaling layer's job. With the job API
+// enabled, the whole-request bound is sized to its largest upload instead.
+const requestTimeoutMs = jobApiRequestTimeoutMs();
+hardenUpgradeSurface(
+  server,
+  requestTimeoutMs === undefined ? {} : { requestTimeoutMs },
+);
 
 // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
 const port = (config.PORT || 3000) as number;

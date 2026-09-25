@@ -222,6 +222,34 @@ export function gateJobRoute(request: Request): GateOutcome {
 export const MAX_JOB_BODY_BYTES = 2 * MAX_INPUT_CSV_LENGTH + 24 * 1024 ** 2;
 
 /**
+ * The slowest upload rate, in bytes per second, a job request body is given
+ * time to arrive at: a create at {@link MAX_JOB_BODY_BYTES} arrives within
+ * {@link JOB_API_REQUEST_TIMEOUT_MS} at this rate or faster.
+ */
+export const MIN_JOB_UPLOAD_BYTES_PER_SECOND = 1024 ** 2;
+
+/**
+ * The whole-request bound a server with the job API enabled applies in place
+ * of the signaling default, sized to the largest body a job route reads: at
+ * {@link MIN_JOB_UPLOAD_BYTES_PER_SECOND} that body takes this long to arrive.
+ * A console is reached only from the operator's own machine, so the longer bound
+ * a slow body gets there is not the exposure it would be on the hosted server.
+ */
+export const JOB_API_REQUEST_TIMEOUT_MS =
+  Math.ceil(MAX_JOB_BODY_BYTES / MIN_JOB_UPLOAD_BYTES_PER_SECOND) * 1000;
+
+/**
+ * The whole-request bound the server should apply: {@link
+ * JOB_API_REQUEST_TIMEOUT_MS} when the job API is enabled, else undefined, which
+ * leaves the signaling default in place.
+ */
+export function jobApiRequestTimeoutMs(
+  config: JobApiConfig = readJobApiConfig(),
+): number | undefined {
+  return isJobApiEnabled(config) ? JOB_API_REQUEST_TIMEOUT_MS : undefined;
+}
+
+/**
  * The byte cap on a `PUT /api/jobs/sftp` authoring body: a small memory bound on
  * the streamed read. The body is a handful of connection fields plus a credential
  * -- an `@path` reference, a mount locator, or a pasted value (a password or an
