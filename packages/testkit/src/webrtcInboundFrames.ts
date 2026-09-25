@@ -95,11 +95,12 @@ export function packValue(value: unknown): Uint8Array {
 }
 
 /** BinaryPack-decode a frame with the real unpacker. Its published type declares an
- * `ArrayBuffer` while what a transport holds on the wire is a view over the datagram's
- * bytes; the real call reads that view (measured, along with the decode shape a view
- * argument produces -- see {@link comparableVerdict}), so this cast is the one place
- * bridging the declared type to the real call. */
-export function unpackFrame(bytes: Uint8Array): unknown {
+ * `ArrayBuffer`, which is what PeerJS's data channel delivers, while what the CLI
+ * transport holds on the wire is a view over the datagram's bytes; the real call reads
+ * that view (measured, along with the decode shape a view argument produces -- see
+ * {@link comparableVerdict}), so this cast is the one place bridging the declared type
+ * to the real call. */
+export function unpackFrame(bytes: Uint8Array | ArrayBuffer): unknown {
   return unpack<Unpackable>(bytes as unknown as ArrayBuffer);
 }
 
@@ -361,6 +362,18 @@ export interface WebrtcChunkEnvelopeFixture {
   readonly refused: boolean;
 }
 
+/** A map whose one key is `__proto__`, holding a byte slice. BinaryPack's `unpack`
+ * assigns that key as the decoded object's prototype, so the object inherits from
+ * the slice without being one. */
+function sliceAsPrototype(): Record<string, unknown> {
+  return Object.defineProperty({}, "__proto__", {
+    value: new Uint8Array(4),
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
 function chunkEnvelope(fields: Record<string, unknown>): Uint8Array {
   return packValue({
     __peerData: 1,
@@ -390,6 +403,11 @@ const chunkEnvelopes: Array<{
   {
     label: "an array-like object as chunk data",
     fields: { data: { length: 2_000_000 } },
+    refused: true,
+  },
+  {
+    label: "an object inheriting from a byte slice as chunk data",
+    fields: { data: sliceAsPrototype() },
     refused: true,
   },
   { label: "no chunk data", fields: { data: undefined }, refused: true },

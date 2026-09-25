@@ -1,5 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
+import { pack, unpack } from "peerjs-js-binarypack";
+
 import {
   ConnectionError,
   MAX_WEBRTC_FRAME_BYTES,
@@ -14,6 +16,7 @@ import {
 } from "../../../src/psi/transport/boundedReassembly.js";
 
 import type { DataConnection } from "peerjs";
+import type { Unpackable } from "peerjs-js-binarypack";
 
 interface Chunk {
   __peerData: number;
@@ -430,6 +433,55 @@ describe("boundChunkReassembly: chunk envelope shape", () => {
       expect(conn.handledChunks).toBe(0);
     },
   );
+
+  test("refuses a decoded object inheriting from an ArrayBuffer and latches the connection", () => {
+    const sliceAsPrototype = Object.defineProperty({}, "__proto__", {
+      value: new Uint8Array(4),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+    const packed = pack({
+      __peerData: 1,
+      n: 0,
+      data: sliceAsPrototype,
+      total: 2,
+    });
+    if (packed instanceof Promise) throw new Error("packed asynchronously");
+    const envelope = unpack<Unpackable>(packed) as { data: unknown };
+    expect(envelope.data).toBeInstanceOf(ArrayBuffer);
+
+    const conn = new FakeChunkedConnection();
+    const fail = install(conn);
+    conn._handleChunk(envelope as never);
+    conn._handleChunk(makeChunk(2, 0, 2, 4));
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame has a malformed chunk envelope: its chunk " +
+        "payload is not binary",
+    );
+    expect(conn.handledChunks).toBe(0);
+    expect(conn.partialCount).toBe(0);
+  });
+
+  test("fails the connection when chunk handling throws, and drops later chunks", () => {
+    const conn = new FakeChunkedConnection();
+    conn._handleChunk = () => {
+      conn.handledChunks++;
+      throw new RangeError("allocation failed");
+    };
+    const fail = install(conn);
+
+    conn._handleChunk(makeChunk(1, 0, 2, 4));
+    conn._handleChunk(makeChunk(2, 0, 2, 4));
+
+    expect(fail).toHaveBeenCalledTimes(1);
+    const err = fail.mock.calls[0][0] as ConnectionError;
+    expect(err.kind).toBe("protocol");
+    expect(err.message).toBe("inbound WebRTC frame could not be reassembled");
+    expect(conn.handledChunks).toBe(1);
+  });
 
   test("accepts an ArrayBuffer slice as well as a typed-array view", () => {
     const conn = new FakeChunkedConnection();

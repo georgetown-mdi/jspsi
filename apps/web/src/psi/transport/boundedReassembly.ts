@@ -64,25 +64,55 @@ function isChunkOrdinal(value: unknown): value is number {
 }
 
 /**
- * Returns what is wrong with a chunk envelope, or `undefined` if it has the
- * {@link PeerChunk} shape. The same rule the CLI's receive dispatch applies
+ * The byte length of a genuine typed-array view or `ArrayBuffer`, or
+ * `undefined` for any other value. A brand check rather than `instanceof`:
+ * BinaryPack's `unpack` assigns a map's `__proto__` key as the object's
+ * prototype, so a peer can send a plain object that inherits from a real
+ * `ArrayBuffer`, whose `byteLength` getter then throws on it.
+ */
+function binaryByteLength(value: unknown): number | undefined {
+  if (ArrayBuffer.isView(value)) return value.byteLength;
+  try {
+    const length: unknown = Reflect.get(
+      ArrayBuffer.prototype,
+      "byteLength",
+      value,
+    );
+    return typeof length === "number" ? length : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Returns the {@link PeerChunk} and its slice's byte length, or what is wrong
+ * with the envelope. The same rule the CLI's receive dispatch applies
  * (`classifyInboundValue`, apps/cli/src/connection/webrtc/peerjsWire.ts), so
  * both parties refuse the same envelopes. PeerJS stores
  * `new Uint8Array(data)`, which for a number or numeric string allocates that
  * many bytes, so a non-binary `data` must never reach it.
  */
-function describeMalformedChunk(chunk: unknown): string | undefined {
-  if (typeof chunk !== "object" || chunk === null) return "it is not an object";
-  const { __peerData: id, n, total, data } = chunk as Record<string, unknown>;
+function readChunkEnvelope(
+  received: unknown,
+): { chunk: PeerChunk; byteLength: number } | { malformed: string } {
+  if (typeof received !== "object" || received === null)
+    return { malformed: "it is not an object" };
+  const {
+    __peerData: id,
+    n,
+    total,
+    data,
+  } = received as Record<string, unknown>;
   if (!Number.isSafeInteger(id))
-    return "its chunk message id is not an integer";
+    return { malformed: "its chunk message id is not an integer" };
   if (!isChunkOrdinal(total) || total < 1)
-    return "its chunk count is not a positive integer";
+    return { malformed: "its chunk count is not a positive integer" };
   if (!isChunkOrdinal(n) || n >= total)
-    return "its chunk index is outside the declared count";
-  if (!ArrayBuffer.isView(data) && !(data instanceof ArrayBuffer))
-    return "its chunk payload is not binary";
-  return undefined;
+    return { malformed: "its chunk index is outside the declared count" };
+  const byteLength = binaryByteLength(data);
+  if (byteLength === undefined)
+    return { malformed: "its chunk payload is not binary" };
+  return { chunk: received as PeerChunk, byteLength };
 }
 
 /** Coerce a frame's bytes to a `Uint8Array` view for the structural scan, without
@@ -226,6 +256,7 @@ export function boundChunkReassembly(
   let failed = false;
 
   const failClosed = (error: ConnectionError): void => {
+    if (failed) return;
     failed = true;
     fail(error);
   };
@@ -241,16 +272,17 @@ export function boundChunkReassembly(
   // Bounds the chunk ACCUMULATION (before completion): envelope shape, declared
   // and retained chunk count, wire bytes, and concurrent reassemblies, evicting
   // the oldest partial past the cap.
-  internals._handleChunk = (received: unknown): void => {
-    if (failed) return;
-    const malformed = describeMalformedChunk(received);
-    if (malformed !== undefined) {
+  const handleChunk = (received: unknown): void => {
+    const envelope = readChunkEnvelope(received);
+    if ("malformed" in envelope) {
       failClosed(
-        frameRefusalError(`has a malformed chunk envelope: ${malformed}`),
+        frameRefusalError(
+          `has a malformed chunk envelope: ${envelope.malformed}`,
+        ),
       );
       return;
     }
-    const chunk = received as PeerChunk;
+    const { chunk } = envelope;
     if (chunk.total > maxChunks) {
       failClosed(
         frameRefusalError(`exceeds its ${maxChunks}-chunk reassembly limit`),
@@ -258,7 +290,7 @@ export function boundChunkReassembly(
       return;
     }
     const id = chunk.__peerData;
-    const bytes = Math.max(chunk.data.byteLength, minChunkBytes);
+    const bytes = Math.max(envelope.byteLength, minChunkBytes);
     const entry = inFlight.get(id);
 
     if (entry === undefined) {
@@ -290,6 +322,18 @@ export function boundChunkReassembly(
     if (internals._chunkedData[id] === undefined) {
       bytesInFlight -= inFlight.get(id)?.bytes ?? 0;
       inFlight.delete(id);
+    }
+  };
+
+  // A throw anywhere in chunk handling -- the checks above, PeerJS's own
+  // reassembly, or the completed frame's unpack -- fails the connection
+  // rather than leaving it open to handle the next chunk.
+  internals._handleChunk = (received: unknown): void => {
+    if (failed) return;
+    try {
+      handleChunk(received);
+    } catch {
+      failClosed(frameRefusalError("could not be reassembled"));
     }
   };
 

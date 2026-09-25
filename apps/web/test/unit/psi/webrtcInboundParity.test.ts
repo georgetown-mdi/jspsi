@@ -84,7 +84,7 @@ class FakePeerJsConnection {
   /** Each unpacked frame that reached the application. */
   delivered: Array<unknown> = [];
 
-  _handleDataMessage = (message: { data: Uint8Array }): void => {
+  _handleDataMessage = (message: { data: Uint8Array | ArrayBuffer }): void => {
     const value = unpackFrame(message.data);
     if (isChunkEnvelope(value)) this._handleChunk(value);
     else this.delivered.push(value);
@@ -243,7 +243,9 @@ describe("the web PeerJS wrap against the shared chunk envelopes", () => {
       boundChunkReassembly(conn as unknown as DataConnection, (error) =>
         failures.push(error),
       );
-      conn._handleDataMessage({ data: fixture.datagram });
+      // As PeerJS's data channel delivers it: under an ArrayBuffer, BinaryPack
+      // decodes a slice to an ArrayBuffer, the shape a `__proto__` key can mimic.
+      conn._handleDataMessage({ data: fixture.datagram.slice().buffer });
 
       expect(
         failures.map(({ kind }) => kind),
