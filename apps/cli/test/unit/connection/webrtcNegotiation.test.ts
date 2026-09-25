@@ -18,6 +18,7 @@ import {
   MAX_CONNECTION_ID_LENGTH,
   MAX_PENDING_REMOTE_CANDIDATES,
   MIN_NEW_OFFER_INTERVAL_MS,
+  MIN_OFFER_RESEND_INTERVAL_MS,
   openWebRtcPeerSession,
 } from "../../../src/connection/webrtc/weriftPeer";
 
@@ -465,17 +466,158 @@ test("the acceptor offers again on the broker's EXPIRE and otherwise only after 
   await session;
 });
 
+/**
+ * Fake the timers and the clock, which also runs at wall-clock pace, so the
+ * waits below stop a margin short of each deadline.
+ */
+function holdOfferResendClock(): void {
+  vi.useFakeTimers({
+    toFake: [
+      "setTimeout",
+      "clearTimeout",
+      "setInterval",
+      "clearInterval",
+      "Date",
+    ],
+    shouldAdvanceTime: true,
+  });
+}
+
+/** The OFFER and CANDIDATE frames sent, leaving out the heartbeats. */
+function signalingFrames(
+  socket: ScriptedSocket,
+): Array<Record<string, unknown>> {
+  return socket.sent.filter(
+    (frame) =>
+      frame.type === BROKER_MESSAGE.offer ||
+      frame.type === BROKER_MESSAGE.candidate,
+  );
+}
+
+function sentCandidates(
+  frames: Array<Record<string, unknown>>,
+): Array<unknown> {
+  return frames
+    .filter((frame) => frame.type === BROKER_MESSAGE.candidate)
+    .map((frame) => (frame.payload as { candidate: unknown }).candidate);
+}
+
+test("EXPIREs inside the minimum interval are answered by one re-send when it ends", async () => {
+  holdOfferResendClock();
+  const marginMs = 1_000;
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    candidatesDuringSetLocal: [CANDIDATE_A, CANDIDATE_B],
+    rendezvousTimeoutMs: 10 * DEFAULT_UNREPORTED_OFFER_RESEND_MS,
+  });
+  for (let index = 0; index < 5; index += 1) {
+    socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
+  }
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(1);
+  const sentBefore = signalingFrames(socket).length;
+
+  await vi.advanceTimersByTimeAsync(MIN_OFFER_RESEND_INTERVAL_MS - marginMs);
+  expect(signalingFrames(socket)).toHaveLength(sentBefore);
+  await vi.advanceTimersByTimeAsync(2 * marginMs);
+  const resent = signalingFrames(socket).slice(sentBefore);
+  expect(resent.map((frame) => frame.type)).toEqual([
+    BROKER_MESSAGE.offer,
+    BROKER_MESSAGE.candidate,
+    BROKER_MESSAGE.candidate,
+  ]);
+  expect(sentCandidates(resent)).toEqual([CANDIDATE_A, CANDIDATE_B]);
+
+  await vi.advanceTimersByTimeAsync(2 * MIN_OFFER_RESEND_INTERVAL_MS);
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(2);
+  peer.channels[0].open();
+  await session;
+});
+
+test("an EXPIRE after the minimum interval re-sends at once, and the interval restarts from that send", async () => {
+  holdOfferResendClock();
+  const marginMs = 1_000;
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    candidatesDuringSetLocal: [CANDIDATE_A],
+    rendezvousTimeoutMs: 10 * DEFAULT_UNREPORTED_OFFER_RESEND_MS,
+  });
+  await vi.advanceTimersByTimeAsync(MIN_OFFER_RESEND_INTERVAL_MS + marginMs);
+  const sentBefore = signalingFrames(socket).length;
+  socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
+  const resent = signalingFrames(socket).slice(sentBefore);
+  expect(resent.map((frame) => frame.type)).toEqual([
+    BROKER_MESSAGE.offer,
+    BROKER_MESSAGE.candidate,
+  ]);
+  expect(sentCandidates(resent)).toEqual([CANDIDATE_A]);
+
+  await vi.advanceTimersByTimeAsync(marginMs);
+  socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(
+    MIN_OFFER_RESEND_INTERVAL_MS - 3 * marginMs,
+  );
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(2 * marginMs);
+  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(3);
+  peer.channels[0].open();
+  await session;
+});
+
+test("a broker answering every frame with an EXPIRE draws at most one re-send per minimum interval", async () => {
+  holdOfferResendClock();
+  const startedAt = Date.now();
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    candidatesDuringSetLocal: [CANDIDATE_A, CANDIDATE_B],
+    rendezvousTimeoutMs: 10 * DEFAULT_UNREPORTED_OFFER_RESEND_MS,
+  });
+  // `startedAt` precedes the first offer only by the few milliseconds the
+  // rendezvous takes to start, far inside the interval.
+  const offerSentAt: Array<number> = [startedAt];
+  // Capped so a client that re-sends on every EXPIRE ends the test rather
+  // than spinning it.
+  let expiresLeft = 1_000;
+  const send = socket.send.bind(socket);
+  socket.send = (data: string) => {
+    send(data);
+    const { type } = JSON.parse(data) as { type: string };
+    if (type === BROKER_MESSAGE.offer) offerSentAt.push(Date.now());
+    if (
+      (type === BROKER_MESSAGE.offer || type === BROKER_MESSAGE.candidate) &&
+      expiresLeft > 0
+    ) {
+      expiresLeft -= 1;
+      queueMicrotask(() =>
+        socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId }),
+      );
+    }
+  };
+  socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
+
+  const intervals = 3;
+  await vi.advanceTimersByTimeAsync(
+    intervals * MIN_OFFER_RESEND_INTERVAL_MS + MIN_OFFER_RESEND_INTERVAL_MS / 2,
+  );
+  expect(offerSentAt).toHaveLength(1 + intervals);
+  for (let index = 1; index < offerSentAt.length; index += 1) {
+    expect(offerSentAt[index] - offerSentAt[index - 1]).toBeGreaterThanOrEqual(
+      MIN_OFFER_RESEND_INTERVAL_MS,
+    );
+  }
+  expect(socket.ofType(BROKER_MESSAGE.candidate)).toHaveLength(
+    2 * (1 + intervals),
+  );
+  peer.channels[0].open();
+  await session;
+});
+
 test("an offer neither answered nor reported expired is sent again after the fallback", async () => {
   const { socket, peer, session, inviterId } = await startRendezvous({
     role: "acceptor",
     unreportedOfferResendMs: 200,
   });
-  await until(() => socket.ofType(BROKER_MESSAGE.offer).length === 2);
-  // A re-send on EXPIRE restarts the wait rather than adding a second timer.
-  socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
-  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(3);
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(socket.ofType(BROKER_MESSAGE.offer)).toHaveLength(3);
+  await until(() => socket.ofType(BROKER_MESSAGE.offer).length === 3);
   // The answer stops the fallback before its next turn.
   socket.deliver({
     type: BROKER_MESSAGE.answer,
@@ -1603,9 +1745,10 @@ test("an acceptor that renews while its first answer is in flight still connects
     (frame) => holdAnswers && frame.type === BROKER_MESSAGE.answer,
   );
 
-  // The first offer went out before the relay existed; the broker's EXPIRE
-  // sends it again through the relay, and the renewal follows.
-  acceptor.socket.deliver({ type: BROKER_MESSAGE.expire, src: inviterId });
+  // The first offer went out before the relay existed, so it is handed over
+  // here; the renewal follows.
+  const [firstOffer] = acceptor.socket.ofType(BROKER_MESSAGE.offer);
+  inviter.socket.deliver({ ...firstOffer, src: acceptorId });
   await until(() => heldAnswers.length > 0);
   const [staleId] = offeredConnectionIds(acceptor.socket);
   expect(answeredConnectionIds(inviter.socket)[0]).toBe(staleId);

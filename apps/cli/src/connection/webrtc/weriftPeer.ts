@@ -103,6 +103,15 @@ export const MAX_PENDING_REMOTE_CANDIDATES = 128;
 export const DEFAULT_UNREPORTED_OFFER_RESEND_MS = 30_000;
 
 /**
+ * The least time between two sends of the acceptor's offer on the broker's
+ * `EXPIRE`. The vendored broker drops a held frame within about 6 s of queuing
+ * it, so an offer sent this long after the last is never held beside it. An
+ * `EXPIRE` inside the interval is not dropped: every one arriving there is
+ * answered by a single send when the interval ends.
+ */
+export const MIN_OFFER_RESEND_INTERVAL_MS = 10_000;
+
+/**
  * How long a connection replaced by a renewal, or by an inviter following a new
  * offer, stays open and negotiable after its replacement is offered or built.
  * A browser inviter adopts the first offer it receives; its client still
@@ -1311,7 +1320,7 @@ class Negotiation {
       clearInterval(this.renewalTimer);
       this.dropRetired();
       this.stopChannelOpenDeadline();
-      this.stopUnreportedOfferResend();
+      this.stopOfferResends();
       signal?.removeEventListener("abort", abort);
     }
   }
@@ -1355,7 +1364,7 @@ class Negotiation {
         await this.onCandidate(message);
         return;
       case BROKER_MESSAGE.expire:
-        this.resendOffer();
+        this.resendOfferOnExpire();
         return;
       case BROKER_MESSAGE.leave:
         this.fail(
@@ -1474,7 +1483,7 @@ class Negotiation {
     // second is caught as a terminal failure, letting a counterparty fail the
     // acceptor's rendezvous by answering twice.
     this.answerAccepted = true;
-    this.stopUnreportedOfferResend();
+    this.stopOfferResends();
     if (retired === undefined) this.dropRetired();
     else this.promoteRetired(retired);
     await this.currentPeer.setRemoteDescription({
@@ -1568,12 +1577,18 @@ class Negotiation {
       },
     });
     this.flushLocalCandidates();
-    this.stopUnreportedOfferResend();
+    this.stopOfferResends();
     if (this.finished) return;
     this.unreportedOfferResendTimer = setTimeout(
       () => this.resendOffer(),
       this.options.unreportedOfferResendMs,
     );
+    this.offerResendIntervalTimer = setTimeout(() => {
+      this.offerResendIntervalTimer = undefined;
+      if (!this.offerResendOnExpireDue) return;
+      this.offerResendOnExpireDue = false;
+      this.resendOffer();
+    }, MIN_OFFER_RESEND_INTERVAL_MS);
   }
 
   private sendAnswer(): void {
@@ -1599,11 +1614,23 @@ class Negotiation {
   }
 
   private unreportedOfferResendTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Running for {@link MIN_OFFER_RESEND_INTERVAL_MS} after each offer send. */
+  private offerResendIntervalTimer: ReturnType<typeof setTimeout> | undefined;
+  private offerResendOnExpireDue = false;
+
+  private resendOfferOnExpire(): void {
+    if (this.offerResendIntervalTimer !== undefined) {
+      this.offerResendOnExpireDue = true;
+      return;
+    }
+    this.resendOffer();
+  }
 
   /**
-   * Send the offer and its candidates again, on the broker's `EXPIRE` or once
-   * {@link DEFAULT_UNREPORTED_OFFER_RESEND_MS} passes with neither it nor an
-   * answer. Never while the broker may still hold the last copy: a browser
+   * Send the offer and its candidates again, on the broker's `EXPIRE` (no
+   * sooner than {@link MIN_OFFER_RESEND_INTERVAL_MS} after the last send) or
+   * once {@link DEFAULT_UNREPORTED_OFFER_RESEND_MS} passes with neither it nor
+   * an answer. Never while the broker may still hold the last copy: a browser
    * PeerJS peer handed two copies of one connection id closes the connection
    * its app already took and builds another. An inviter's `EXPIRE` means the
    * acceptor it answered has left, and it waits for that partner's next offer.
@@ -1624,10 +1651,12 @@ class Negotiation {
     }
   }
 
-  private stopUnreportedOfferResend(): void {
-    if (this.unreportedOfferResendTimer === undefined) return;
+  private stopOfferResends(): void {
     clearTimeout(this.unreportedOfferResendTimer);
     this.unreportedOfferResendTimer = undefined;
+    clearTimeout(this.offerResendIntervalTimer);
+    this.offerResendIntervalTimer = undefined;
+    this.offerResendOnExpireDue = false;
   }
 
   /**

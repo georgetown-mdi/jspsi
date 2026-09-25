@@ -41,8 +41,10 @@ import type {
  * - A message addressed to an id that is not registered is held and delivered,
  *   with every other frame held for that id, when the peer registers. Frames
  *   still held about five seconds after the first was queued are dropped, and
- *   each sender is sent one `EXPIRE` whose `src` is the absent id. The dialer
- *   in `weriftPeer.ts` offers again on that `EXPIRE`.
+ *   each of their senders is sent one `EXPIRE` whose `src` is the absent id. A
+ *   frame refused past one of the broker's hold bounds is not held and draws
+ *   its own `EXPIRE` at once. The dialer in `weriftPeer.ts` offers again on an
+ *   `EXPIRE`, no more than once per minimum interval.
  * - A registered socket that sends nothing is closed by the broker's reaper
  *   about twenty seconds in; any traffic, heartbeat or not, resets that. Hence
  *   {@link BROKER_HEARTBEAT_INTERVAL_MS}, which is also the cadence the web

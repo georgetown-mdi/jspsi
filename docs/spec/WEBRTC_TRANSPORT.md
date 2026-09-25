@@ -33,7 +33,7 @@ The two parties take fixed, asymmetric roles, named by `connection.role`:
 
 | `role` | Rendezvous | Handshake role |
 | ------ | ---------- | -------------- |
-| `acceptor` | Dials: creates the data channel, sends the `OFFER`, and offers again on each `EXPIRE` until answered | `initiator` |
+| `acceptor` | Dials: creates the data channel, sends the `OFFER`, and offers again on an `EXPIRE` until answered | `initiator` |
 | `inviter` | Listens: waits for an `OFFER`, answers it, and takes the channel the remote created | `responder` |
 
 Each party registers with the broker under the id its own role derives and
@@ -168,10 +168,13 @@ offer delivered to a partner whose socket then drops before it answers is lost
 with no `EXPIRE`.
 
 - The CLI acceptor sends its `OFFER` once, and sends it again, with the
-  candidates already sent, each time an `EXPIRE` arrives before it is answered,
-  or once the unreported-offer re-send budget (table below) passes with neither
-  an `EXPIRE` nor an answer, for an offer lost unreported. It never repeats an
-  offer the broker may still hold: PeerJS 1.5.5, given a second `OFFER` for a
+  candidates already sent, when an `EXPIRE` arrives before it is answered, or
+  once the unreported-offer re-send budget (table below) passes with neither
+  an `EXPIRE` nor an answer, for an offer lost unreported. An `EXPIRE` sends
+  the offer again no sooner than the minimum offer re-send interval (table
+  below) after the last send: every `EXPIRE` arriving inside that interval is
+  answered by one send, with its candidates, when the interval ends. It never
+  repeats an offer the broker may still hold: PeerJS 1.5.5, given a second `OFFER` for a
   `connectionId` it already holds, closes that connection -- emitting no
   `close` while it is not yet open -- and builds a new one. A browser
   inviter's app has already taken the first, so the data channel would open on
@@ -580,6 +583,7 @@ condition holds.
 | ------ | ------- | -------------- |
 | Broker registration | 30 s | Opening the signaling socket and receiving `OPEN` |
 | Rendezvous | 10 min | Both parties finding each other; human-timescale, because one operator may start well before the other |
+| Minimum offer re-send interval | 10 s | The least time between two sends of the CLI acceptor's offer on an `EXPIRE`; above the broker's 5 to 6 s hold, so a copy sent on an `EXPIRE` is never held beside the one before it |
 | Unreported offer re-send | 30 s | How long the CLI acceptor waits after sending its offer for an answer or an `EXPIRE` before sending it again; far above the broker's 5 to 6 s report of an undelivered frame, so the copy it replaces is no longer held |
 | Relay credential renewal | 30 min | How long a CLI run presenting a minted TURN credential waits for the partner's session description before it rebuilds the peer connection with a new one; half the credential's one-hour lifetime |
 | Renewal overlap | 15 s | How long a connection replaced by a relay-credential renewal, or by an inviter following a new offer, stays open and answerable; above the broker's roughly 5 s hold of frames for a late registrant |
