@@ -15,6 +15,11 @@ export interface IRealm {
 
   removeClientById(id: string): boolean;
 
+  /** Remove `client`'s registration only if the realm still maps its id to
+   * that same client, so a stale holder of an id never removes the client that
+   * registered it since. */
+  removeClient(client: IClient): boolean;
+
   getMessageQueueById(id: string): IMessageQueue | undefined;
 
   addMessageToQueue(id: string, message: IMessage): void;
@@ -84,6 +89,12 @@ export class Realm implements IRealm {
     this.clients.delete(id);
 
     return true;
+  }
+
+  public removeClient(client: IClient): boolean {
+    if (this.clients.get(client.getId()) !== client) return false;
+
+    return this.clients.delete(client.getId());
   }
 
   public getMessageQueueById(id: string): IMessageQueue | undefined {

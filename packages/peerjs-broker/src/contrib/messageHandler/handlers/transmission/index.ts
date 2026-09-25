@@ -1,7 +1,19 @@
+import { Buffer } from "node:buffer";
+
 import { MessageType } from "../../../enums.ts";
 import type { IClient } from "../../../models/client.ts";
 import type { IMessage } from "../../../models/message.ts";
 import type { IRealm } from "../../../models/realm.ts";
+
+// Bound on the bytes the relay leaves queued toward one destination socket
+// that has not yet taken them. A destination that stops reading is dropped
+// once a relayed frame would take its socket's `bufferedAmount` past this: its
+// socket is terminated, its registration removed, and the sender told it left.
+// One inbound frame is at most MAX_SIGNALING_PAYLOAD_BYTES, and decoding it can
+// triple its size (an invalid UTF-8 byte becomes a three-byte U+FFFD), so 1 MiB
+// holds any single relayed frame on an idle socket. See
+// docs/spec/CHANNEL_SECURITY.md.
+export const MAX_RELAY_BUFFERED_BYTES = 1024 * 1024;
 
 export const TransmissionHandler = ({
   realm,
@@ -15,27 +27,31 @@ export const TransmissionHandler = ({
 
     const destinationClient = realm.getClientById(dstId);
 
-    // User is connected!
     if (destinationClient) {
       const socket = destinationClient.getSocket();
+      let delivered = false;
       try {
         if (socket) {
           const data = JSON.stringify(message);
 
-          socket.send(data);
-        } else {
-          // Neither socket no res available. Peer dead?
-          throw new Error("Peer dead");
+          if (
+            socket.bufferedAmount + Buffer.byteLength(data, "utf8") <=
+            MAX_RELAY_BUFFERED_BYTES
+          ) {
+            socket.send(data);
+            delivered = true;
+          }
         }
-      } catch (e) {
-        // This happens when a peer disconnects without closing connections and
-        // the associated WebSocket has not closed.
-        // Tell other side to stop trying.
-        if (socket) {
-          socket.close();
-        } else {
-          realm.removeClientById(destinationClient.getId());
-        }
+      } catch {
+        delivered = false;
+      }
+
+      if (!delivered) {
+        // The destination has no socket, cannot take a send, or has stopped
+        // reading. Terminate rather than close: a peer that is not reading will
+        // not answer a close frame either.
+        socket?.terminate();
+        realm.removeClient(destinationClient);
 
         handle(client, {
           type: MessageType.LEAVE,
