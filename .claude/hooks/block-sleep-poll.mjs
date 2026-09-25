@@ -29,10 +29,10 @@
 // - An unbounded background command: a `run_in_background` call must open with
 //   `timeout <N>` (or `gtimeout <N>`, the name Homebrew's coreutils installs it
 //   under), N not zero -- GNU `timeout 0` disables the limit, measured against
-//   coreutils 9.1 -- and hold no later `;`, `&&`, `||`, or newline outside
-//   quotes, since a command after one of those runs outside the bound. The
-//   Bash tool's own timeout does not apply to a background run, so the wrapper
-//   is its only bound. Any non-zero N is accepted: the rule is that the run
+//   coreutils 9.1 -- and hold no later `;`, `&&`, `||`, lone `&`, or newline
+//   outside quotes, since a command after one of those runs outside the
+//   bound. The Bash tool's own timeout does not apply to a background run, so
+//   the wrapper is its only bound. Any non-zero N is accepted: the rule is that the run
 //   ends, and a background run is used precisely for work longer than the
 //   foreground ceiling, so a hook-enforced cap would be a number with nothing
 //   behind it. A host with no `timeout` on PATH (macOS without coreutils) can
@@ -142,8 +142,9 @@ function opensWithTimeout(command) {
   return i + 1 < words.length;
 }
 
-// True when a `;`, `&&`, `||`, or newline stands outside quotes, where the
-// command after it runs as a separate list element.
+// True when a `;`, `&&`, `||`, lone `&`, or newline stands outside quotes,
+// where the command after it runs as a separate list element. An `&` inside a
+// redirection (`2>&1`, `&>`, `>&`) or a `|&` pipe is not a separator.
 function hasTopLevelListSeparator(command) {
   let quote = null;
   for (let i = 0; i < command.length; i += 1) {
@@ -167,6 +168,13 @@ function hasTopLevelListSeparator(command) {
     if (char === ";" || char === "\n") return true;
     const pair = command.slice(i, i + 2);
     if (pair === "&&" || pair === "||") return true;
+    if (char === "&") {
+      const before = command[i - 1];
+      const after = command[i + 1];
+      const inRedirection =
+        before === ">" || before === "<" || before === "|" || after === ">";
+      if (!inRedirection) return true;
+    }
   }
   return false;
 }
@@ -193,7 +201,7 @@ function blockUnboundedBackground() {
   process.stderr.write(
     "Blocked by block-sleep-poll hook: a run_in_background command has no timeout " +
       "of its own, so it must open with `timeout <N>` (N not zero) and hold no " +
-      "later `;`, `&&`, `||`, or newline outside quotes.\n" +
+      "later `;`, `&&`, `||`, lone `&`, or newline outside quotes.\n" +
       "Wrap the whole command -- `timeout 900 npm run lint`, or " +
       "`timeout 900 sh -c 'cd apps/web && npm test'` -- or, where no `timeout` " +
       "is on PATH, run it in the foreground with a raised timeout.\n",
@@ -206,8 +214,9 @@ function blockNakedSleep(seconds) {
     `Blocked by block-sleep-poll hook: this call is a bare ${seconds}-second sleep, ` +
       "which polls rather than waits -- every poll re-bills this session's whole context.\n" +
       "Wait one of the three ways that cost nothing while they wait: run the command in " +
-      "the foreground and let the tool wait for it; start it with run_in_background and " +
-      "wait for the completion notification; or loop on the condition itself inside one " +
+      "the foreground and let the tool wait for it; start it with run_in_background, " +
+      "opening with `timeout <N>` (N not zero), and wait for the completion notification; " +
+      "or loop on the condition itself inside one " +
       "bounded call (`timeout 600 sh -c 'until <test>; do sleep 2; done'`).\n",
   );
   process.exit(2);

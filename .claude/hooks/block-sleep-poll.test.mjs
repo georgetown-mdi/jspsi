@@ -75,6 +75,13 @@ describe("block-sleep-poll hook", () => {
     ]);
   });
 
+  it("names the timeout wrapper a background wait needs", () => {
+    const { status, stderr } = background("sleep 800");
+    expect(status).toBe(2);
+    expect(stderr).toContain("800-second sleep");
+    expect(stderr).toContain("run_in_background, opening with `timeout <N>`");
+  });
+
   it("names the duration it refused", () => {
     expect(verdict("sleep 1m").stderr).toContain("60-second sleep");
   });
@@ -146,6 +153,8 @@ describe("block-sleep-poll hook", () => {
       "timeout 600 npm run build; npm run dev",
       "timeout 600 npm run build || npm run dev",
       "timeout 600 npm run build\nnpm run dev",
+      "timeout 5 true & sleep 999",
+      "timeout 5 true &",
       "env timeout 600 npm run lint",
     ];
     for (const command of refused) {
@@ -167,6 +176,11 @@ describe("block-sleep-poll hook", () => {
       "timeout 900 sh -c 'cd apps/web && npm test; echo done'",
       'timeout 900 bash -c "npm run build && npm test"',
       "timeout 600 sh -c 'until curl -sf localhost:3000; do sleep 2; done'",
+      "timeout 5 sh -c 'a && b'",
+      "timeout 900 sh -c 'npm run dev & npm test'",
+      "timeout 900 npm test &> /tmp/test.log",
+      "timeout 900 npm test >& /tmp/test.log",
+      "timeout 900 npm test |& tee /tmp/test.log",
     ]) {
       expect(background(command).status, command).toBe(0);
     }
