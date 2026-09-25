@@ -82,8 +82,8 @@ function keyFileIsMountPoint(keyFilePath: string): boolean {
  * error strings -- when:
  *
  * - `keyFilePath` is missing or whitespace-only;
- * - the path, or the temp name the write creates beside it, is too long;
  * - the path already exists but is a directory or other non-regular node;
+ * - the path, or the temp name the write creates beside it, is too long;
  * - the parent exists but is not a directory, or cannot be created, written,
  *   or (on POSIX) read;
  * - on Linux, the key file is a mount point of its own.
@@ -136,16 +136,6 @@ export function preflightKeyFilePath(
     )
       throw err;
   }
-  // The write's first act is on `<name>.tmp.<pid>`, a longer final component
-  // than the key path's own, so a name within a few bytes of the limit passes
-  // the lstat above and fails there after the secret rotated.
-  const tempPath = ownerOnlyTempPath(kfp);
-  try {
-    fs.lstatSync(tempPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENAMETOOLONG")
-      throw nameTooLongError(kfp, tempPath);
-  }
   // The directory/special-node rejection runs outside the try because it
   // applies only when lstat SUCCEEDED and returned a stat (a non-file, non-
   // symlink node); gating it on targetStat being set keeps the "lstat threw"
@@ -161,6 +151,16 @@ export function preflightKeyFilePath(
         }). Remove or rename it before running the exchange; ` +
         `${FAILS_AFTER_KEY_EXCHANGE}.`,
     );
+  // The write's first act is on `<name>.tmp.<pid>`, a longer final component
+  // than the key path's own, so a name within a few bytes of the limit passes
+  // the lstat above and fails there after the secret rotated.
+  const tempPath = ownerOnlyTempPath(kfp);
+  try {
+    fs.lstatSync(tempPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENAMETOOLONG")
+      throw nameTooLongError(kfp, tempPath);
+  }
   // Pre-validate the parent: create it if missing (mirroring saveKeyFile's
   // `mkdirSync({ recursive: true })`) and confirm it is a directory, so
   // saveKeyFile cannot fail here after the handshake (see the JSDoc above).

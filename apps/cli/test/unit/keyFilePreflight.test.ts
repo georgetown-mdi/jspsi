@@ -380,6 +380,19 @@ test.skipIf(process.platform === "win32")(
 );
 
 test.skipIf(process.platform === "win32")(
+  "rejects an existing directory as not a regular file before its temp sibling's length",
+  () => {
+    const { log } = makeLogger();
+    const leaf = "d".repeat(256 - ".tmp.".length - String(process.pid).length);
+    const keyAsDir = path.join(dir, leaf);
+    fs.mkdirSync(keyAsDir);
+    expect(() => preflightKeyFilePath(keyAsDir, log)).toThrow(
+      "not a regular file",
+    );
+  },
+);
+
+test.skipIf(process.platform === "win32")(
   "every portable rejection states the remedy and the post-exchange failure",
   () => {
     const { log } = makeLogger();
