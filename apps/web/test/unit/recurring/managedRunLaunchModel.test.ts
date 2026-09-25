@@ -1428,6 +1428,59 @@ describe("a rotation in flight across a crash", () => {
     expect(failure.recovery).toBe("confirm");
   });
 
+  test("a no-show beside a standing auth condition keeps the confirm-first reading", () => {
+    const authFailure = failed("auth");
+    const standing = {
+      lastRun: authFailure,
+      rotationInFlightSince: MARKED_AT,
+      standingCondition: { since: authFailure.at, kind: "auth" as const },
+    };
+    const afterNoShow = record({
+      ...standing,
+      lastRun: { at: "2026-07-14T11:00:00.000Z", outcome: "missed" },
+    });
+    const live = withCopy(
+      classifyManagedRunFailure(
+        new PartnerNoShowError("timed out waiting for the other party"),
+        { atLaunch: record(standing), afterRun: afterNoShow },
+        undefined,
+        NOW,
+        false,
+      ),
+    );
+    expect(live.kind).toBe("missed");
+    const nextVisit = withCopy(
+      managedRunFailureFromRecord(afterNoShow, undefined, NOW),
+    );
+    expect(nextVisit.kind).toBe("unexplained");
+    expect(nextVisit.recovery).toBe("confirm");
+  });
+
+  test("a marker older than a recorded outcome that supersedes it is not the partial-rotation state", () => {
+    const failure = classifyAgainstOneRecord(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record({ lastRun: failed("auth"), rotationInFlightSince: MARKED_AT }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("missed");
+  });
+
+  test("a marker older than a dropped connection still reads as the partial-rotation state", () => {
+    const failure = classifyAgainstOneRecord(
+      new PartnerNoShowError("timed out waiting for the other party"),
+      record({
+        lastRun: failed("transport"),
+        rotationInFlightSince: MARKED_AT,
+      }),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("partial-rotation");
+  });
+
   test("the next visit reads a recorded no-show after the marker as the partial-rotation state", () => {
     const failure = withCopy(
       managedRunFailureFromRecord(

@@ -1890,6 +1890,58 @@ describe("the rotation-in-flight marker", () => {
     expect(stamped.rotationInFlightSince).toBe(MARKED_AT);
   });
 
+  test("a failed-closed handshake's bookkeeping removes it with the condition it raises", () => {
+    const marked = applyManagedExchangeRotationInFlight(
+      runnableRecord(),
+      MARKED_AT,
+    );
+    const stamped = applyManagedExchangeLastRun(
+      marked,
+      {
+        at: "2026-07-14T09:00:00.000Z",
+        outcome: "failed",
+        failureKind: "auth",
+      },
+      Date.parse("2026-07-14T08:00:00.000Z"),
+    );
+    expect(stamped).not.toHaveProperty("rotationInFlightSince");
+    expect(stamped.standingCondition.kind).toBe("auth");
+  });
+
+  test("a dropped connection's bookkeeping leaves it standing", () => {
+    const marked = applyManagedExchangeRotationInFlight(
+      runnableRecord(),
+      MARKED_AT,
+    );
+    const stamped = applyManagedExchangeLastRun(
+      marked,
+      {
+        at: "2026-07-14T09:00:00.000Z",
+        outcome: "failed",
+        failureKind: "transport",
+      },
+      Date.parse("2026-07-14T08:00:00.000Z"),
+    );
+    expect(stamped.rotationInFlightSince).toBe(MARKED_AT);
+  });
+
+  test("a failure stamped before a later run's marker leaves that marker", () => {
+    const marked = applyManagedExchangeRotationInFlight(
+      runnableRecord(),
+      "2026-07-14T10:00:00.000Z",
+    );
+    const stamped = applyManagedExchangeLastRun(
+      marked,
+      {
+        at: "2026-07-14T09:00:00.000Z",
+        outcome: "failed",
+        failureKind: "auth",
+      },
+      Date.parse("2026-07-14T08:00:00.000Z"),
+    );
+    expect(stamped.rotationInFlightSince).toBe("2026-07-14T10:00:00.000Z");
+  });
+
   test("a configuration-only record cannot hold one", () => {
     const configurationOnly = buildManagedExchangeRecord({
       label: "Riverbend quarterly",

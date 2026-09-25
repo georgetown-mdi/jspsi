@@ -31,6 +31,7 @@ import {
 import {
   deriveManagedFailureTier,
   importedSinceLastSuccess,
+  rotationInFlightUnansweredAtLaunch,
 } from "@psi/managed/managedFailureTiers";
 import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
 
@@ -535,7 +536,10 @@ const MISSED_OUTRANKED_BY: ReadonlyArray<ManagedFailureTier> = [
  * marker alone does not.
  *
  * A rotation-in-flight marker on the launch record is read the same way: this
- * run found a key exchange that never saved its rotation, and met no partner. */
+ * run found a key exchange that never saved its rotation, and met no partner.
+ * It is read only while no standing condition is raised and no outcome since
+ * supersedes it ({@link rotationInFlightUnansweredAtLaunch}), so a failed-closed
+ * handshake keeps its confirm-first reading. */
 function missedFailure(
   atLaunch: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
@@ -545,7 +549,7 @@ function missedFailure(
   if (MISSED_OUTRANKED_BY.includes(tier))
     return managedRunTierFailure(tier, atLaunch);
   if (importedSinceLastSuccess(local)) return IMPORTED_FAILURE;
-  if (atLaunch.rotationInFlightSince !== undefined)
+  if (rotationInFlightUnansweredAtLaunch(atLaunch))
     return PARTIAL_ROTATION_FAILURE;
   return MISSED_FAILURE;
 }

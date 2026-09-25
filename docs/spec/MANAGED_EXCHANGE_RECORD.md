@@ -1283,14 +1283,19 @@ holds exactly one live `sharedSecret`, and no previous secret is kept.
   run before the key exchange, with nothing rotated.
 - **Removed** by the rotation write that stores the rotated secret -- the run's
   own and a re-invite's -- in the same transaction, and by a take-back that
-  replaces the secret. A run's bookkeeping write does not touch it, so a failed
-  or cut key exchange leaves it standing, as does every no-show after it.
+  replaces the secret. A recorded outcome supersedes it: the bookkeeping write
+  that records a key exchange reaching a verdict at or after the marker -- a
+  success, a failed-closed handshake, or a rotation not saved, the last two
+  with the standing condition they raise -- removes it in the same write
+  (`applyManagedExchangeLastRun`), while a cut run, a dropped connection, a
+  refusal before connecting, and every no-show leave it standing.
 - **Read** as the `"partial-rotation"` failure tier
   (`apps/web/src/psi/managed/managedFailureTiers.ts`) only where a no-show is
   the record's last run, the marker predates that run, and no standing
   condition is raised: the pattern a secret the partner saved and this device
   did not produces. A live no-show is read the same way against the record as
-  it stood at launch. The tier is Tier 1, recovered by re-invite with no attack
+  it stood at launch, where no standing condition is raised and no outcome
+  recorded since the marker supersedes it. The tier is Tier 1, recovered by re-invite with no attack
   checklist. It never displaces a standing condition, and a failed-closed
   handshake beside a marker stays the unexplained tier: the marker is evidence
   for the benign reading only alongside the no-shows it predicts.

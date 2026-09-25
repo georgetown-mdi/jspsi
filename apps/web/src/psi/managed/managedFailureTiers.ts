@@ -14,8 +14,11 @@
  * tier.
  */
 
+import {
+  answersRotationInFlight,
+  raisedStandingCondition,
+} from "./managedExchangeRecord";
 import { managedExchangeLapsed } from "./managedExpiry";
-import { raisedStandingCondition } from "./managedExchangeRecord";
 
 import type {
   ManagedExchangeRecord,
@@ -122,6 +125,24 @@ export function rotationInFlightBeforeLastRun(
   const lastRun = record.lastRun;
   if (since === undefined || lastRun === undefined) return false;
   return Date.parse(since) < Date.parse(lastRun.at);
+}
+
+/**
+ * Whether a run launched on `atLaunch` that met no partner reads as the
+ * partial-rotation state: a rotation-in-flight marker stands, no standing
+ * condition is raised, and no outcome recorded since the marker supersedes it
+ * ({@link answersRotationInFlight}). The launch record precedes this run's own
+ * stamp, so a marker with no later outcome is the interrupted run's; a later
+ * no-show is read through {@link rotationInFlightBeforeLastRun} instead.
+ */
+export function rotationInFlightUnansweredAtLaunch(
+  atLaunch: ManagedExchangeRecord,
+): boolean {
+  const since = atLaunch.rotationInFlightSince;
+  if (since === undefined) return false;
+  if (raisedStandingCondition(atLaunch) !== undefined) return false;
+  const lastRun = atLaunch.lastRun;
+  return lastRun === undefined || !answersRotationInFlight(lastRun, since);
 }
 
 /** A record's failure tier and where the evidence for it came from: the run

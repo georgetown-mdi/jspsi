@@ -1377,8 +1377,9 @@ or killed between the handshake and that write leaves the marker behind -- the
 one-sided rotation the persist-before-success ordering cannot rule out. A
 no-show after it reads as a probable partial rotation, with the re-invite
 recovery and no attack checklist. The marker counts only beside the no-shows it
-predicts: a handshake that failed closed stays the unexplained state whatever the
-marker says, and a standing condition keeps its own reading. Its fields and
+predicts: a handshake that failed closed stays the unexplained state, and the
+write recording it removes the marker; a standing condition keeps its own
+reading. Its fields and
 write order are in [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md#the-rotation-in-flight-marker).
 
 That outranking belongs to the run that meets the no-show, and it weighs the

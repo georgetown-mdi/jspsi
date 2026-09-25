@@ -1131,7 +1131,10 @@ export function applyManagedExchangeLastRun(
   runStartedAtMs: number,
   nowMs: number = Date.now(),
 ): ManagedExchangeRecord {
-  const raised = withStandingCondition(record, standingConditionFrom(lastRun));
+  const raised = withoutAnsweredRotationInFlight(
+    withStandingCondition(record, standingConditionFrom(lastRun)),
+    lastRun,
+  );
   const stored = lastRunNotAfter(record.lastRun, nowMs);
   if (stored !== undefined && Date.parse(stored.at) > Date.parse(lastRun.at))
     return parseManagedExchangeRecord(raised);
@@ -1153,6 +1156,38 @@ function lastRunNotAfter(
   return stored !== undefined && Date.parse(stored.at) > nowMs
     ? undefined
     : stored;
+}
+
+/** Whether `lastRun` records an outcome that supersedes a rotation-in-flight
+ * marker set at `since`: a key exchange that reached a verdict at or after the
+ * marker -- it succeeded, failed closed, or could not save its rotation. A
+ * no-show, a dropped connection, or a refusal before connecting says nothing
+ * about the secret the partner holds, and leaves the marker standing. */
+export function answersRotationInFlight(
+  lastRun: ManagedExchangeLastRun,
+  since: string,
+): boolean {
+  if (Date.parse(lastRun.at) < Date.parse(since)) return false;
+  return (
+    lastRun.outcome === "succeeded" ||
+    standingConditionFrom(lastRun) !== undefined
+  );
+}
+
+/** `record` with its rotation-in-flight marker removed where `lastRun`
+ * supersedes it ({@link answersRotationInFlight}), removed whether or not the
+ * entry itself lands, as the condition it raises is. A marker set after the
+ * entry's stamp belongs to a later run and stays. */
+function withoutAnsweredRotationInFlight(
+  record: ManagedExchangeRecord,
+  lastRun: ManagedExchangeLastRun,
+): ManagedExchangeRecord {
+  const since = record.rotationInFlightSince;
+  if (since === undefined || !answersRotationInFlight(lastRun, since))
+    return record;
+  const next: ManagedExchangeRecord = { ...record };
+  delete next.rotationInFlightSince;
+  return next;
 }
 
 /** The standing condition a `lastRun` entry raises, or `undefined` for an entry
