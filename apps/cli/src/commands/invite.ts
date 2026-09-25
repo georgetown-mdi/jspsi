@@ -486,7 +486,7 @@ export async function validateInvite(params: {
    * writes its result with; recorded in the configuration this command writes
    * so the recurring exchange it governs needs no flag. */
   csvDelimiter?: string;
-  /** The relay `--turn` / `--stun` name, applied on a ws:// or wss:// URL. */
+  /** The relay `--turn` / `--stun` name, applied on a webrtc URL (http://, https://, ws://, or wss://). */
   ownRelay?: InviterOwnRelay;
   log: ReturnType<typeof getLogger>;
 }): Promise<InviteReady> {
