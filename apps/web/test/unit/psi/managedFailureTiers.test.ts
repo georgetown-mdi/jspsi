@@ -1,6 +1,8 @@
 import {
   ConnectionError,
   LinkageTermsUnsatisfiableError,
+  WebRtcFrameLimitError,
+  assertFirstRoundFitsWebRtcFrame,
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
@@ -17,13 +19,21 @@ import {
   managedInputFailureKind,
 } from "@psi/managed/managedInputGuard";
 import {
+  classifyManagedRunFailure,
+  managedRunFailureFromRecord,
+  managedRunRetryable,
+} from "@recurring/managedRunLaunchModel";
+import {
   deriveManagedFailureTier,
   importedSinceLastSuccess,
   managedStandingConditionTier,
   readManagedFailure,
 } from "@psi/managed/managedFailureTiers";
+import {
+  remapLapsedRunFailure,
+  rerunFailureLastRun,
+} from "@psi/managed/managedRun";
 import { prepareManagedRerunExchange } from "@psi/managed/managedPreparedExchange";
-import { rerunFailureLastRun } from "@psi/managed/managedRun";
 
 import type {
   ManagedExchangeLastRun,
@@ -560,5 +570,123 @@ describe("managedStandingConditionTier", () => {
     expect(
       managedStandingConditionTier({ since: RAISED_AT, kind: "auth" }, {}),
     ).toBe("unexplained");
+  });
+});
+
+describe("the too-large tier: a set over the bound one WebRTC message holds", () => {
+  // The refusal an unattended run meets when its input is too large to send
+  // over WebRTC. Reconnecting sends the same set, so it tiers apart from the
+  // retryable transport drop, and its copy names splitting the input.
+  const columns = ["ssn", "ssn4", "first_name", "last_name", "date_of_birth"];
+  const rows: Array<CSVRow> = [
+    {
+      ssn: "123-45-6789",
+      ssn4: "6789",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      date_of_birth: "12/10/1815",
+    },
+    {
+      ssn: "987-65-4321",
+      ssn4: "4321",
+      first_name: "Alan",
+      last_name: "Turing",
+      date_of_birth: "06/23/1912",
+    },
+  ];
+
+  /** The first-round check's real refusal, at a bound two values cross. */
+  function firstRoundRefusal(): unknown {
+    const prepared = prepareManagedRerunExchange(
+      record().exchangeFile,
+      rows,
+      columns,
+    );
+    try {
+      assertFirstRoundFitsWebRtcFrame(prepared, 1);
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  }
+
+  const roundRefusal = new WebRtcFrameLimitError(
+    "The set this party sends for this linkage key is 300.1 MiB, over the " +
+      "256 MiB one WebRTC message can hold, so the exchange stopped before " +
+      "sending it and told your partner.",
+    "local",
+  );
+
+  test("the first-round refusal and a round's refusal both record too-large", () => {
+    const beforeConnecting = firstRoundRefusal();
+    expect(beforeConnecting).toBeInstanceOf(WebRtcFrameLimitError);
+    const at = Date.parse(RUN_AT);
+    for (const [error, dataExchangeStarted] of [
+      [beforeConnecting, false],
+      [roundRefusal, true],
+    ] as const) {
+      const lastRun = rerunFailureLastRun(
+        error,
+        at,
+        false,
+        dataExchangeStarted,
+      );
+      expect(lastRun).toEqual({
+        at: RUN_AT,
+        outcome: "failed",
+        failureKind: "too-large",
+      });
+      expect(
+        deriveManagedFailureTier(record({ lastRun }), undefined, NOW),
+      ).toBe("too-large");
+    }
+  });
+
+  test("a lapsed bound does not turn the refusal into an expiry", () => {
+    expect(
+      remapLapsedRunFailure(
+        roundRefusal,
+        { expires: "2026-07-01T00:00:00.000Z" },
+        NOW,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("the next visit states the bound and the remedy, and offers no retry", () => {
+    const failure = managedRunFailureFromRecord(
+      record({ lastRun: failed("too-large") }),
+      undefined,
+      NOW,
+    );
+    expect(failure?.kind).toBe("too-large");
+    if (failure === undefined || failure.kind === "handed-off")
+      throw new Error("expected the too-large alert");
+    expect(failure.message).toContain("256 MiB one WebRTC message can hold");
+    expect(failure.message).toContain("Split the input into smaller files");
+    expect(failure.message).not.toMatch(/nothing left this device/i);
+    expect(failure.recovery).toBe("split");
+    expect(managedRunRetryable(failure)).toBe(false);
+  });
+
+  test("a live launch shows the refusal's own message, on either side of the boundary", () => {
+    for (const [error, dataExchangeStarted] of [
+      [firstRoundRefusal(), false],
+      [roundRefusal, true],
+    ] as const) {
+      const stamped = record({ lastRun: failed("too-large") });
+      const failure = classifyManagedRunFailure(
+        error,
+        { atLaunch: record(), afterRun: stamped },
+        undefined,
+        NOW,
+        dataExchangeStarted,
+      );
+      if (failure.kind === "handed-off")
+        throw new Error("expected the too-large alert");
+      expect(failure.kind).toBe("too-large");
+      expect(failure.message).toBe((error as Error).message);
+      expect(failure.reportedCause).toBeUndefined();
+      expect(managedRunRetryable(failure)).toBe(false);
+    }
   });
 });

@@ -43,6 +43,10 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   what this run would send is not the set the exchange recorded agreeing to send
  *   (recovery: re-confirm the disclosure; never a retry, since the same input refuses
  *   identically at the next window).
+ * - `"too-large"` -- the last run refused to send a set over the bound one WebRTC
+ *   message holds, before connecting or at a round (recovery: split the input
+ *   into smaller exchanges; never a retry, since the same files refuse
+ *   identically at the next window).
  * - `"handed-off"` -- the last run met a copy an export had handed off and refused
  *   before reading the input or connecting (recovery: none here; the exchange runs
  *   wherever the hand-off took it, and every later run on this device refuses the
@@ -72,6 +76,7 @@ export type ManagedFailureTier =
   | "input"
   | "terms-shortfall"
   | "consent"
+  | "too-large"
   | "handed-off"
   | "custody-unreadable"
   | "missed"
@@ -218,6 +223,9 @@ function recordedFailureTier(
   // out of the retryable transport bucket -- its remedy is re-confirming what this
   // exchange sends, which no amount of reconnecting supplies.
   if (lastRun.failureKind === "consent") return "consent";
+  // A recorded refusal of a set too large for one WebRTC message: benign, and
+  // held out of the transport bucket because reconnecting sends the same set.
+  if (lastRun.failureKind === "too-large") return "too-large";
   // A recorded hand-off refusal: the copy this device held was given away, so the
   // failure is the single-owner invariant holding rather than anything to recover
   // from here -- and nothing about it is a desync or an attack.

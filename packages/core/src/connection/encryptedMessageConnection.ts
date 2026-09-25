@@ -39,6 +39,11 @@ const TYPE_BINARY = 1;
 /** @internal */
 export const IV_SEQ_OFFSET = 4;
 
+// Bytes send() adds to a payload: the version byte, the 12-byte IV, the type
+// tag inside the ciphertext, and the 16-byte GCM tag.
+/** @internal */
+export const AEAD_ENVELOPE_OVERHEAD_BYTES = 1 + 12 + 1 + 16;
+
 /**
  * Wraps any {@link MessageConnection} and transparently encrypts all outbound
  * messages and decrypts all inbound messages using AES-256-GCM. This is a
@@ -566,5 +571,18 @@ export class EncryptedMessageConnection implements MessageConnection {
   // tightening the static check here would add nothing.
   setInboundFrameCap(maxBytes: number | undefined): void {
     this.inner.setInboundFrameCap?.(maxBytes);
+  }
+
+  outboundWebRtcFrameBound(): number | undefined {
+    return this.inner.outboundWebRtcFrameBound?.();
+  }
+
+  // The envelope is added before the inner transport packs and chunks the
+  // frame, so it is charged once per frame, not per chunk.
+  outboundFrameOverheadBytes(): number {
+    return (
+      AEAD_ENVELOPE_OVERHEAD_BYTES +
+      (this.inner.outboundFrameOverheadBytes?.() ?? 0)
+    );
   }
 }

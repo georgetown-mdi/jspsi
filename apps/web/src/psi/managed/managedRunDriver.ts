@@ -27,6 +27,7 @@
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
+  assertFirstRoundFitsWebRtcFrame,
   describeResolvedRunShape,
   exchangeRecordFromFailure,
   exchangeRecordOwedButUnbuilt,
@@ -241,6 +242,7 @@ export function runManagedExchangeInBrowser(
           acquired.rows,
           acquired.columns,
         );
+        assertFirstRoundFitsWebRtcFrame(prepared);
         return { prepared };
       },
       // Inside the lock: open the side-dispatched rendezvous, authenticate the

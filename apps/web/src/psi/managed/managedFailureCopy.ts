@@ -19,6 +19,8 @@
  * advances or anticipates a write the runner has not made.
  */
 
+import { MAX_WEBRTC_FRAME_BYTES } from "@alcove/core";
+
 import type { ManagedExchangeSchedule } from "./managedExchangeRecord";
 
 /**
@@ -77,6 +79,23 @@ export const TERMS_SHORTFALL_FAILURE_TITLE =
 /** The title over the benign disclosure-refusal failure tier. */
 export const CONSENT_FAILURE_TITLE =
   "What this run would send is not what this exchange agreed to send";
+
+/** The title over the benign too-large failure tier, read back from a record
+ * that does not say whose file it was. */
+export const TOO_LARGE_FAILURE_TITLE =
+  "A file in this exchange is too large for a browser exchange";
+
+/** The bound one WebRTC message holds, as the too-large copy states it. */
+export const WEBRTC_MESSAGE_BOUND_LABEL = `${(
+  MAX_WEBRTC_FRAME_BYTES /
+  (1024 * 1024)
+).toString()} MiB`;
+
+/** The too-large tier's remedy, in the words the next-visit alert and the
+ * between-visit notification both state it in. */
+export const TOO_LARGE_REMEDY =
+  "Split the input into smaller files and set up one exchange for each; if " +
+  "the set was your partner's, ask them to split theirs.";
 
 /** The title over the Tier-2 unexplained failure tier. */
 export const UNEXPLAINED_FAILURE_TITLE =

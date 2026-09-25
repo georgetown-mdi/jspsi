@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
+  assertFirstRoundFitsWebRtcFrame,
   deriveAcceptedLinkageTerms,
   getLogger,
   loadPsiBackend,
@@ -445,6 +446,7 @@ export function useAcceptorExchange({
         disclosedPayloadColumns: token.disclosedPayloadColumns,
         deduplicate,
       });
+      assertFirstRoundFitsWebRtcFrame(prepared);
       onStages(stagesFor(prepared, "acceptor"));
 
       // Fail fast: await the WASM library before dialing, so a WASM-load failure

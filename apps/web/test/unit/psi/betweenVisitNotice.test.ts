@@ -272,6 +272,7 @@ describe("betweenVisitNotice: the failures that need the operator", () => {
     { tier: "input", lastRun: failed("input") },
     { tier: "terms-shortfall", lastRun: failed("terms-shortfall") },
     { tier: "consent", lastRun: failed("consent") },
+    { tier: "too-large", lastRun: failed("too-large") },
     { tier: "unexplained", lastRun: failed("auth") },
   ];
 

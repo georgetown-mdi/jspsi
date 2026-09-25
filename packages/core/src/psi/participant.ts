@@ -20,6 +20,14 @@ import {
   assertPartnerIndices,
   assertPartnerIndexTable,
 } from "../utils/partnerIndices";
+import {
+  binaryPackByteStringLength,
+  builtSetTooLargeMessage,
+  webrtcFrameExceedsBound,
+  WEBRTC_FRAME_LIMIT_ABORT_REASON,
+} from "../connection/webrtcOutboundBound";
+import { WebRtcFrameLimitError } from "../errors";
+import { sendAbort } from "../protocolSetup";
 import { decodePsiBinaryFrame, receivePsiBinaryFrame } from "./psiBinaryFrame";
 import { InProcessPsiEngine, type PsiEngine } from "./psiEngine";
 import type { RoundGroupingField } from "./roundGrouping";
@@ -371,6 +379,33 @@ export class PSIParticipant {
     return declared;
   }
 
+  // Send one of the round's PSI set frames, refusing it first where the
+  // transport states a receive-side frame bound the frame would cross: the
+  // partner is parked on this frame, so it is sent the abort in its place and
+  // ends the round as a peer termination rather than on a frame it refuses.
+  // `setOwner` is whose set the frame holds -- the response returns the
+  // partner's own set re-encrypted -- which is whose input the remedy names.
+  private async sendPsiSetFrame(
+    conn: MessageConnection,
+    frame: Uint8Array,
+    setOwner: "local" | "partner",
+  ): Promise<void> {
+    const bound = conn.outboundWebRtcFrameBound?.();
+    if (bound !== undefined) {
+      const packedFrameBytes = binaryPackByteStringLength(
+        frame.byteLength + (conn.outboundFrameOverheadBytes?.() ?? 0),
+      );
+      if (webrtcFrameExceedsBound(packedFrameBytes, bound)) {
+        await sendAbort(conn, [WEBRTC_FRAME_LIMIT_ABORT_REASON]);
+        throw new WebRtcFrameLimitError(
+          builtSetTooLargeMessage(setOwner, packedFrameBytes, bound),
+          setOwner,
+        );
+      }
+    }
+    await conn.send(frame);
+  }
+
   // Report one crypto operation's element count and duration around the engine
   // call that runs it, for a caller rendering a progress display. The timing is
   // taken here, on the participant's own thread, rather than inside the engine:
@@ -567,7 +602,7 @@ export class PSIParticipant {
         `${this.id}: starting count-only protocol; sending server data ` +
           "encrypted by server",
       );
-      await conn.send(setup);
+      await this.sendPsiSetFrame(conn, setup, "local");
 
       this.log.debug(`${this.id}: waiting for client request`);
       const clientRequest = await receivePsiBinaryFrame(
@@ -580,7 +615,7 @@ export class PSIParticipant {
       this.log.debug(
         `${this.id}: sending client data encrypted by both server and client`,
       );
-      await conn.send(serverResponse);
+      await this.sendPsiSetFrame(conn, serverResponse, "partner");
 
       // The sender's round ends here: it holds no count, and whether one reaches it
       // at all is the entitlement question the caller answers (see protocolSetup's
@@ -599,7 +634,7 @@ export class PSIParticipant {
 
     const clientRequest = await this.createClientRequest(set);
     this.log.debug(`${this.id}: sending client data encrypted by client`);
-    await conn.send(clientRequest);
+    await this.sendPsiSetFrame(conn, clientRequest, "local");
 
     const serverResponse = await receivePsiBinaryFrame(
       conn,
@@ -632,7 +667,7 @@ export class PSIParticipant {
         `${this.id}: starting identify-intersection protocol; sending server ` +
           " data encrypted by server",
       );
-      await conn.send(setup);
+      await this.sendPsiSetFrame(conn, setup, "local");
 
       this.log.debug(`${this.id}: waiting for client request`);
 
@@ -649,7 +684,7 @@ export class PSIParticipant {
         `${this.id}: sending client data encrypted by both server and client`,
       );
 
-      await conn.send(serverResponse);
+      await this.sendPsiSetFrame(conn, serverResponse, "partner");
 
       // The partner sends [theirIndices, ourIndices]; the swapped names
       // restore our-first order. A third element is the partner's own grouping
@@ -725,7 +760,7 @@ export class PSIParticipant {
 
       this.log.debug(`${this.id}: sending client data encrypted by client`);
 
-      await conn.send(clientRequest);
+      await this.sendPsiSetFrame(conn, clientRequest, "local");
 
       const serverResponse = await receivePsiBinaryFrame(
         conn,

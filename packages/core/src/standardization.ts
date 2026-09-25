@@ -3515,23 +3515,30 @@ export class StandardizedKeyIterable {
   private readonly dataset: StandardizedDataset;
   private readonly isReceiver: boolean;
   private readonly keyIndex: number | undefined;
+  private readonly reportRows: boolean;
   // Read at the first row rather than in the constructor, so an element
   // transform that does not compile refuses from the row read rather than from
   // the construction of the round's iterables.
   private plan: KeyReadPlan | undefined;
 
+  /**
+   * @param reportRows - Whether the rows this round drops or finds wide are
+   *   reported; false for a read that only sizes the round ahead of it.
+   */
   constructor(
     key: LinkageKey,
     dataset: StandardizedDataset,
     rowCount: number,
     isReceiver = false,
     keyIndex?: number,
+    reportRows = true,
   ) {
     this.key = key;
     this.dataset = dataset;
     this.length = rowCount;
     this.isReceiver = isReceiver;
     this.keyIndex = keyIndex;
+    this.reportRows = reportRows;
 
     return new Proxy(this, {
       get: (target, prop, receiver) => {
@@ -3546,12 +3553,20 @@ export class StandardizedKeyIterable {
   }
 
   private valueAt(index: number): KeyCandidates {
-    this.plan ??= planKeyRead(
-      this.key,
-      this.dataset,
-      this.isReceiver,
-      this.keyIndex,
-    );
+    if (this.plan === undefined) {
+      this.plan = planKeyRead(
+        this.key,
+        this.dataset,
+        this.isReceiver,
+        this.keyIndex,
+      );
+      // A tally whose individual lines are spent reports no row; left unclosed,
+      // it states no summary either.
+      if (!this.reportRows) {
+        this.plan.drops.reportedIndividually = MAX_ROW_LINES_PER_KEY_ROUND;
+        this.plan.wideRows.reportedIndividually = MAX_ROW_LINES_PER_KEY_ROUND;
+      }
+    }
     const result = buildKeyStringsUnderPlan(
       this.key,
       this.plan,

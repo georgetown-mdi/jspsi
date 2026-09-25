@@ -10,14 +10,17 @@
  * value except the record's own local `expires`.
  */
 
-import { sanitizeErrorForDisplay } from "@alcove/core";
+import { WebRtcFrameLimitError, sanitizeErrorForDisplay } from "@alcove/core";
 
 import {
   CONSENT_FAILURE_TITLE,
   INPUT_FAILURE_TITLE,
   SINGLE_COLUMN_DELIMITER_REMEDY,
   TERMS_SHORTFALL_FAILURE_TITLE,
+  TOO_LARGE_FAILURE_TITLE,
+  TOO_LARGE_REMEDY,
   UNEXPLAINED_FAILURE_TITLE,
+  WEBRTC_MESSAGE_BOUND_LABEL,
 } from "@psi/managed/managedFailureCopy";
 import {
   ManagedExchangeExpiredError,
@@ -40,6 +43,7 @@ export {
   CONSENT_FAILURE_TITLE,
   INPUT_FAILURE_TITLE,
   TERMS_SHORTFALL_FAILURE_TITLE,
+  TOO_LARGE_FAILURE_TITLE,
   UNEXPLAINED_FAILURE_TITLE,
 } from "@psi/managed/managedFailureCopy";
 
@@ -62,9 +66,19 @@ export {
  * - `"restate"` -- what this exchange matches on must be decided again, or the
  *   input replaced: the file cannot supply every agreed linkage key, and the
  *   same file refuses identically every time. Not `"retry"`.
+ * - `"split"` -- the input must be split into smaller exchanges: a set this
+ *   exchange sends is over the bound one WebRTC message holds, and the same
+ *   files refuse identically every time. Not `"retry"`.
  * - `"none"` -- nothing to recover (informational; e.g. a missed window). */
 type ManagedRunRecovery =
-  "reinvite" | "retry" | "wait" | "confirm" | "reconfirm" | "restate" | "none";
+  | "reinvite"
+  | "retry"
+  | "wait"
+  | "confirm"
+  | "reconfirm"
+  | "restate"
+  | "split"
+  | "none";
 
 /** The two readings of a record a live launch failure is classified against. They
  * differ because a failed run stamps its own `lastRun` before the host reloads, and
@@ -94,6 +108,7 @@ export interface ManagedRunFailureAlert {
     | "input"
     | "terms-shortfall"
     | "consent"
+    | "too-large"
     | "custody-unreadable"
     | "already-running"
     | "missed"
@@ -309,6 +324,41 @@ const CONSENT_FAILURE: ManagedRunFailureAlert = {
   recovery: "reconfirm",
 };
 
+/** The benign too-large state read back from a record: a set the last run had
+ * to send was over the bound one WebRTC message holds, so the run refused to
+ * send it. The record holds no count, so this copy states the bound and not
+ * the set's size; a live launch shows the refusal's own message instead
+ * ({@link tooLargeFailure}). Not the retry state -- the same files refuse
+ * identically -- and it claims nothing about earlier rounds, since a round
+ * past the first refuses after data has moved. */
+const TOO_LARGE_FAILURE: ManagedRunFailureAlert = {
+  kind: "too-large",
+  title: TOO_LARGE_FAILURE_TITLE,
+  message:
+    "The last run stopped because a set of values it had to send was over " +
+    `the ${WEBRTC_MESSAGE_BOUND_LABEL} one WebRTC message can hold, so that ` +
+    "set was not sent. Running it again with the same files stops the same " +
+    "way - this is not a connection problem. " +
+    TOO_LARGE_REMEDY,
+  recovery: "split",
+};
+
+/** The too-large state for THIS run's refusal: the refusal's message states the
+ * set's size, the bound, what was sent, and whose input to split, all composed
+ * from frame sizes and fixed constants, so it is the state's whole message. The
+ * titles are the one-shot seats' own for the same refusal. */
+function tooLargeFailure(error: unknown): ManagedRunFailureAlert {
+  if (!(error instanceof WebRtcFrameLimitError)) return TOO_LARGE_FAILURE;
+  return {
+    ...TOO_LARGE_FAILURE,
+    title:
+      error.setOwner === "local"
+        ? "Your file is too large for a browser exchange"
+        : "Your partner's file is too large for a browser exchange",
+    message: sanitizeErrorForDisplay(error),
+  };
+}
+
 /** The Tier-1 recorded persist-failure state: the last run rotated the secret but
  * could not save it, which can leave the two parties on different secrets. Plain,
  * specific copy naming re-invite -- the record's own bookkeeping explains the
@@ -413,6 +463,8 @@ export function managedRunTierFailure(
         : TERMS_SHORTFALL_FAILURE;
     case "consent":
       return CONSENT_FAILURE;
+    case "too-large":
+      return TOO_LARGE_FAILURE;
     case "handed-off":
       return HANDED_OFF_FAILURE;
     case "custody-unreadable":
@@ -513,6 +565,7 @@ export const MANAGED_RUN_NON_DISCLOSURE_ATTESTATION: Readonly<
   "custody-unreadable": "alert-copy",
   consent: "alert-copy",
   "terms-shortfall": "alert-copy",
+  "too-large": "none",
   expired: "none",
   input: "none",
   missed: "none",
@@ -563,7 +616,9 @@ export type ManagedRunCausePlacement =
  * copy instead. Every other state's copy states the cause itself, fixed and
  * non-oracular by the decision each constant above records, and the unexplained
  * state withholds for the reason the seats withhold a failed-closed handshake's
- * message (docs/notes/reported-failure-cause.md).
+ * message (docs/notes/reported-failure-cause.md). The too-large state's live
+ * copy is the refusal's own message ({@link tooLargeFailure}), so a second
+ * block would repeat it.
  */
 const MANAGED_RUN_CAUSE_PLACEMENT: Record<
   ManagedRunFailureAlert["kind"],
@@ -575,6 +630,7 @@ const MANAGED_RUN_CAUSE_PLACEMENT: Record<
   input: "withheld",
   "terms-shortfall": "withheld",
   consent: "withheld",
+  "too-large": "withheld",
   "already-running": "withheld",
   missed: "withheld",
   storage: "withheld",
@@ -701,6 +757,7 @@ function classifyLaunchState(
   if (benign === "input") return INPUT_FAILURE;
   if (benign === "terms-shortfall") return shortfallFailure(error);
   if (benign === "missed") return missedFailure(records.atLaunch, local, now);
+  if (benign === "too-large") return tooLargeFailure(error);
   const { afterRun } = records;
   const tier = deriveManagedFailureTier(afterRun, local, now);
   return managedRunTierFailure(

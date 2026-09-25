@@ -170,6 +170,8 @@ vi.mock("@alcove/core", async (importOriginal) => {
         }) satisfies PreparedExchange,
     ),
     describeExchangeStages: vi.fn(() => []),
+    // The acceptor's prepared exchange is a stand-in with no terms to size.
+    assertFirstRoundFitsWebRtcFrame: vi.fn(),
   };
 });
 vi.mock("../../../src/exchange/acceptorExchange.js", () => ({

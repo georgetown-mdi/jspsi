@@ -137,17 +137,21 @@ interface IndexableIterable<T> extends Iterable<T> {
   [index: number]: T | undefined;
 }
 
-// The value a round that resolves no candidate set reads a record through: a
-// record holding several is refused rather than narrowed to one candidate or
-// dropped, either of which would match on less than the terms declare. Key
-// realization holds the whole candidate set (buildKeyStrings), so this is the
-// point a round applies the refusal at. A count-only round is held to it
-// unconditionally -- psi-c counts matched VALUES where the resolution accepts
-// at most one pair per record, so a candidate set would over-report the
-// linkage the count is used to justify -- while the cascade applies it behind
-// the strategy allowlist (docs/spec/PROTOCOL.md, Where a candidate set is
-// refused).
-function requireSingleCandidate(value: KeyCandidates): string | undefined {
+/**
+ * The value a round that resolves no candidate set reads a record through: a
+ * record holding several is refused rather than narrowed to one candidate or
+ * dropped, either of which would match on less than the terms declare. Key
+ * realization holds the whole candidate set (buildKeyStrings), so this is the
+ * point a round applies the refusal at. A count-only round is held to it
+ * unconditionally -- psi-c counts matched VALUES where the resolution accepts
+ * at most one pair per record, so a candidate set would over-report the
+ * linkage the count is used to justify -- while the cascade applies it behind
+ * the strategy allowlist (docs/spec/PROTOCOL.md, Where a candidate set is
+ * refused).
+ */
+export function requireSingleCandidate(
+  value: KeyCandidates,
+): string | undefined {
   if (value === undefined || typeof value === "string") return value;
   throw fanOutReachedMatchingRefusal();
 }
@@ -211,6 +215,18 @@ export function removeDuplicatesAndUndefineds(
     originalIndices.push(permutation ? permutation[i] : i);
   }
   return [data, originalIndices];
+}
+
+/**
+ * How many values a round over `keyData` sends under the rule that drops a
+ * value several of this party's records hold: the set
+ * {@link removeDuplicatesAndUndefineds} builds, counted. A party that keeps
+ * those values sends each once instead, so this is the fewest values the
+ * round sends whichever cardinality the terms resolve. A record holding a
+ * candidate set contributes each candidate, as the round's own set does.
+ */
+export function droppingRoundSetSize(keyData: Iterable<KeyCandidates>): number {
+  return removeDuplicatesAndUndefineds(Array.from(keyData))[0].length;
 }
 
 /**

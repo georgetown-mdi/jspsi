@@ -130,6 +130,23 @@ describe("savedExchangeRow", () => {
     expect(row.status).not.toMatch(/attack|tamper|desync|connection/i);
   });
 
+  test("a set too large to send displays as its own line, with no retry", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: {
+          at: "2026-07-10T09:00:00.000Z",
+          outcome: "failed",
+          failureKind: "too-large",
+        },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(/too large for a browser exchange/i);
+    expect(row.status).toMatch(/split the input/i);
+    expect(row.status).not.toMatch(/did not complete|attack|tamper|desync/i);
+  });
+
   test("a linkage shortfall displays as its own quiet line, not the input file's", () => {
     const row = savedExchangeRow(
       record({

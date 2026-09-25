@@ -1,6 +1,10 @@
 import { unpack } from "peerjs-js-binarypack";
 
-import { ConnectionError, encodeBinaryPackValue } from "@alcove/core";
+import {
+  ConnectionError,
+  PEERJS_CHUNK_MTU,
+  encodeBinaryPackValue,
+} from "@alcove/core";
 
 /**
  * The PeerJS DataConnection wire, written out rather than obtained by running
@@ -27,12 +31,13 @@ import { ConnectionError, encodeBinaryPackValue } from "@alcove/core";
 
 /**
  * Byte length past which PeerJS splits a packed message into chunks
- * (`peerjs`'s `util.chunkedMTU`). Well under the 65,536-byte SCTP message
- * ceiling both peers negotiate, so it is a PeerJS convention rather than a
- * transport limit -- which is exactly why it has to be matched: a browser peer
+ * (`peerjs`'s `util.chunkedMTU`), defined in core beside the send-side frame
+ * check that charges for it. Well under the 65,536-byte SCTP message ceiling
+ * both peers negotiate, so it is a PeerJS convention rather than a transport
+ * limit -- which is exactly why it has to be matched: a browser peer
  * reassembles by this envelope, not by anything SCTP knows about.
  */
-export const PEERJS_CHUNK_MTU = 16_300;
+export { PEERJS_CHUNK_MTU };
 
 /**
  * The `serialization` value the CLI advertises on its OFFER. Critical rather
