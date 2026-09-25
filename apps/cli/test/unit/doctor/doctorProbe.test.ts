@@ -519,7 +519,10 @@ describe("inputs that change the shape of the run", () => {
     );
     const check = checkById(report, "subdirectory");
     expect(check.status).toBe("warn");
-    expect(check.action).toContain("dedicated to the exchange");
+    expect(check.meaning).toContain(
+      `holding more than ${MAX_DIRECTORY_ENTRIES} entries, so an exchange here will fail`,
+    );
+    expect(check.action).toBe("use a folder dedicated to the exchange.");
     expect(overallOf(report)).toBe("ok");
   });
 
@@ -538,7 +541,7 @@ describe("inputs that change the shape of the run", () => {
     expect(overallOf(report)).toBe("ok");
   });
 
-  test("a listing the output cap cut has the advisory and no free-space figure", async () => {
+  test("a listing the output cap cut short of the bound leaves the count open and has no free-space figure", async () => {
     const report = await runProbe(
       INPUT,
       deps((args) =>
@@ -550,6 +553,12 @@ describe("inputs that change the shape of the run", () => {
     const subdirectory = checkById(report, "subdirectory");
     expect(subdirectory.status).toBe("warn");
     expect(subdirectory.summary).toContain("at least 2 file(s)");
+    expect(subdirectory.meaning).toContain("too long to capture in full");
+    expect(subdirectory.meaning).not.toContain("will fail");
+    expect(subdirectory.action).toBe(
+      `confirm the folder holds no more than ${MAX_DIRECTORY_ENTRIES} ` +
+        "entries, or use a folder dedicated to the exchange.",
+    );
     const freeSpace = checkById(report, "free_space");
     expect(freeSpace.status).toBe("skipped");
     expect(freeSpace.summary).toContain("too long");

@@ -199,8 +199,9 @@ export function countEntries(listing: string): number {
 /**
  * The subdirectory check over the folder the exchange will run in, including
  * the advisory a folder earns when it already holds more entries than the
- * transport will list. A listing the output cap cut holds more than that, since
- * the cap holds a listing past the bound.
+ * transport will list. A listing the output cap cut short of that bound leaves
+ * the count unknown rather than over it: lines longer than the cap allows for
+ * fill it with fewer entries.
  */
 function entryCountCheck(
   where: string,
@@ -209,16 +210,26 @@ function entryCountCheck(
   const entries = countEntries(listing.output);
   const cut = listing.truncated === true;
   const summary = `${where} ${cut ? "at least " : ""}${entries} file(s) in it.`;
-  if (entries <= MAX_DIRECTORY_ENTRIES && !cut)
-    return ok("subdirectory", summary);
-  return warn(
-    "subdirectory",
-    summary,
-    `Alcove will not read a rendezvous folder holding more than ` +
-      `${MAX_DIRECTORY_ENTRIES} entries, so an exchange here will ` +
-      "fail however the permissions come out.",
-    "use a folder dedicated to the exchange.",
-  );
+  if (entries > MAX_DIRECTORY_ENTRIES)
+    return warn(
+      "subdirectory",
+      summary,
+      `Alcove will not read a rendezvous folder holding more than ` +
+        `${MAX_DIRECTORY_ENTRIES} entries, so an exchange here will ` +
+        "fail however the permissions come out.",
+      "use a folder dedicated to the exchange.",
+    );
+  if (cut)
+    return warn(
+      "subdirectory",
+      summary,
+      "the folder's listing was too long to capture in full, so how many " +
+        "entries it holds was not established. Alcove will not read a " +
+        `rendezvous folder holding more than ${MAX_DIRECTORY_ENTRIES} entries.`,
+      `confirm the folder holds no more than ${MAX_DIRECTORY_ENTRIES} ` +
+        "entries, or use a folder dedicated to the exchange.",
+    );
+  return ok("subdirectory", summary);
 }
 
 /**
