@@ -73,6 +73,58 @@ export const WEBRTC_URL_EXTRAS_REFUSED =
   "`server.key`) in alcove.yaml and run 'alcove exchange'.";
 
 /**
+ * The path the web app serves its coordination server under, relative to the
+ * app's own address. A browser inviter resolves the same location from its
+ * page's origin (`apps/web/src/psi/transport/rendezvous.ts`).
+ */
+export const WEB_APP_COORDINATION_PATH = "/api/";
+
+/**
+ * The refusal an `http:`/`https:` URL naming anything past the web app's
+ * address gets on the invite path. The URL is not echoed: a pasted invitation
+ * link holds its token in the fragment.
+ */
+export const WEB_APP_ADDRESS_REFUSED =
+  "an http:// or https:// URL must be the web app's own address with no " +
+  "path, user, query, or fragment (e.g. https://app.example.org/). Give that " +
+  "address, or give the coordination server itself as a ws:// or wss:// URL " +
+  "(e.g. wss://peers.example.org/psi).";
+
+/**
+ * Whether `url` is a web app's address (`http:` or `https:`), the form an
+ * online `alcove invite` resolves to the app's coordination server.
+ */
+export function isWebAppAddress(url: URL): boolean {
+  return url.protocol === "http:" || url.protocol === "https:";
+}
+
+/**
+ * The coordination server a web app at `address` serves, as the `ws:`/`wss:`
+ * URL {@link inviterConnectionFromURL} reads: the address's host and port, the
+ * {@link WEB_APP_COORDINATION_PATH} mount point, and TLS exactly when the
+ * address is `https:`.
+ *
+ * @throws {UsageError} ({@link WEB_APP_ADDRESS_REFUSED}) when the address names
+ *   a path other than `/`, a user, a query, or a fragment.
+ * @internal exported for testing
+ */
+export function coordinationServerURLFromWebAppAddress(address: URL): URL {
+  if (
+    !isWebAppAddress(address) ||
+    address.pathname !== "/" ||
+    address.username ||
+    address.password ||
+    address.search ||
+    address.hash
+  )
+    throw new UsageError(WEB_APP_ADDRESS_REFUSED);
+  const scheme = address.protocol === "https:" ? "wss:" : "ws:";
+  // `host` keeps an explicit port; the address's scheme-default port is already
+  // normalized away, and the ws:/wss: parse drops one equal to ITS default.
+  return new URL(`${scheme}//${address.host}${WEB_APP_COORDINATION_PATH}`);
+}
+
+/**
  * Maps a server URL protocol to a connection channel identifier.
  * @internal exported for testing
  */
@@ -194,7 +246,9 @@ export function connectionFromURL(
 /**
  * Build the connection an online `alcove invite` runs on from its server URL:
  * {@link connectionFromURL}'s file-sync channels, plus a `ws:`/`wss:` URL as
- * the webrtc coordination server this party meets its partner through. The
+ * the webrtc coordination server this party meets its partner through, or an
+ * `http:`/`https:` web app address resolved to the coordination server that
+ * app serves ({@link coordinationServerURLFromWebAppAddress}). The
  * caller stamps the `inviter` role (`withWebRTCPeerRole`) and mints the
  * invitation, whose credential-free endpoint states the same locator so the
  * acceptor reaches this coordination server rather than a hard-coded default.
@@ -230,10 +284,13 @@ export function connectionFromURL(
  * @internal exported for testing
  */
 export function inviterConnectionFromURL(
-  url: URL,
+  given: URL,
   overrides: ConnectionOverrides,
   ownRelay: InviterOwnRelay = {},
 ): InviterConnectionConfig {
+  const url = isWebAppAddress(given)
+    ? coordinationServerURLFromWebAppAddress(given)
+    : given;
   if (channelFromURL(url) !== "webrtc")
     return connectionFromURL(url, overrides);
 

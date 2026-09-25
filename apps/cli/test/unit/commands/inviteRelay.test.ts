@@ -273,9 +273,7 @@ describe("online invite", () => {
       log,
     });
     if (ready.mode !== "online") throw new Error("expected online mode");
-    expect(warned(warn, "--turn applies only to a ws:// or wss:// URL")).toBe(
-      true,
-    );
+    expect(warned(warn, "--turn applies only to a webrtc URL")).toBe(true);
     expect(ready.connection).not.toHaveProperty("turn");
     const token = await decodeInvitation(ready.invitation);
     expect(token.connectionEndpoint).not.toHaveProperty("relay");
