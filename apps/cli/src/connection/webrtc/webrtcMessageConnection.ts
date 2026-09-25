@@ -1,5 +1,6 @@
 import {
   ConnectionError,
+  MAX_WEBRTC_FRAME_BYTES,
   QueuedMessageConnection,
   asConnectionError,
 } from "@alcove/core";
@@ -114,7 +115,10 @@ export interface WebRtcMessageConnectionOptions {
   inactivityTimeoutMs?: number;
   closeFlushTimeoutMs?: number;
   channelCloseTimeoutMs?: number;
-  /** Per-bound overrides for the inbound reassembler; tests only. */
+  /** Per-bound overrides for the inbound reassembler; tests only. Its
+   * `maxFrameBytes` is also the bound the connection states for the partner's
+   * receive path (`outboundWebRtcFrameBound`), which a PSI round checks its set
+   * frames against before sending them. */
   inboundBounds?: ConstructorParameters<typeof BoundedInboundFrames>[0];
 }
 
@@ -249,6 +253,8 @@ export function webRtcMessageConnection(
       );
 
       return {
+        outboundWebRtcFrameBound: () =>
+          options?.inboundBounds?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES,
         send: (data) => {
           for (const datagram of encoder.encode(data)) {
             channel.send(Buffer.from(datagram));

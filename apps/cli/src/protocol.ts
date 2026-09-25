@@ -16,6 +16,7 @@ import {
   describeResolvedMatching,
   describeResolvedRunShape,
   authenticateConnection,
+  assertFirstRoundFitsWebRtcFrame,
   assertSharedSecretReadyForHandshake,
   deriveAbortToken,
   OperatorConfigError,
@@ -1511,6 +1512,7 @@ async function prepareTransport(
   build: PreparedTransport,
   params: {
     connection: ProtocolConnectionConfig;
+    prepared: PreparedExchange;
     auth: AuthPersist | null;
     saveIntent: boolean | undefined;
     onAuthenticated: (() => void | Promise<void>) | undefined;
@@ -1524,6 +1526,7 @@ async function prepareTransport(
 ): Promise<void> {
   const {
     connection,
+    prepared,
     auth,
     saveIntent,
     onAuthenticated,
@@ -1614,6 +1617,9 @@ async function prepareTransport(
     build.trimmedKeyFilePath = preflightKeyFilePath(auth.keyFilePath, log);
   }
   if (connection.channel === "webrtc") {
+    // A first round too large for one WebRTC message is refused here, before
+    // the rendezvous is resolved and before anything is sent.
+    assertFirstRoundFitsWebRtcFrame(prepared);
     // Resolve the rendezvous -- broker location, ICE servers, role, and the
     // secret both ids derive from -- here rather than at the dial, so a
     // misconfigured connection fails with no socket opened and no id
@@ -2197,6 +2203,7 @@ export async function runProtocol(
   try {
     await prepareTransport(build, {
       connection,
+      prepared,
       auth,
       saveIntent,
       onAuthenticated,

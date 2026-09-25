@@ -102,6 +102,9 @@ vi.mock("@alcove/core", async (importActual) => {
     }),
     describeExchangeStages: vi.fn().mockReturnValue([]),
     buildOutputTable: vi.fn().mockReturnValue({ headers: [], rows: [] }),
+    assertFirstRoundFitsWebRtcFrame: vi.fn(
+      actual.assertFirstRoundFitsWebRtcFrame,
+    ),
   };
 });
 
@@ -149,6 +152,9 @@ const {
   RELAY_CREDENTIAL_MAX_TTL_SECONDS,
   StandardizedDataset,
   UsageError,
+  WebRtcFrameLimitError,
+  assertFirstRoundFitsWebRtcFrame,
+  prepareForExchange,
   generateSharedSecret,
   getDefaultLinkageTerms,
   mintRunRelayCredential,
@@ -296,6 +302,8 @@ test("both parties complete an authenticated exchange over the data channel", as
     expect(saved.sharedSecret).not.toBe(SECRET);
   }
   expect(mockState.exchangeConnections).toHaveLength(2);
+  // Each party checked its first round against the frame bound before dialing.
+  expect(vi.mocked(assertFirstRoundFitsWebRtcFrame)).toHaveBeenCalledTimes(2);
 });
 
 test("the configured role fixes the handshake role, complementary across the pair", async () => {
@@ -588,6 +596,54 @@ test("a host the resolver admits but the authority parse refuses exits 64", asyn
   expect(error).toBeInstanceOf(UsageError);
   expect(exitCodeForError(error)).toBe(64);
   expect((error as Error).message).toBe(BROKER_ADDRESS_REFUSED);
+  expect(mockState.dials).toHaveLength(0);
+});
+
+test("a first round too large for one WebRTC message is refused before anything is dialed", async () => {
+  // A dataset of 301 values held once each, checked against a bound of 300
+  // values' frame, stands in for one past the real bound: the check's
+  // arithmetic at that bound is core's to pin, and what the dispatch decides is
+  // that the refusal comes before the rendezvous and exits 64.
+  const names = Array.from(
+    { length: 301 },
+    (_unused, i) =>
+      `zq${String.fromCharCode(97 + Math.floor(i / 26))}` +
+      String.fromCharCode(97 + (i % 26)),
+  );
+  const prepared = prepareForExchange(
+    {
+      linkageTerms: {
+        ...getDefaultLinkageTerms("Inviter"),
+        linkageFields: [{ name: "firstName", type: "first_name" }],
+        linkageKeys: [
+          { name: "firstName", elements: [{ field: "firstName" }] },
+        ],
+      },
+    },
+    "Inviter",
+    names.map((name) => ({ first_name: name })),
+    ["first_name"],
+  );
+  const check = vi.mocked(assertFirstRoundFitsWebRtcFrame);
+  const actual = check.getMockImplementation()!;
+  check.mockImplementationOnce((checked) => actual(checked, 300 * 35 + 3));
+  const keyFilePath = path.join(tmpDir, "inviter.key");
+  saveKeyFile(keyFilePath, { sharedSecret: SECRET });
+  const error = await runProtocol({
+    connection: webrtcConnection("inviter"),
+    auth: { sharedSecret: SECRET, keyFilePath },
+    prepared,
+    output: path.join(tmpDir, "inviter.csv"),
+    verbosity: -1,
+    loggerName: "test",
+  }).then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(check).toHaveBeenCalledWith(prepared);
+  expect(error).toBeInstanceOf(WebRtcFrameLimitError);
+  expect((error as Error).message).toMatch(/at least 301 values to send/);
+  expect(exitCodeForError(error)).toBe(64);
   expect(mockState.dials).toHaveLength(0);
 });
 
