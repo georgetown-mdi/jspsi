@@ -39,6 +39,7 @@ import {
 import { withTimeZone } from "../../utils/hostTimeZone";
 
 import type {
+  ManagedExchangeFailureKind,
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
@@ -1924,6 +1925,42 @@ describe("the rotation-in-flight marker", () => {
     );
     expect(stamped.rotationInFlightSince).toBe(MARKED_AT);
   });
+
+  // Only a failure that raises a standing condition answers the marker; every
+  // other kind leaves it for the next visit to read.
+  const removesMarker = {
+    auth: true,
+    storage: true,
+    transport: false,
+    "custody-unreadable": false,
+    input: false,
+    "terms-shortfall": false,
+    consent: false,
+    "handed-off": false,
+    "too-large": false,
+    cancelled: false,
+  } satisfies Record<ManagedExchangeFailureKind, boolean>;
+
+  test.each(Object.entries(removesMarker))(
+    "a %s failure's bookkeeping removes it: %s",
+    (failureKind, removes) => {
+      const marked = applyManagedExchangeRotationInFlight(
+        runnableRecord(),
+        MARKED_AT,
+      );
+      const stamped = applyManagedExchangeLastRun(
+        marked,
+        {
+          at: "2026-07-14T09:00:00.000Z",
+          outcome: "failed",
+          failureKind: failureKind as ManagedExchangeFailureKind,
+        },
+        Date.parse("2026-07-14T08:00:00.000Z"),
+      );
+      if (removes) expect(stamped).not.toHaveProperty("rotationInFlightSince");
+      else expect(stamped.rotationInFlightSince).toBe(MARKED_AT);
+    },
+  );
 
   test("a failure stamped before a later run's marker leaves that marker", () => {
     const marked = applyManagedExchangeRotationInFlight(

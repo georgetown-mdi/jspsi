@@ -226,12 +226,15 @@ than two files are refused before either is read. The code:
 
 **What it accepts.** The configuration exactly as the configuration-only import
 accepts it, and a key file holding exactly what Alcove writes there: a JSON
-object with a `sharedSecret` matching `SHARED_SECRET_REGEX` and an optional ISO
-8601 `expires`, and no other field. The key file is validated on its own -- the
-configuration's schema parse never sees it -- through the sensitive-JSON
-chokepoint and the strict key-pair schema the export artifact's key half and the
-[hand-off re-take](#taking-a-command-line-hand-off-back) read (`keyFileFieldsSchema`),
-under the re-take's size cap, applied before the file is read.
+object with a `sharedSecret` matching `SHARED_SECRET_REGEX`, an optional ISO
+8601 `expires`, and the command line's optional
+[rotation-in-flight marker](#the-rotation-in-flight-marker), and no other field.
+The key file is validated on its own -- the configuration's schema parse never
+sees it -- through the sensitive-JSON chokepoint and the strict key-file schema
+the [hand-off re-take](#taking-a-command-line-hand-off-back) also reads
+(`keyFileFieldsSchema`), under the re-take's size cap, applied before the file
+is read. The export artifact's key half is read against the two-field key-pair
+schema (`keyPairFieldsSchema`) instead, which admits no marker.
 
 **What it refuses**, with nothing written:
 
@@ -1300,11 +1303,12 @@ holds exactly one live `sharedSecret`, and no previous secret is kept.
   handshake beside a marker stays the unexplained tier: the marker is evidence
   for the benign reading only alongside the no-shows it predicts.
 - **Not carried** between devices or applications: the export artifact and the
-  command-line key file this app writes hold none, and a command-line key file
+  command-line key file this app writes hold none. A command-line key file
   holding the CLI's own marker (see
   [EXCHANGE_FILE.md](EXCHANGE_FILE.md#the-rotation-in-flight-marker)) is read
   and the marker dropped, since an import is already read through the import
-  marker.
+  marker; an artifact whose key block holds one is refused whole, as for any
+  unknown field.
 
 ## Derived, never stored
 

@@ -240,8 +240,7 @@ describe("CLI separability", () => {
       "sharedSecret",
     ]);
     expect(artifact.key).not.toHaveProperty("shared_secret");
-    // And it validates against the shared key-file shape (keyFileFieldsSchema is the
-    // one the CLI's key file and this artifact both use).
+    // And it reads as a command-line key file, so the block lifts out as one.
     const key = keyFileFieldsSchema.parse(artifact.key);
     expect(key.sharedSecret).toBe(record.sharedSecret);
     expect(key.expires).toBe(record.expires);
@@ -382,6 +381,36 @@ describe("rejection of malformed or tampered imports", () => {
     expect(() =>
       parseManagedExchangeArtifact(JSON.stringify(artifact)),
     ).toThrow();
+  });
+
+  test("a key block holding the rotation-in-flight marker is refused as an unknown field", () => {
+    const artifact = JSON.parse(goodBytes());
+    artifact.key.rotationInFlightSince = "2026-04-06T14:00:00.000Z";
+    expect(() =>
+      parseManagedExchangeArtifact(JSON.stringify(artifact)),
+    ).toThrow(
+      expect.objectContaining({
+        issues: [
+          expect.objectContaining({
+            code: "unrecognized_keys",
+            keys: ["rotationInFlightSince"],
+            path: ["key"],
+          }),
+        ],
+      }),
+    );
+  });
+
+  test("a key block holding only the secret and its expiry imports", () => {
+    const artifact = JSON.parse(goodBytes());
+    artifact.key.expires = "2026-04-06T14:00:00.000Z";
+    expect(Object.keys(artifact.key).sort()).toEqual([
+      "expires",
+      "sharedSecret",
+    ]);
+    const { record } = importManagedExchangeArtifact(JSON.stringify(artifact));
+    expect(record.sharedSecret).toBe(artifact.key.sharedSecret);
+    expect(record.expires).toBe("2026-04-06T14:00:00.000Z");
   });
 
   test("a tampered (malformed) shared secret is rejected", () => {

@@ -516,9 +516,9 @@ const persistedExchangeFileSchema = ExchangeSpecSchema.refine(
 
 /**
  * The `.alcove.key` fields: `sharedSecret`, `expires`, `rotationInFlightSince`.
- * The export/import artifact's key half and the command-line export's key file
- * are both this shape, so a record's secret half maps onto a valid `.alcove.key`
- * and one read back maps onto a record.
+ * The artifact's key half and the key file this app writes are the pair
+ * without the marker ({@link ManagedExchangeKeyPair}), so a record's secret
+ * half maps onto a valid `.alcove.key` and one read back maps onto a record.
  */
 export interface ManagedExchangeKeyFields {
   /** The current rotated shared secret (base64url, 43 chars / 32 bytes). */
@@ -531,16 +531,37 @@ export interface ManagedExchangeKeyFields {
   rotationInFlightSince?: string;
 }
 
+/** The key pair without the command-line marker: what the export artifact's
+ * key block and the key file this app writes hold. */
+export type ManagedExchangeKeyPair = Omit<
+  ManagedExchangeKeyFields,
+  "rotationInFlightSince"
+>;
+
+const keyPairShape = {
+  sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
+  expires: z.iso.datetime().optional(),
+};
+
 /**
- * The key fields' validator: `sharedSecret` plus optional ISO 8601 instants.
- * Shared by every reader of the fields so none validates against a looser copy,
- * keeping the CLI-separability commitment a single source of truth. Strict, so a
+ * The key pair's validator, for the export artifact's key block: `sharedSecret`
+ * and an optional ISO 8601 `expires`. Strict, so an artifact whose key block
+ * holds the rotation-in-flight marker, which the artifact never carries, is
+ * refused rather than read with the field dropped.
+ */
+export const keyPairFieldsSchema: ZodType<ManagedExchangeKeyPair> = z
+  .object(keyPairShape)
+  .strict();
+
+/**
+ * The command-line key file's validator: the key pair plus the optional
+ * rotation-in-flight marker the command line writes there. Shares the pair's
+ * field schemas so neither reader validates against a looser copy. Strict, so a
  * reader rejects an unknown key rather than silently accepting it.
  */
 export const keyFileFieldsSchema: ZodType<ManagedExchangeKeyFields> = z
   .object({
-    sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
-    expires: z.iso.datetime().optional(),
+    ...keyPairShape,
     rotationInFlightSince: z.iso.datetime().optional(),
   })
   .strict();
