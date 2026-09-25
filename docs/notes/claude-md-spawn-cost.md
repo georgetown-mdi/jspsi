@@ -136,9 +136,10 @@ CLAUDE.md. That keeps the four the by-role partition already named, and all of
 "Writing, tooling and commits", "Boards and PM" and "Documentation routing".
 
 **Load mechanism.** CLAUDE.md names the ledger once, in the pointer bullet under
-"Orchestrating a session", and the five front doors the ledger's own preamble
-lists -- the `start-issue`, `light-review`, `assess-review` and `panel`
-commands, and the `shortlist-backlog` skill -- each open with a line reading it.
+"Orchestrating a session", and the seven front doors the ledger's own preamble
+lists -- the `start-issue`, `light-review`, `assess-review`, `panel`, `docket`
+and `follow-ups` commands, and the `shortlist-backlog` skill -- each open with a
+line reading it.
 That is the shape `.claude/pm/ruleset.md` and its two front doors already use.
 
 **The check.** `npm run check:rule-ledgers`
