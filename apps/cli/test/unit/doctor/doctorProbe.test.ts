@@ -56,6 +56,30 @@ const DIRECTORY_LISTING = [
   "",
 ].join("\n");
 
+/** A listing holding a file named like an smbclient error status. */
+const STATUS_NAMED_LISTING = [
+  "  .                                   D        0  Mon Jan  1 00:00:00 2024",
+  "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
+  "  NT_STATUS_ACCESS_DENIED.csv         A      100  Mon Jan  1 00:00:00 2024",
+  "  secret-client-list.csv              A      100  Mon Jan  1 00:00:00 2024",
+  "",
+  "\t\t10485760 blocks of size 1024. 5242880 blocks available",
+  "",
+].join("\n");
+
+/**
+ * A listing on a full share holding a file named like the free-space line,
+ * ahead of the real one.
+ */
+const SPACE_NAMED_LISTING = [
+  "  .                                   D        0  Mon Jan  1 00:00:00 2024",
+  "  ..                                  D        0  Mon Jan  1 00:00:00 2024",
+  "  blocks of size 1048576. 999999 blocks available      A      100  Mon Jan  1 00:00:00 2024",
+  "",
+  "\t\t1024 blocks of size 1024. 0 blocks available",
+  "",
+].join("\n");
+
 /** A listing one entry past the bound the transport will refuse to read. */
 function oversizedListing(): string {
   return [
@@ -520,6 +544,69 @@ describe("inputs that change the shape of the run", () => {
     expect(overallOf(report)).toBe("ok");
   });
 
+  test("a file named like an error status does not fail the subdirectory", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args) === "ls" && args.includes("-D")
+          ? { output: STATUS_NAMED_LISTING }
+          : healthyReply(args),
+      ),
+    );
+    expect(checkById(report, "subdirectory").summary).toContain("2 file(s)");
+    expect(overallOf(report)).toBe("ok");
+    for (const check of report.checks) expect(check.status).toBe("ok");
+  });
+
+  test("a file named like an error status does not fail the share root", async () => {
+    const report = await runProbe(
+      { ...INPUT, subdirectory: "" },
+      deps((args) =>
+        commandOf(args) === "ls"
+          ? { output: STATUS_NAMED_LISTING }
+          : healthyReply(args),
+      ),
+    );
+    expect(checkById(report, "share_open").status).toBe("ok");
+    expect(checkById(report, "subdirectory").summary).toContain("2 file(s)");
+    expect(overallOf(report)).toBe("ok");
+  });
+
+  test("a refused listing keeps its entries out of the human verdict", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args) === "ls" && args.includes("-D")
+          ? {
+              code: 1,
+              output: `${STATUS_NAMED_LISTING}NT_STATUS_ACCESS_DENIED listing \\dropbox\\*`,
+            }
+          : healthyReply(args),
+      ),
+    );
+    const check = checkById(report, "subdirectory");
+    expect(check.status).toBe("fail");
+    expect(check.summary).toBe("NT_STATUS_ACCESS_DENIED");
+    const rendered = verdictLines(report).join("\n");
+    expect(rendered).toContain("listing \\dropbox\\*");
+    expect(rendered).not.toContain("secret-client-list");
+    expect(rendered).not.toContain("NT_STATUS_ACCESS_DENIED.csv");
+  });
+
+  test("a filename shaped like the free-space line does not set the figure", async () => {
+    const report = await runProbe(
+      INPUT,
+      deps((args) =>
+        commandOf(args) === "ls"
+          ? { output: SPACE_NAMED_LISTING }
+          : healthyReply(args),
+      ),
+    );
+    const check = checkById(report, "free_space");
+    expect(check.status).toBe("warn");
+    expect(check.summary).toBe("the share reports no free space.");
+  });
+
   test("no marker requested leaves nothing behind and skips the check", async () => {
     const probeDeps = deps(healthyReply);
     const report = await runProbe({ ...INPUT, marker: "" }, probeDeps);
@@ -569,6 +656,22 @@ describe("smbclient output parsing", () => {
       ),
     ).toBe(5120);
     expect(freeMegabytes("no space line here")).toBeUndefined();
+  });
+
+  test("statusOf does not read a status out of a listing entry", () => {
+    expect(statusOf(STATUS_NAMED_LISTING)).toBeUndefined();
+    expect(
+      statusOf(`${STATUS_NAMED_LISTING}\nNT_STATUS_IO_TIMEOUT listing \\*`),
+    ).toBe("NT_STATUS_IO_TIMEOUT");
+  });
+
+  test("freeMegabytes reads the trailer line, not a filename shaped like it", () => {
+    expect(freeMegabytes(SPACE_NAMED_LISTING)).toBe(0);
+    expect(
+      freeMegabytes(
+        "  1 blocks of size 1048576. 999999 blocks available   A  0  Mon Jan  1 00:00:00 2024",
+      ),
+    ).toBeUndefined();
   });
 
   test("countEntries excludes the dot entries", () => {

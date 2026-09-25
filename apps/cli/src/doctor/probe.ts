@@ -110,12 +110,21 @@ const IPV4_LITERAL = /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/;
 
 /**
  * The NT_STATUS token smbclient reported, if any. `NT_STATUS_OK` appears in
- * ordinary successful output and is not one.
+ * ordinary successful output and is not one. Only smbclient's own messages,
+ * which start at the first column, are read: an indented line is a listing
+ * entry, a share-list row, or the free-space line, and a filename or comment in
+ * one is text the server supplied.
  * @internal exported for testing
  */
 export function statusOf(output: string): string | undefined {
-  const matches = output.match(/NT_STATUS_[A-Z_]+/g) ?? [];
-  return matches.find((status) => status !== "NT_STATUS_OK");
+  for (const line of output.split("\n")) {
+    if (!/^\S/.test(line)) continue;
+    const status = (line.match(/NT_STATUS_[A-Z_]+/g) ?? []).find(
+      (token) => token !== "NT_STATUS_OK",
+    );
+    if (status !== undefined) return status;
+  }
+  return undefined;
 }
 
 /**
@@ -133,12 +142,20 @@ export function transportFailed(result: CommandResult): boolean {
 
 /**
  * Free megabytes as reported in an smbclient listing, or `undefined` when the
- * server reported none.
+ * server reported none. Read from the last whole line of the tab-indented shape
+ * smbclient prints after the entries, never from a substring: a listing entry
+ * is indented with spaces, and a filename can hold the same words.
  * @internal exported for testing
  */
 export function freeMegabytes(listing: string): number | undefined {
-  const match = listing.match(/blocks of size (\d+)\. (\d+) blocks available/);
-  if (match === null) return undefined;
+  const figures = listing
+    .split("\n")
+    .map((line) =>
+      /^\t+\d+ blocks of size (\d+)\. (\d+) blocks available$/.exec(line),
+    )
+    .filter((match) => match !== null);
+  const match = figures.at(-1);
+  if (match === undefined) return undefined;
   return Math.floor((Number(match[1]) * Number(match[2])) / 1_048_576);
 }
 
@@ -375,7 +392,7 @@ function shareOpenCheck(
   status: string,
   result: CommandResult,
 ): DoctorCheckRecord {
-  const detail = { detail: result.output };
+  const detail = { detail: withoutListingEntries(result.output) };
   switch (status) {
     case "NT_STATUS_BAD_NETWORK_NAME":
     case "NT_STATUS_OBJECT_NAME_NOT_FOUND":
@@ -464,7 +481,7 @@ function subdirectoryCheck(
                 "Ask for rights on this folder specifically.",
             ];
   return fail("subdirectory", status, meaning, action, {
-    detail: result.output,
+    detail: withoutListingEntries(result.output),
   });
 }
 
