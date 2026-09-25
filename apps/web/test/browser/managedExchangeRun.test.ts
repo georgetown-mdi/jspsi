@@ -1068,7 +1068,9 @@ describe("a failing run never overwrites a success stamped after it began", () =
 
   test("a failure stamped over a success written mid-run leaves the success", async () => {
     const created = await createRunnableExchange(newExchange());
-    const runStartedAtMs = Date.now();
+    // Every stamp sits behind the store's own clock, which holds a stored stamp
+    // from the future off nothing.
+    const runStartedAtMs = Date.now() - 10_000;
     const successAt = runStartedAtMs + 1_000;
 
     // This run is open, another context completes a whole exchange and stamps
