@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
@@ -15,6 +15,8 @@ import {
   assertFirstRoundFitsWebRtcFrame,
   prepareForExchange,
 } from "../../src/exchange";
+import { StandardizedKeyIterable } from "../../src/standardization";
+import { getLogger } from "../../src/utils/logger";
 import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
 import type { MessageConnection } from "../../src/connection/messageConnection";
@@ -243,4 +245,81 @@ test("the first-round check leaves a single-pass exchange to its dataset ceiling
   expect(() =>
     assertFirstRoundFitsWebRtcFrame(preparedWith(rows), 100),
   ).toThrow(WebRtcFrameLimitError);
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+test("the first-round check reports no row, so each row's warning comes once, from the round", () => {
+  // Two split elements: a row realizing 21 x 20 candidates is dropped from the
+  // round, one realizing 21 x 1 is kept and warned as wide.
+  const split = [{ function: "split_on", params: { delimiter: " " } }];
+  const parts = (row: string, count: number) =>
+    Array.from({ length: count }, (_unused, i) =>
+      `${row}x${letters(i)}`.padEnd(8, "z"),
+    ).join(" ");
+  const prepared = prepareForExchange(
+    {
+      linkageTerms: {
+        version: "1.0.0",
+        date: "2026-01-01",
+        algorithm: "psi",
+        deduplicate: false,
+        linkageStrategy: "cascade",
+        identity: "Tester",
+        output: { expectsOutput: true, shareWithPartner: true },
+        linkageFields: [
+          { name: "lastName", type: "last_name" },
+          { name: "firstName", type: "first_name" },
+        ],
+        linkageKeys: [
+          {
+            name: "names",
+            elements: [
+              { field: "lastName", transform: split },
+              { field: "firstName", transform: split },
+            ],
+          },
+        ],
+      },
+    },
+    "Tester",
+    [
+      { last_name: parts("dropped", 21), first_name: parts("dropped", 20) },
+      { last_name: parts("wide", 21), first_name: "zqsole" },
+      { last_name: "zqplain", first_name: "zqplain" },
+    ],
+    ["last_name", "first_name"],
+  );
+  const warn = vi
+    .spyOn(getLogger("cleaning"), "warn")
+    .mockImplementation(() => {});
+  const rowLines = () =>
+    warn.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => /^row \d+, key "names"/.test(line));
+
+  // A bound the dataset's ceiling crosses, so the check reads the rows, and
+  // the set the round sends fits.
+  expect(() =>
+    assertFirstRoundFitsWebRtcFrame(
+      prepared,
+      webrtcFrameReceiveCharge(minimumPsiSetFrameBytes(100)),
+    ),
+  ).not.toThrow();
+  expect(rowLines()).toEqual([]);
+
+  const [key] = prepared.linkageTerms.linkageKeys;
+  const firstRound = new StandardizedKeyIterable(
+    key,
+    prepared.dataset,
+    prepared.rowCount,
+    false,
+    0,
+  );
+  expect(Array.from(firstRound)[0]).toBeUndefined();
+  firstRound.closeRowReporting();
+  const lines = rowLines();
+  expect(lines).toHaveLength(2);
+  expect(lines[0]).toMatch(/^row 0, key "names": .*contributes no value/);
+  expect(lines[1]).toMatch(/^row 1, key "names": cross-product produced 21 /);
 });

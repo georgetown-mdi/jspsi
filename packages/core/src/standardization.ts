@@ -3523,8 +3523,7 @@ export class StandardizedKeyIterable {
 
   /**
    * @param reportRows - Whether the rows this round drops or finds wide are
-   *   reported. False for a read that only sizes the round ahead of it, so the
-   *   operator reads each row's report once, from the round itself.
+   *   reported; false for a read that only sizes the round ahead of it.
    */
   constructor(
     key: LinkageKey,
