@@ -14,8 +14,9 @@
  * set, pinned at accept and recorded in the document), so a re-run fails CLOSED
  * if the partner transmits a different set than was consented to -- the same
  * enforcement `prepareAcceptorExchange` applies from the invitation's disclosed
- * set. An absent persisted set (a lazy token) stays undefined and the party
- * reconciles lazily.
+ * set. An absent persisted set falls back to the names the document's own
+ * `payload.receive` lists, as the command line's recurring run does; a document
+ * holding neither reconciles lazily.
  *
  * The terms-side enforcement beside it is the acceptor's persisted
  * `expectedPartnerDeduplicate` -- the `deduplicate` the invitation declared for
@@ -87,12 +88,13 @@ export function prepareManagedRerunExchange(
     rawRows,
     columns,
   );
-  // The received-payload enforcement, mirrored from the persisted document exactly
-  // as the accept path mirrors it from the invitation's disclosed set: passed
-  // AS-IS, so an absent set (lazy) stays undefined and an empty set is a strict
-  // "receive nothing" commitment. runExchange prefers this explicit commitment
-  // over the payload.receive fallback.
-  prepared.expectedPayloadColumns = exchangeFile.expectedPayloadColumns;
+  // The received-payload enforcement, as the command line's recurring run
+  // applies it: the persisted commitment, else the names the document's own
+  // payload.receive lists. An empty set is a strict "receive nothing"
+  // commitment, and a document holding neither reconciles lazily.
+  prepared.expectedPayloadColumns =
+    exchangeFile.expectedPayloadColumns ??
+    exchangeFile.linkageTerms.payload?.receive?.map((column) => column.name);
   // The terms-side enforcement, mirrored from the persisted document exactly as
   // the accept path mirrors it from the invitation's declared terms: passed
   // AS-IS, so an absent declaration (an inviter's record, or a document no
