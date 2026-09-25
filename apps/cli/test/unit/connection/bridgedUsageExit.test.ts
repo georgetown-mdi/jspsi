@@ -11,6 +11,7 @@ import {
   UsageError,
 } from "@alcove/core";
 import type { FileInfo, MessageConnection } from "@alcove/core";
+import { MESSAGE_ENVELOPE_VERSION } from "@alcove/core/testing";
 
 import {
   directoryTooLargeError,
@@ -164,7 +165,12 @@ test("an unexpected file mid-exchange exits 64 through the bridge", async () => 
 
 test("a corrupt partner message exits 64 through the bridge", async () => {
   const { bridge } = await rendezvous();
-  fs.writeFileSync(path.join(dropDir, `${B}-5.json`), "xxxxx");
+  // This build's version byte, so the version check passes and the short
+  // body fails the envelope parse itself.
+  fs.writeFileSync(
+    path.join(dropDir, `${B}-5.json`),
+    Buffer.from([MESSAGE_ENVELOPE_VERSION, 0x78, 0x78, 0x78, 0x78]),
+  );
   const err = await rejection(bridge.receive());
   expectBridgedUsageExit(err, /malformed envelope/);
 });
