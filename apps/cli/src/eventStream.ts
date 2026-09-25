@@ -105,8 +105,7 @@ export type WarningSource = (typeof WARNING_SOURCES)[number];
  * - `security`: a trust-boundary failure -- a `security`-kind
  *   {@link ConnectionError} from the authenticated key exchange (wrong secret,
  *   tamper, replay), from SFTP host-key verification (a pinned-fingerprint
- *   mismatch, or an unpinned host refused fail-closed), or from the
- *   post-handshake AEAD layer. It must be identifiable from the terminal event
+ *   mismatch), or from the post-handshake AEAD layer. It must be identifiable from the terminal event
  *   alone, since the process exit code (64/69) cannot distinguish it from a
  *   plain usage or transport failure.
  * - `output`: the privacy-sensitive exchange already succeeded and only local
@@ -520,20 +519,30 @@ export function buildErrorEvent(error: unknown, phase: ErrorPhase): ErrorEvent {
  * stream but spawned the process without wiring fd 3, fail loud and early rather
  * than silently dropping every event or crashing mid-run on the first write. An
  * `fstat` on an unopened descriptor raises `EBADF`; any error is treated as
- * fail-closed.
+ * fail-closed. A descriptor open only for reading passes `fstat`, so a
+ * zero-length write follows it: it writes nothing, and raises `EBADF` on a
+ * descriptor this process cannot write (measured on macOS and Linux).
  */
 export function assertEventStreamFdOpen(): void {
+  let problem: string | undefined;
   try {
     fs.fstatSync(EVENT_STREAM_FD);
+    try {
+      fs.writeSync(EVENT_STREAM_FD, Buffer.alloc(0), 0, 0);
+    } catch {
+      problem = "is open but not writable";
+    }
   } catch {
+    problem = "is not open";
+  }
+  if (problem !== undefined)
     throw new UsageError(
-      `--event-stream was given but file descriptor ${EVENT_STREAM_FD} is not ` +
-        "open; spawn Alcove with that descriptor wired to a pipe your " +
-        "supervisor reads, or drop --event-stream. Format: " +
+      `--event-stream was given but file descriptor ${EVENT_STREAM_FD} ` +
+        `${problem}; spawn Alcove with that descriptor wired to the write end ` +
+        "of a pipe your supervisor reads, or drop --event-stream. Format: " +
         "https://github.com/georgetown-mdi/alcove/blob/main/docs/spec/" +
         "CLI_EVENTS.md",
     );
-  }
 }
 
 // --- fd-3 writer -------------------------------------------------------------

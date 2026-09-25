@@ -320,6 +320,7 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   operatorSuppliedSpans,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  describeExchangeStages,
 } from "@alcove/core";
 import {
   AEAD_ENVELOPE_VERSION,
@@ -1747,6 +1748,69 @@ test("a partner payload missing a matched row still leaves the record and the re
       parseDualSignedRecord(JSON.parse(fs.readFileSync(p.receipt, "utf8"))),
     ).toEqual(signedReceiptFixture);
   }
+}, 20_000);
+
+test("a single-pass run's stages event names every stage id it emits", async () => {
+  // Core's own list names only the confirming step for single-pass, and which
+  // encrypt and match stages a party then emits follows its role; here one
+  // party emits every one of them, so no id can go unlisted whatever the role.
+  // Its closing "done" marker is not a stage and reaches neither event.
+  const actual =
+    await vi.importActual<typeof import("@alcove/core")>("@alcove/core");
+  vi.mocked(describeExchangeStages).mockImplementation(
+    actual.describeExchangeStages,
+  );
+  vi.mocked(runExchange).mockImplementation((async (
+    _conn: unknown,
+    _role: unknown,
+    _prepared: unknown,
+    options: { onStage?: (id: string) => void },
+  ) => {
+    options.onStage?.(actual.CONFIRMING_PROTOCOL_STAGE_ID);
+    for (const id of Object.values(actual.SINGLE_PASS_STAGE_IDS))
+      options.onStage?.(id);
+    // The end-of-round marker linkViaSinglePassPSI passes last.
+    options.onStage?.("done");
+    return defaultRunExchange();
+  }) as never);
+  const singlePass = {
+    ...minimalPrepared,
+    linkageTerms: {
+      ...minimalPrepared.linkageTerms,
+      linkageStrategy: "single-pass" as const,
+    },
+  };
+
+  mockFd3Open();
+  try {
+    await Promise.all(
+      ["test-a", "test-b"].map((loggerName) =>
+        runProtocol({
+          connection: {
+            channel: "filedrop",
+            path: dropDir,
+            options: TWO_PARTY_OPTIONS,
+          },
+          auth: null,
+          prepared: singlePass,
+          output: undefined,
+          verbosity: -1,
+          loggerName,
+          fileSyncRuntime: { eventStream: loggerName === "test-a" },
+        }),
+      ),
+    );
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+    vi.mocked(describeExchangeStages).mockReturnValue([]);
+  }
+
+  const lines = takeFd3Lines();
+  const listed = (lines[0].stages as Array<{ id: string }>).map((s) => s.id);
+  const emitted = lines.filter((l) => l.type === "stage").map((l) => l.id);
+  const ended = lines.filter((l) => l.type === "stageEnd").map((l) => l.id);
+  expect(listed).toEqual(emitted);
+  expect(ended).toEqual(emitted);
 }, 20_000);
 
 // --- One-sided result withholding via runProtocol ----------------------------

@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { afterEach, expect, test, vi } from "vitest";
 
@@ -624,9 +626,55 @@ test("assertEventStreamFdOpen throws a UsageError when fd 3 is not open", () => 
   expect(spy).toHaveBeenCalledWith(EVENT_STREAM_FD);
 });
 
-test("assertEventStreamFdOpen succeeds when fd 3 stats cleanly", () => {
-  vi.spyOn(fs, "fstatSync").mockReturnValue({} as fs.Stats);
-  expect(() => assertEventStreamFdOpen()).not.toThrow();
+// Answer fd 3 from a real descriptor opened with `flags`, so the preflight's
+// stat and its zero-length write reach the operating system, not a model of it.
+function withFd3OpenedAs(flags: "r" | "w", body: () => void): void {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-fd3-"));
+  const file = path.join(dir, "events");
+  fs.writeFileSync(file, "");
+  const fd = fs.openSync(file, flags);
+  const realFstatSync = fs.fstatSync;
+  const realWriteSync = fs.writeSync;
+  vi.spyOn(fs, "fstatSync").mockImplementation(((
+    target: number,
+    ...rest: unknown[]
+  ) =>
+    (realFstatSync as (...a: unknown[]) => fs.Stats)(
+      target === EVENT_STREAM_FD ? fd : target,
+      ...rest,
+    )) as typeof fs.fstatSync);
+  vi.spyOn(fs, "writeSync").mockImplementation(((
+    target: number,
+    ...rest: unknown[]
+  ) =>
+    (realWriteSync as (...a: unknown[]) => number)(
+      target === EVENT_STREAM_FD ? fd : target,
+      ...rest,
+    )) as typeof fs.writeSync);
+  try {
+    body();
+    expect(fs.readFileSync(file, "utf8")).toBe("");
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("assertEventStreamFdOpen refuses an fd 3 open only for reading", () => {
+  // fstat succeeds on it, so without the write probe every event would be
+  // dropped on its first write with nothing said.
+  withFd3OpenedAs("r", () => {
+    expect(() => assertEventStreamFdOpen()).toThrow(UsageError);
+    expect(() => assertEventStreamFdOpen()).toThrow(
+      /file descriptor 3 is open but not writable/,
+    );
+  });
+});
+
+test("assertEventStreamFdOpen accepts a writable fd 3 and writes nothing to it", () => {
+  withFd3OpenedAs("w", () => {
+    expect(() => assertEventStreamFdOpen()).not.toThrow();
+  });
 });
 
 test("openEventStream builds no emitter, and never stats fd 3, when the flag is off", () => {
@@ -649,6 +697,7 @@ test("openEventStream takes the fail-closed preflight before it hands back an em
   expect(() => openEventStream(true)).toThrow(UsageError);
 
   vi.mocked(fs.fstatSync).mockReturnValue({} as fs.Stats);
+  vi.spyOn(fs, "writeSync").mockReturnValue(0);
   expect(openEventStream(true)).toBeDefined();
 });
 
@@ -780,6 +829,10 @@ test("drains a short write so a long line is never truncated", () => {
 });
 
 test("a broken pipe stops the writer without throwing into the exchange", () => {
+  // One emitter, so one writer: the broken flag has to survive between the two
+  // emissions below for the retry to be suppressed. Opened before the pipe
+  // breaks, as a supervisor's read end closes only after the run starts.
+  const emitter = openEventStreamWithFdWired();
   let calls = 0;
   vi.spyOn(fs, "writeSync").mockImplementation((() => {
     calls += 1;
@@ -788,9 +841,6 @@ test("a broken pipe stops the writer without throwing into the exchange", () => 
     });
   }) as unknown as typeof fs.writeSync);
 
-  // One emitter, so one writer: the broken flag has to survive between the two
-  // emissions below for the retry to be suppressed.
-  const emitter = openEventStreamWithFdWired();
   expect(() => emitter.result(true, ONE_TO_ONE)).not.toThrow();
   // A later emit does not retry the write once the stream is marked broken.
   emitter.warning("termsExchange", "raised after the broken write");
