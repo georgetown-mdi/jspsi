@@ -3,6 +3,7 @@ import {
   assertCountOnlyTransmitsNoColumn,
   inferMetadata,
   isDisclosedToPartner,
+  linkageDateOfBirthColumn,
 } from "./config/metadata.js";
 import {
   assertBothSidedDeduplicateImplemented,
@@ -1224,11 +1225,7 @@ export function prepareForExchange(
 
   let dateInputFormat: string | undefined;
   if (exchangeDataSpec.standardization === undefined) {
-    // Only a `role: linkage` date_of_birth column participates in linkage,
-    // so only one may drive the inferred date format.
-    const dobCol = metadata.find(
-      (c) => c.type === "date_of_birth" && c.role === "linkage",
-    );
+    const dobCol = linkageDateOfBirthColumn(metadata);
     if (dobCol !== undefined) {
       const inference = inferDateFormatWithCounts(
         columnValues(rawRows, dobCol.name),

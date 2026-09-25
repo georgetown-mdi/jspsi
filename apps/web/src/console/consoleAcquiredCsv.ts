@@ -1,12 +1,13 @@
 import type { AcceptorAcquiredCsv } from "@exchange/acceptorColumnsModel";
 import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { CSVRow } from "@alcove/core";
+import type { ProfiledDateInputFormats } from "@psi/authoring/advancedInvite";
 
 /**
  * The file facts the console acquires from the server-side profile instead of the
  * rows: on the console the file is read server-side, never in the browser, so the
- * intake has the name, size, column list, row count, and the pre-inferred
- * date-of-birth format -- everything the pure draft model needs -- but no rows. The
+ * intake has the name, size, column list, row count, and the per-column
+ * date-of-birth formats -- everything the pure draft model needs -- but no rows. The
  * per-column preview samples come through a separate path (the coverage/preview
  * providers), not this shape.
  */
@@ -15,7 +16,7 @@ interface ConsoleAcquiredProfile {
   sizeBytes: number;
   columns: Array<string>;
   rowCount: number;
-  dateInputFormat?: string;
+  dateInputFormats?: ProfiledDateInputFormats;
 }
 
 /**
@@ -25,7 +26,7 @@ interface ConsoleAcquiredProfile {
  *
  * `rawRows` is a getter that throws in dev and test and yields the empty array in a
  * production build. Any explicit `rawRows` read is a consumer that does not source
- * from the profile (rowCount, dateInputFormat, and the preview/coverage boundaries);
+ * from the profile (rowCount, dateInputFormats, and the preview/coverage boundaries);
  * failing loud in every dev run and test catches it at once, while degrading to
  * empty in production keeps an overlooked reader rendering an empty preview rather
  * than crashing the operator's session. The ESLint `rawRows` restriction is the
@@ -46,10 +47,10 @@ export function consoleAcquiredCsv(
     sizeBytes: profile.sizeBytes,
     columns: profile.columns,
     rowCount: profile.rowCount,
-    dateInputFormat: profile.dateInputFormat,
+    dateInputFormats: profile.dateInputFormats,
     // Signals to the draft reconciliations that this shape has no rows, so they
     // feed an empty row set to the seed helpers rather than reading the getter below
-    // (the date-of-birth format they need is already profiled).
+    // (the date-of-birth formats they need are already profiled).
     rowsWithheld: true,
   };
   Object.defineProperty(csv, "rawRows", {
@@ -58,7 +59,7 @@ export function consoleAcquiredCsv(
     get(): Array<CSVRow> {
       if (import.meta.env.DEV)
         throw new Error(
-          "console acquired CSV has no rawRows; read rowCount / dateInputFormat / the profile's column samples instead",
+          "console acquired CSV has no rawRows; read rowCount / dateInputFormats / the profile's column samples instead",
         );
       return [];
     },

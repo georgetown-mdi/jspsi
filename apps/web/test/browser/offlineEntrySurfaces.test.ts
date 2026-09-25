@@ -159,6 +159,7 @@ const directProfile: ProfiledJobInput = {
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
   sanitizedColumnPositions: [],
+  dateInputFormats: new Map(),
   columnSamples: new Map([
     ["client_id", ["1", "2"]],
     ["first_name", ["Ann", "Bo"]],

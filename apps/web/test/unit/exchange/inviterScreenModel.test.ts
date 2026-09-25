@@ -370,6 +370,7 @@ describe("the console's mounted-file commit", () => {
     columns: csv.columns,
     sanitizedColumnPositions: [],
     columnSamples: new Map(),
+    dateInputFormats: new Map(),
   };
 
   test("a delimiter change voids the commit and the draft it seeded", () => {
@@ -472,6 +473,7 @@ describe("what a voided commit can still compose", () => {
     columns: csv.columns,
     sanitizedColumnPositions: [],
     columnSamples: new Map(),
+    dateInputFormats: new Map(),
   };
 
   function seeded(state: InviterScreenState): InviterScreenState {

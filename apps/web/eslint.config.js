@@ -127,7 +127,7 @@ const fetchedBodyReadBan = {
 const rawRowsAccessBan = {
   selector: "MemberExpression[property.name='rawRows']",
   message:
-    "Read `.rawRows` only in the enumerated consumers (see rawRowsConsumers in apps/web/eslint.config.js). The console acquired CSV has no rows (a throwing getter); author from the profiled rowCount / dateInputFormat / column samples instead. If this is a legitimate new rawRows consumer, add its file to rawRowsConsumers.",
+    "Read `.rawRows` only in the enumerated consumers (see rawRowsConsumers in apps/web/eslint.config.js). The console acquired CSV has no rows (a throwing getter); author from the profiled rowCount / dateInputFormats / column samples instead. If this is a legitimate new rawRows consumer, add its file to rawRowsConsumers.",
 };
 
 // Every seat that hands the exchange driver an `onWarning` slot must fold the

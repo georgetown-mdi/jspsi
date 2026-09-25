@@ -8,7 +8,7 @@ describe("consoleAcquiredCsv", () => {
     sizeBytes: 4096,
     columns: ["first_name", "last_name", "dob"],
     rowCount: 12408,
-    dateInputFormat: "YYYY-MM-DD",
+    dateInputFormats: new Map([["dob", "YYYY-MM-DD"]]),
   };
 
   test("holds the profiled facts an authoring session needs, without the rows", () => {
@@ -17,7 +17,7 @@ describe("consoleAcquiredCsv", () => {
     expect(acquired.sizeBytes).toBe(4096);
     expect(acquired.columns).toEqual(["first_name", "last_name", "dob"]);
     expect(acquired.rowCount).toBe(12408);
-    expect(acquired.dateInputFormat).toBe("YYYY-MM-DD");
+    expect(acquired.dateInputFormats).toEqual(new Map([["dob", "YYYY-MM-DD"]]));
   });
 
   test("a stray rawRows read throws in dev/test rather than reading empty", () => {

@@ -165,6 +165,7 @@ function profileOf(csv: AcquiredCsv): ProfiledJobInput {
     columns: csv.columns,
     sanitizedColumnPositions: [],
     columnSamples: new Map(),
+    dateInputFormats: new Map(),
   };
 }
 

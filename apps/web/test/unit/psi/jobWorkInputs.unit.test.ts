@@ -202,7 +202,9 @@ describe("profileJobInput", () => {
       "last_name",
       "date_of_birth",
     ]);
-    expect(profile.dateInputFormat).toBe("YYYY-MM-DD");
+    expect(profile.dateInputFormats).toEqual([
+      { column: "date_of_birth", format: "YYYY-MM-DD" },
+    ]);
 
     // The samples ride the wire as an ordered array of {column, values} pairs, one
     // per column in the profile's column order, each equal to sampleInputValues over
@@ -254,15 +256,36 @@ describe("profileJobInput", () => {
     expect(Object.getPrototypeOf({})).toBe(Object.prototype);
   });
 
-  test("date format equals inferDateFormat over the whole date column", async () => {
+  test("each column's date format equals inferDateFormat over the whole column", async () => {
     const dir = tempDir("input");
     writeFixture(dir);
     const { data } = await loadCSVFile(
       fs.createReadStream(path.join(dir, "input.csv")),
     );
-    const dobs = columnValues(data, "date_of_birth");
     const profile = await profileJobInput(dir, "input.csv");
-    expect(profile.dateInputFormat).toBe(inferDateFormat(dobs));
+    const expected = profile.columns.flatMap((column) => {
+      const format = inferDateFormat(columnValues(data, column));
+      return format === undefined ? [] : [{ column, format }];
+    });
+    expect(expected).not.toEqual([]);
+    expect(profile.dateInputFormats).toEqual(expected);
+  });
+
+  test("infers a format for a date column the header names no date of birth", async () => {
+    // The operator may bind any column as the date of birth, so the profile infers
+    // every column's format rather than only the column the header names.
+    const dir = tempDir("input");
+    const csv = [
+      "first_name,dob,birth_date",
+      "Ann,01/15/1990,1990-01-15",
+      "Bo,12/31/1985,1985-12-31",
+    ].join("\n");
+    fs.writeFileSync(path.join(dir, "dates.csv"), csv);
+    const profile = await profileJobInput(dir, "dates.csv");
+    expect(profile.dateInputFormats).toEqual([
+      { column: "dob", format: "MM/DD/YYYY" },
+      { column: "birth_date", format: "YYYY-MM-DD" },
+    ]);
   });
 
   test("throws JobInputNotFoundError for an unknown name", async () => {

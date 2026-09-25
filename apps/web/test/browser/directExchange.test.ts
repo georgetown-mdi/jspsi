@@ -78,7 +78,7 @@ const CLIENTS_PROFILE = {
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
   sanitizedColumnPositions: [],
-  dateInputFormat: "%m/%d/%Y",
+  dateInputFormats: [],
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
     { column: "first_name", values: ["Ann", "Bo"] },
@@ -95,6 +95,7 @@ const ONE_COLUMN_PROFILE = {
   rowCount: 2,
   columns: [CLIENTS_PROFILE.columns.join("|")],
   sanitizedColumnPositions: [],
+  dateInputFormats: [],
   columnSamples: [
     {
       column: CLIENTS_PROFILE.columns.join("|"),

@@ -251,6 +251,31 @@ describe("prepareForExchange: date-of-birth format inference", () => {
     );
   });
 
+  test("infers from the first role: linkage date-of-birth column", () => {
+    const { info } = prepareLogging(
+      [
+        { first_name: "Alice", dob: "01/15/1990", birth_date: "1990-01-15" },
+        { first_name: "Bob", dob: "12/31/1985", birth_date: "1985-12-31" },
+      ],
+      [
+        dobMetadata[0],
+        {
+          name: "dob",
+          type: "date_of_birth",
+          role: "payload",
+          isPayload: true,
+        },
+        {
+          name: "birth_date",
+          type: "date_of_birth",
+          role: "linkage",
+          isPayload: false,
+        },
+      ],
+    );
+    expect(info).toContain("inferred date of birth format: YYYY-MM-DD");
+  });
+
   test("warns when no format parses most of the values", () => {
     const { info, warn } = prepareLogging(
       dobRows(["1990-01-15", "1985-06-28", "01/15/1990", "02/20/1985"]),

@@ -60,6 +60,7 @@ import type {
   AdvancedInviteDraft,
   AdvancedInviteSeed,
   AdvancedValidation,
+  ProfiledDateInputFormats,
 } from "./advancedInviteTypes";
 
 /**
@@ -932,7 +933,7 @@ export function importedConstraintDivergenceMessage(
   terms: LinkageTerms,
   seed: AdvancedInviteSeed,
   rawRows: ReadonlyArray<CSVRow> = [],
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): string | undefined {
   const rebuilt = buildAdvancedTerms(
     draftFromTerms(
@@ -940,7 +941,7 @@ export function importedConstraintDivergenceMessage(
       seed,
       INVITATION_LIFETIME_SECONDS,
       rawRows,
-      dateInputFormat,
+      dateInputFormats,
     ),
   );
   const importedByName = new Map(

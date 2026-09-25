@@ -40,6 +40,7 @@ import type {
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
+import type { ProfiledDateInputFormats } from "@psi/authoring/advancedInvite";
 
 /**
  * The pure, React-free model behind the acceptor console's "Confirm your columns"
@@ -73,11 +74,11 @@ export interface AcceptorAcquiredCsv {
   /** The file's row total, held explicitly so display surfaces never read
    * `rawRows.length` (the console profiles the count server-side). */
   rowCount: number;
-  /** A pre-inferred date-of-birth input layout
-   * ({@link dateInputFormatForColumns}), set only by sources that profile it
-   * without rows (the console); when absent, derivations infer it from the
-   * rows. */
-  dateInputFormat?: string;
+  /** The per-column date-of-birth input layouts a profile inferred
+   * ({@link dateInputFormatsForColumns}), set only by sources that profile
+   * without rows (the console); when absent, derivations infer the layout from
+   * the rows. */
+  dateInputFormats?: ProfiledDateInputFormats;
 }
 
 /**
@@ -140,7 +141,7 @@ export function acceptorColumnsEditorState(
   state: AcceptorColumnsState,
   linkageTerms: LinkageTerms,
   rawRows: ReadonlyArray<CSVRow>,
-  dateInputFormat?: string,
+  dateInputFormats?: ProfiledDateInputFormats,
 ): { metadata: Metadata; standardization: Standardization } {
   const { metadata } = state;
   const fieldByName = new Map(
@@ -162,7 +163,7 @@ export function acceptorColumnsEditorState(
     metadata,
     linkageTerms,
     rawRows,
-    dateInputFormat,
+    dateInputFormats,
   );
   const standardization = applyStepOverrides(
     applyInputOverrides(baseStandardization, effectiveInputOverrides),

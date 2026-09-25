@@ -261,7 +261,7 @@ describe("KeysTab: expert import/export over a rows-withheld console shape", () 
       sizeBytes: 4096,
       columns: ["client_id", "first_name", "last_name", "dob", "ssn4"],
       rowCount: 12408,
-      dateInputFormat: "%m/%d/%Y",
+      dateInputFormats: new Map([["dob", "MM/DD/YYYY"]]),
     });
     const editor = editorFromCsv("Dana Okafor", consoleCsv);
     app.render(

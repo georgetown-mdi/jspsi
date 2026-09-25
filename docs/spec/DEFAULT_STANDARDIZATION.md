@@ -303,8 +303,12 @@ parameter that varies per party.
 
 `MM/DD/YYYY` is the value used when no format is supplied. An exchange that
 authors no `standardization` supplies one instead: it infers the layout from
-the values of the `role: linkage` `date_of_birth` column the field binds to, so
-a file written `YYYY-MM-DD` is parsed as written rather than dropped wholesale.
+the values of the first `role: linkage` `date_of_birth` column, the column the
+field binds to, so a file written `YYYY-MM-DD` is parsed as written rather than
+dropped wholesale. A front end that writes the default standardization out for
+its operator -- the CLI's `init` and invite paths, the web editors, the
+console -- infers from that same column, so a column the operator retypes as
+the date of birth is parsed with its own layout.
 
 Inference scans the column's non-empty values, up to the scan cap, and tests
 each against every candidate in the table below. A candidate parses a value

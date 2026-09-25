@@ -436,6 +436,7 @@ export {
   disclosedColumnNames,
   inferMetadata,
   isDisclosedToPartner,
+  linkageDateOfBirthColumn,
   overlongDisclosedColumnPositions,
   ownResultColumnNames,
   safeParseMetadata,
