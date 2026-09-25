@@ -25,6 +25,7 @@ import {
 import { ConfigManager } from "../src/utils/serverConfig";
 import { registerServer } from "../src/httpServer";
 
+import { attachRequestAbortSignal } from "./requestAbortSignal";
 import { hardenUpgradeSurface } from "./upgradeHardening";
 
 import type { AddressInfo } from "node:net";
@@ -40,6 +41,9 @@ setLogLevel(config.LOG_LEVEL);
 const log = getLogger("server-entry");
 
 const nitroApp = useNitroApp();
+
+// Give each handler's `request.signal` the client disconnect.
+nitroApp.hooks.hook("request", attachRequestAbortSignal);
 
 const server =
   cert && key
