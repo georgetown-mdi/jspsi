@@ -6,6 +6,10 @@ import { PSIParticipant } from "../../src/psi/participant";
 import { InProcessPsiEngine } from "../../src/psi/psiEngine";
 import { createMessagePipe } from "../../src/connection/messageConnection";
 import {
+  AEAD_ENVELOPE_OVERHEAD_BYTES,
+  EncryptedMessageConnection,
+} from "../../src/connection/encryptedMessageConnection";
+import {
   binaryPackByteStringLength,
   minimumPsiSetFrameBytes,
   webrtcFrameReceiveCharge,
@@ -47,10 +51,14 @@ function values(count: number, prefix: string): Array<string> {
   return Array.from({ length: count }, (_unused, i) => `${prefix}-${i}`);
 }
 
-/** The packed length of the frame the library builds for `set` in `role`. */
+/**
+ * The packed length of the frame the library builds for `set` in `role`, sent
+ * inside an envelope of `envelopeBytes`.
+ */
 async function builtFrameBytes(
   role: "starter" | "joiner",
   set: Array<string>,
+  envelopeBytes = 0,
 ): Promise<number> {
   const engine = new InProcessPsiEngine(
     psiLibrary,
@@ -63,23 +71,43 @@ async function builtFrameBytes(
       role === "starter"
         ? (await engine.createServerSetup(set)).setup
         : await engine.createClientRequest(set);
-    return binaryPackByteStringLength(bytes.byteLength);
+    return binaryPackByteStringLength(bytes.byteLength + envelopeBytes);
   } finally {
     engine.dispose();
   }
 }
 
+const SESSION_KEY = new Uint8Array(32).fill(0x42) as Uint8Array<ArrayBuffer>;
+
 /**
  * One cascade round between a starter holding `starterSet` and a joiner
- * holding `joinerSet`, each advertising its own bound. Resolves to how each
- * side ended.
+ * holding `joinerSet`, each advertising its own bound, over AEAD-wrapped
+ * connections when `encrypted`. Resolves to how each side ended.
  */
 async function round(
   starterSet: Array<string>,
   joinerSet: Array<string>,
   bounds: { starter?: number; joiner?: number },
+  encrypted = false,
 ): Promise<{ starter: unknown; joiner: unknown }> {
-  const [a, b] = createMessagePipe();
+  const [rawA, rawB] = createMessagePipe();
+  const [a, b]: Array<MessageConnection> = encrypted
+    ? await Promise.all([
+        EncryptedMessageConnection.create(
+          withFrameBound(rawA, bounds.starter),
+          SESSION_KEY,
+          "initiator",
+        ),
+        EncryptedMessageConnection.create(
+          withFrameBound(rawB, bounds.joiner),
+          SESSION_KEY,
+          "responder",
+        ),
+      ])
+    : [
+        withFrameBound(rawA, bounds.starter),
+        withFrameBound(rawB, bounds.joiner),
+      ];
   const starter = new PSIParticipant(
     "server",
     psiLibrary,
@@ -98,15 +126,8 @@ async function round(
       (err: unknown) => err,
     );
   const [starterEnd, joinerEnd] = await Promise.all([
-    settle(
-      starter.identifyIntersection(
-        withFrameBound(a, bounds.starter),
-        starterSet,
-      ),
-    ),
-    settle(
-      joiner.identifyIntersection(withFrameBound(b, bounds.joiner), joinerSet),
-    ),
+    settle(starter.identifyIntersection(a, starterSet)),
+    settle(joiner.identifyIntersection(b, joinerSet)),
   ]);
   await a.close();
   await b.close();
@@ -160,6 +181,32 @@ test("the reply returning a partner's set over the bound is refused as the partn
   expect((ended.starter as WebRtcFrameLimitError).setOwner).toBe("partner");
   expect((ended.starter as Error).message).toMatch(/Ask your partner/);
   expect(ended.joiner).toBeInstanceOf(PeerAbortError);
+});
+
+test("over an encrypted connection, the bound is charged the envelope too", async () => {
+  const set = values(100, "e");
+  const wrappedCharge = webrtcFrameReceiveCharge(
+    await builtFrameBytes("starter", set, AEAD_ENVELOPE_OVERHEAD_BYTES),
+  );
+
+  const at = await round(set, values(3, "e"), { starter: wrappedCharge }, true);
+  expect(at).toEqual({ starter: "completed", joiner: "completed" });
+
+  const under = await round(
+    set,
+    values(3, "e"),
+    { starter: wrappedCharge - 1 },
+    true,
+  );
+  expect(under.starter).toBeInstanceOf(WebRtcFrameLimitError);
+  expect((under.starter as WebRtcFrameLimitError).setOwner).toBe("local");
+  expect(under.joiner).toBeInstanceOf(PeerAbortError);
+
+  // Unwrapped, the same frame fits one byte under the wrapped charge.
+  const plain = await round(set, values(3, "e"), {
+    starter: wrappedCharge - 1,
+  });
+  expect(plain).toEqual({ starter: "completed", joiner: "completed" });
 });
 
 test("a transport stating no bound sends any set", async () => {

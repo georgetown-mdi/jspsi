@@ -392,7 +392,9 @@ export class PSIParticipant {
   ): Promise<void> {
     const bound = conn.outboundWebRtcFrameBound?.();
     if (bound !== undefined) {
-      const packedFrameBytes = binaryPackByteStringLength(frame.byteLength);
+      const packedFrameBytes = binaryPackByteStringLength(
+        frame.byteLength + (conn.outboundFrameOverheadBytes?.() ?? 0),
+      );
       if (webrtcFrameExceedsBound(packedFrameBytes, bound)) {
         await sendAbort(conn, [WEBRTC_FRAME_LIMIT_ABORT_REASON]);
         throw new WebRtcFrameLimitError(

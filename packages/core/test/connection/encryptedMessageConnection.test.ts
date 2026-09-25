@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
 
 import {
   EncryptedMessageConnection,
+  AEAD_ENVELOPE_OVERHEAD_BYTES,
   AEAD_ENVELOPE_VERSION,
   IV_SEQ_OFFSET,
   TYPE_JSON,
@@ -1071,4 +1072,47 @@ test("setInboundFrameCap reaches the inner transport's read gate", async () => {
 
   expect(caps).toEqual([4096, undefined]);
   await conn.close();
+});
+
+test("the envelope a binary payload is sent in is the payload plus the stated overhead", async () => {
+  const [rawPeer, rawLocal] = createMessagePipe();
+  const conn = await EncryptedMessageConnection.create(
+    rawLocal,
+    SESSION_KEY,
+    "initiator",
+  );
+  for (const length of [0, 1, 1000]) {
+    await conn.send(new Uint8Array(length));
+    const envelope = (await rawPeer.receive()) as Uint8Array;
+    expect(envelope.byteLength - length).toBe(AEAD_ENVELOPE_OVERHEAD_BYTES);
+  }
+  expect(conn.outboundFrameOverheadBytes()).toBe(AEAD_ENVELOPE_OVERHEAD_BYTES);
+  await conn.close();
+  await rawPeer.close();
+});
+
+test("the outbound frame bound is forwarded, and a nested wrapper's overhead adds up", async () => {
+  const [, rawLocal] = createMessagePipe();
+  const inner: MessageConnection = {
+    send: (data) => rawLocal.send(data),
+    receive: (timeoutMs) => rawLocal.receive(timeoutMs),
+    close: () => rawLocal.close(),
+    outboundWebRtcFrameBound: () => 4096,
+  };
+  const once = await EncryptedMessageConnection.create(
+    inner,
+    SESSION_KEY,
+    "initiator",
+  );
+  const twice = await EncryptedMessageConnection.create(
+    once,
+    SESSION_KEY,
+    "initiator",
+  );
+  expect(once.outboundWebRtcFrameBound()).toBe(4096);
+  expect(twice.outboundWebRtcFrameBound()).toBe(4096);
+  expect(twice.outboundFrameOverheadBytes()).toBe(
+    2 * AEAD_ENVELOPE_OVERHEAD_BYTES,
+  );
+  await twice.close();
 });

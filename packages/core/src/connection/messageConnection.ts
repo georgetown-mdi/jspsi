@@ -128,6 +128,13 @@ export interface MessageConnection {
    * nothing sent. See docs/spec/CHANNEL_SECURITY.md.
    */
   outboundWebRtcFrameBound?(): number | undefined;
+  /**
+   * Optional: the bytes this connection adds around each binary frame before
+   * the transport under it packs the frame (an encryption envelope), or 0 when
+   * absent. A sender checking a frame against
+   * {@link outboundWebRtcFrameBound} adds it to the frame's length first.
+   */
+  outboundFrameOverheadBytes?(): number;
 }
 
 /** The transport's interface to push inbound events into the queue. */
