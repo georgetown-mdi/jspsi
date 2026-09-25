@@ -216,9 +216,12 @@ marks it as either a chunk envelope or the close sentinel.
 - The browser delivers an assembled chunked frame as a `Uint8Array` and an
   unchunked one as an `ArrayBuffer`; a consumer must normalize both.
 
-The inbound path is bounded before anything is reassembled --
-`MAX_WEBRTC_FRAME_BYTES` and the structural scan that goes with it are specified
-in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#webrtc-data-channel-inbound-bound).
+The inbound path is bounded before anything is reassembled. Both parties refuse
+an envelope whose message id is not an integer, whose count is not a positive
+integer, whose index is outside that count, or whose chunk bytes are not binary.
+`MAX_WEBRTC_FRAME_BYTES`, the chunk-count cap, and the structural scan that goes
+with them are specified in
+[CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#webrtc-data-channel-inbound-bound).
 
 ### Outbound encoding
 

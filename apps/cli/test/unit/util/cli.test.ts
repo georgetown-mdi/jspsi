@@ -6,6 +6,7 @@ import { Writable } from "node:stream";
 import { expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import {
+  AuthenticationError,
   buildKeyStrings,
   ConnectionError,
   InternalConsistencyError,
@@ -26,6 +27,7 @@ import {
   writeOutput,
 } from "../../../src/util/dataIo";
 import {
+  AUTHENTICATION_FAILED_EXIT_CODE,
   exitCodeForError,
   exitWithError,
   INTERNAL_FAULT_EXIT_CODE,
@@ -493,6 +495,15 @@ test("exitCodeForError: a ConnectionError subclass follows its own kind", () => 
   // constructor fixed. PeerAbortError fixes `transport` and its class doc rests on
   // reaching 69: the peer died, which is not the operator's to fix.
   expect(exitCodeForError(new PeerAbortError())).toBe(69);
+});
+
+test("exitCodeForError: an AuthenticationError is EX_NOPERM, unlike its security kind", () => {
+  // The class, not the kind, selects 77: a plain security-kind ConnectionError
+  // (a frame that failed to decrypt) stays 69 above.
+  const failure = new AuthenticationError("key exchange authentication failed");
+  expect(failure.kind).toBe("security");
+  expect(exitCodeForError(failure)).toBe(AUTHENTICATION_FAILED_EXIT_CODE);
+  expect(AUTHENTICATION_FAILED_EXIT_CODE).toBe(77);
 });
 
 test("exitCodeForError: an unrecognized standardization function is EX_USAGE", () => {

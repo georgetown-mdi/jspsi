@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
 
+import { buildRunOutputs, failedRunRecordOffer } from "@psi/runOutputs";
 import {
   minimalExchangeResult,
   minimalPreparedExchange,
 } from "@alcove/core/testing";
-import { buildRunOutputs } from "@psi/runOutputs";
 import { getDefaultLinkageTerms } from "@alcove/core";
 
 import type { ExchangeResult, PreparedExchange } from "@alcove/core";
@@ -281,5 +281,46 @@ describe("buildRunOutputs", () => {
     expect(outputs.kind === "matched" && outputs.resultsUrl).toBe(created[0]);
     expect(created).toHaveLength(1);
     expect(revoked).toEqual([]);
+  });
+});
+
+describe("failedRunRecordOffer", () => {
+  const terminatedAudit = {
+    record: {
+      createdAt: "2026-07-08T14:32:00.000Z",
+      outcome: "receipt-swap-terminated",
+      certificateMismatchObserved: true,
+    },
+    keys: { salts: {} },
+  } as unknown as NonNullable<ExchangeResult["audit"]>;
+
+  test("offers the record pair with the outcome and marker the record states", async () => {
+    const { urls, created, revoked, blobs } = recordingUrls();
+
+    const offer = failedRunRecordOffer(terminatedAudit, urls);
+
+    expect(offer).toEqual({
+      kind: "available",
+      outcome: "receipt-swap-terminated",
+      recordCertificateMismatchObserved: true,
+      downloads: {
+        recordUrl: created[0],
+        recordFileName: "alcove-record-2026-07-08T14-32-00-000Z.json",
+        keysUrl: created[1],
+        keysFileName: "alcove-record-2026-07-08T14-32-00-000Z.keys.json",
+      },
+    });
+    expect(await blobs[0].text()).toContain("receipt-swap-terminated");
+    expect(revoked).toEqual([]);
+  });
+
+  test("a throw after the record url was created revokes it before propagating", () => {
+    const { urls, created, revoked } = recordingUrls({ failOnCall: 2 });
+
+    expect(() => failedRunRecordOffer(terminatedAudit, urls)).toThrow(
+      "createObjectURL refused",
+    );
+    expect(created).toHaveLength(1);
+    expect(revoked).toEqual(created);
   });
 });

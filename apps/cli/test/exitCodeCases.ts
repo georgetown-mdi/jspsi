@@ -1,4 +1,5 @@
 import {
+  AuthenticationError,
   ConnectionError,
   InternalConsistencyError,
   UsageError,
@@ -39,6 +40,11 @@ export const ERROR_CLASS_EXIT_CODES: ReadonlyArray<{
     planted: 'a ConnectionError of kind "transport"',
     code: 69,
     plant: () => new ConnectionError("the server went away", "transport"),
+  },
+  {
+    planted: "an AuthenticationError",
+    code: 77,
+    plant: () => new AuthenticationError("key exchange authentication failed"),
   },
   {
     planted: "an InternalConsistencyError",

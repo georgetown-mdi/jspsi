@@ -297,6 +297,7 @@ import {
   runExchange,
   exchangeRecordFromFailure,
   exchangeRecordOwedButUnbuilt,
+  AuthenticationError,
   PeerAbortError,
   ConnectionError,
   FrameSizeExceededError,
@@ -3368,7 +3369,7 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
   expectNoGenericRecoveryAdvisory(mockState.errors);
 }, 20_000);
 
-test("runProtocol marks the key-file path when the rotated token cannot be saved", async () => {
+test("runProtocol marks the key-file path when the rotated token cannot be saved, and maps to exit 77", async () => {
   // The refusal names the operator's own key file, so it marks that path and
   // the display sink shows it as they typed it rather than doubling every
   // separator. The fixture path holds backslashes off Windows too, where a
@@ -3419,6 +3420,16 @@ test("runProtocol marks the key-file path when the rotated token cannot be saved
       .filter((span) => span.operatorSupplied)
       .map((span) => span.text),
   ).toContain(keyFileA);
+
+  // The secrets may now differ, so the refusal exits with the authentication
+  // code a retry cannot clear, through the real command exit mapper.
+  const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
+  try {
+    await runOrExit("test-a", () => Promise.reject(thrown));
+    expect(exitSpy).toHaveBeenCalledWith(77);
+  } finally {
+    exitSpy.mockRestore();
+  }
 }, 20_000);
 
 test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceededError", async () => {
@@ -5983,10 +5994,10 @@ test("runProtocol leaves ephemeralSessions unset when connection_per_poll is abs
 // ConnectionError): a failed key-exchange authentication driven by a genuine
 // mismatched-secret handshake over the real filedrop transport, and an SFTP
 // host-key verification failure driven through core's real hostVerifier wrap
-// (mocked transport). Both must keep exit code 69, pinned through the real
-// runOrExit mapper fed the real captured error.
+// (mocked transport). Both exit 77, the authentication code, pinned through the
+// real runOrExit mapper fed the real captured error.
 
-test("a mismatched shared secret under --event-stream emits category security and maps to exit 69", async () => {
+test("a mismatched shared secret under --event-stream emits category security and maps to exit 77", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
 
@@ -6036,10 +6047,10 @@ test("a mismatched shared secret under --event-stream emits category security an
   }
 
   // The real handshake failure: the generic non-oracular message, held by a
-  // security-kind ConnectionError.
+  // security-kind AuthenticationError.
   expect(resA.status).toBe("rejected");
   const reasonA = (resA as PromiseRejectedResult).reason as unknown;
-  expect(reasonA).toBeInstanceOf(ConnectionError);
+  expect(reasonA).toBeInstanceOf(AuthenticationError);
   expect((reasonA as ConnectionError).kind).toBe("security");
   expect((reasonA as ConnectionError).message).toBe(
     "key exchange authentication failed",
@@ -6053,19 +6064,17 @@ test("a mismatched shared secret under --event-stream emits category security an
   expect(lines[1].category).toBe("security");
   expect(lines[1].v).toBe(1);
 
-  // The exit code stays 69: feed the real captured error through the real
-  // command exit mapper (a ConnectionError is not a UsageError and has no
-  // exitCode of its own).
+  // Feed the real captured error through the real command exit mapper.
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
   try {
     await runOrExit("test-a", () => Promise.reject(reasonA));
-    expect(exitSpy).toHaveBeenCalledWith(69);
+    expect(exitSpy).toHaveBeenCalledWith(77);
   } finally {
     exitSpy.mockRestore();
   }
 }, 20_000);
 
-test("an SFTP host-key mismatch under --event-stream emits category security and maps to exit 69", async () => {
+test("an SFTP host-key mismatch under --event-stream emits category security and maps to exit 77", async () => {
   // The pinned fingerprint is well-formed but matches no key, so core's real
   // hostVerifier wrap (driven by the mocked adapter's connect) fails closed
   // with its mismatch error.
@@ -6097,7 +6106,7 @@ test("an SFTP host-key mismatch under --event-stream emits category security and
   }
 
   expect((err as Error).message).toMatch(/SFTP host-key verification failed/);
-  expect(err).toBeInstanceOf(ConnectionError);
+  expect(err).toBeInstanceOf(AuthenticationError);
   expect((err as ConnectionError).kind).toBe("security");
 
   const lines = takeFd3Lines();
@@ -6110,7 +6119,7 @@ test("an SFTP host-key mismatch under --event-stream emits category security and
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
   try {
     await runOrExit("test", () => Promise.reject(err));
-    expect(exitSpy).toHaveBeenCalledWith(69);
+    expect(exitSpy).toHaveBeenCalledWith(77);
   } finally {
     exitSpy.mockRestore();
   }

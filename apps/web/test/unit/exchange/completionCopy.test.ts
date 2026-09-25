@@ -3,11 +3,13 @@ import { describe, expect, test } from "vitest";
 import {
   CERTIFICATE_MISMATCH_RECORD_NOTICE,
   COMPLETED_RECORD_NOTICE,
+  COMPLETED_RECORD_PAGE_NOTICE,
   RECORD_UNANSWERED_LEAD,
   RECORD_UNANSWERED_NOTICE,
   TERMINATED_RECORD_KEYS_NOTICE,
   TERMINATED_RECORD_LEAD,
   TERMINATED_RECORD_NOTICE,
+  TERMINATED_RECORD_PAGE_NOTICE,
   UNDESCRIBABLE_RECORD_LEAD,
   UNDESCRIBABLE_RECORD_NOTICE,
   recordPanelCopy,
@@ -255,6 +257,44 @@ describe("the exchange-record copy", () => {
     expect(
       recordPanelCopy({ kind: "unanswered" }).certificateMismatch,
     ).toBeUndefined();
+  });
+
+  test("a record this page holds names the page, not a console, as what discards it", () => {
+    // An in-browser run that failed holding a record offers it in the same panel
+    // a console run's takes; the page is the only place that pair lives, so the
+    // copy names leaving or re-running on the page as what discards it.
+    const offered = (outcome: ExchangeRecordOutcome) =>
+      ({
+        kind: "available",
+        outcome,
+        recordCertificateMismatchObserved: false,
+        downloads: {
+          recordUrl: "blob:record",
+          recordFileName: "alcove-record.json",
+          keysUrl: "blob:keys",
+          keysFileName: "alcove-record.keys.json",
+        },
+      }) as const;
+
+    const terminated = recordPanelCopy(
+      offered("receipt-swap-terminated"),
+      "page",
+    );
+    expect(terminated.lead).toBe(TERMINATED_RECORD_LEAD);
+    expect(terminated.notice).toBe(TERMINATED_RECORD_PAGE_NOTICE);
+    const completed = recordPanelCopy(offered("completed"), "page");
+    expect(completed.notice).toBe(COMPLETED_RECORD_PAGE_NOTICE);
+    for (const copy of [terminated, completed]) {
+      expect(copy.lead + copy.notice).not.toMatch(/console/i);
+      expect(copy.notice).toContain("disclosure accounting");
+      expect(copy.notice).toContain("leaving the page discards it");
+    }
+    expect(TERMINATED_RECORD_PAGE_NOTICE).toContain("Download it now");
+    expect(TERMINATED_RECORD_PAGE_NOTICE).toContain("still happened");
+    // The console default is unchanged.
+    expect(recordPanelCopy(offered("receipt-swap-terminated")).notice).toBe(
+      TERMINATED_RECORD_NOTICE,
+    );
   });
 
   test("the unanswered copy states the silence conditionally", () => {

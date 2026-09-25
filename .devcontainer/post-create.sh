@@ -51,8 +51,9 @@ fi
 # (`bypassPermissions` -- the container's egress firewall plus the checked-in
 # deny-list and protected-branch push hook are the safety floor, and both deny
 # rules and PreToolUse hooks apply even in that mode), the session model and
-# effort, the editor and TUI preferences, and the statusline, read from the
-# workspace bind-mount so the repository carries the one copy.
+# effort, the editor and TUI preferences, transcript retention, and the
+# statusline, read from the workspace bind-mount so the repository carries
+# the one copy.
 #
 # The copy is wholesale rather than key-by-key: the ~/.claude volume outlives
 # nothing but the container it was created for, and a volume seeded once then

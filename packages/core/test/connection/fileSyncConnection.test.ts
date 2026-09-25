@@ -22,6 +22,7 @@ import type {
   FileDropConnectionConfig,
 } from "../../src/config/connection";
 import {
+  AuthenticationError,
   UsageError,
   BilateralModeMismatchError,
   ConnectionClosedError,
@@ -737,8 +738,8 @@ test("open (sftp) with no pin records no observed host key", async () => {
     .catch((e: unknown) => e);
   expect((err as Error).message).toMatch(/no host_key_fingerprint is pinned/);
   // The no-pin refusal is the other host-identity trust failure: the same
-  // security-kind ConnectionError as the pinned mismatch, cause preserved.
-  expect(err).toBeInstanceOf(ConnectionError);
+  // security-kind AuthenticationError as the pinned mismatch, cause preserved.
+  expect(err).toBeInstanceOf(AuthenticationError);
   expect((err as ConnectionError).kind).toBe("security");
   expect((err as ConnectionError).cause).toBeInstanceOf(Error);
   expect(conn.observedHostKey).toBeUndefined();
@@ -767,9 +768,9 @@ test("open (sftp) with a mismatched pin fails closed and names the re-pin recove
     .catch((e: unknown) => e);
   expect((err as Error).message).toMatch(/SFTP host-key verification failed/);
   // A host-identity mismatch is a trust-boundary failure: a security-kind
-  // ConnectionError (the classification the web classifier and the CLI event
+  // AuthenticationError (the classification the web classifier and the CLI event
   // stream key on), with the underlying connect rejection preserved as cause.
-  expect(err).toBeInstanceOf(ConnectionError);
+  expect(err).toBeInstanceOf(AuthenticationError);
   expect((err as ConnectionError).kind).toBe("security");
   expect((err as ConnectionError).cause).toBeInstanceOf(Error);
   await expect(
