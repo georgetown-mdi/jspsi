@@ -19,7 +19,10 @@ import {
   assertFirstRoundFitsWebRtcFrame,
   prepareForExchange,
 } from "../../src/exchange";
-import { StandardizedKeyIterable } from "../../src/standardization";
+import {
+  fanOutReachedMatchingRefusal,
+  StandardizedKeyIterable,
+} from "../../src/standardization";
 import { getLogger } from "../../src/utils/logger";
 import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
@@ -292,6 +295,48 @@ test("the first-round check leaves a single-pass exchange to its dataset ceiling
   expect(() =>
     assertFirstRoundFitsWebRtcFrame(preparedWith(rows), 100),
   ).toThrow(WebRtcFrameLimitError);
+});
+
+test("the first-round check raises the fan-out refusal for a candidate set a count-only round refuses", () => {
+  const split = [{ function: "split_on", params: { delimiter: " " } }];
+  const cascade = prepareForExchange(
+    {
+      linkageTerms: {
+        version: "1.0.0",
+        date: "2026-01-01",
+        algorithm: "psi",
+        deduplicate: false,
+        linkageStrategy: "cascade",
+        identity: "Tester",
+        output: { expectsOutput: true, shareWithPartner: true },
+        linkageFields: [{ name: "firstName", type: "first_name" }],
+        linkageKeys: [
+          {
+            name: "firstName",
+            elements: [{ field: "firstName", transform: split }],
+          },
+        ],
+      },
+    },
+    "Tester",
+    Array.from({ length: 200 }, (_unused, i) => ({
+      first_name: `${letters(2 * i)} ${letters(2 * i + 1)}`,
+    })),
+    ["first_name"],
+  );
+  // A count-only exchange assembled without the prepare step's refusal.
+  const countOnly = {
+    ...cascade,
+    linkageTerms: { ...cascade.linkageTerms, algorithm: "psi-c" as const },
+  };
+  const bound = webrtcFrameReceiveCharge(minimumPsiSetFrameBytes(100));
+
+  expect(() => assertFirstRoundFitsWebRtcFrame(cascade, bound)).toThrow(
+    WebRtcFrameLimitError,
+  );
+  expect(() => assertFirstRoundFitsWebRtcFrame(countOnly, bound)).toThrow(
+    fanOutReachedMatchingRefusal().message,
+  );
 });
 
 afterEach(() => vi.restoreAllMocks());

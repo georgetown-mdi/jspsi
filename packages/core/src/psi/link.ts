@@ -137,17 +137,21 @@ interface IndexableIterable<T> extends Iterable<T> {
   [index: number]: T | undefined;
 }
 
-// The value a round that resolves no candidate set reads a record through: a
-// record holding several is refused rather than narrowed to one candidate or
-// dropped, either of which would match on less than the terms declare. Key
-// realization holds the whole candidate set (buildKeyStrings), so this is the
-// point a round applies the refusal at. A count-only round is held to it
-// unconditionally -- psi-c counts matched VALUES where the resolution accepts
-// at most one pair per record, so a candidate set would over-report the
-// linkage the count is used to justify -- while the cascade applies it behind
-// the strategy allowlist (docs/spec/PROTOCOL.md, Where a candidate set is
-// refused).
-function requireSingleCandidate(value: KeyCandidates): string | undefined {
+/**
+ * The value a round that resolves no candidate set reads a record through: a
+ * record holding several is refused rather than narrowed to one candidate or
+ * dropped, either of which would match on less than the terms declare. Key
+ * realization holds the whole candidate set (buildKeyStrings), so this is the
+ * point a round applies the refusal at. A count-only round is held to it
+ * unconditionally -- psi-c counts matched VALUES where the resolution accepts
+ * at most one pair per record, so a candidate set would over-report the
+ * linkage the count is used to justify -- while the cascade applies it behind
+ * the strategy allowlist (docs/spec/PROTOCOL.md, Where a candidate set is
+ * refused).
+ */
+export function requireSingleCandidate(
+  value: KeyCandidates,
+): string | undefined {
   if (value === undefined || typeof value === "string") return value;
   throw fanOutReachedMatchingRefusal();
 }

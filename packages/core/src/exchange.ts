@@ -25,6 +25,7 @@ import {
   declaredKeyWidth,
   localFanOutFactor,
   StandardizedKeyIterable,
+  type KeyCandidates,
 } from "./standardization.js";
 import {
   assertFanOutImplemented,
@@ -50,6 +51,7 @@ import {
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 import {
   droppingRoundSetSize,
+  requireSingleCandidate,
   linkViaCountOnlyPSI,
   linkViaPSI,
   linkViaSinglePassPSI,
@@ -1405,7 +1407,9 @@ export function prepareForExchange(
  * cardinality the terms resolve, taken in both PSI roles, since which one this
  * party plays is not yet known. Every later round, and a frame this bound
  * cannot size from a count, is checked on the frame the round builds
- * (`PSIParticipant`). A single-pass exchange is not checked here: its
+ * (`PSIParticipant`). Where the round reads one candidate per record, a
+ * record holding a candidate set raises the round's own fan-out refusal
+ * rather than this one. A single-pass exchange is not checked here: its
  * dataset ceiling holds every frame it sends under the bound
  * (docs/spec/PROTOCOL.md, "The single-pass dataset ceiling").
  *
@@ -1432,9 +1436,16 @@ export function assertFirstRoundFitsWebRtcFrame(
     declaredKeyWidth(key, 0) *
     localFanOutFactor(dataset.declaresFanOut);
   if (!exceeds(candidateCeiling)) return;
-  const roundSetSize = (isReceiver: boolean): number | undefined => {
+  // The round's single-candidate rule, applied here so a candidate set the
+  // round would refuse raises the round's refusal, which names the cause,
+  // rather than this check's.
+  const readsSingleCandidate =
+    linkageTerms.algorithm === "psi-c" ||
+    !candidateSetIsImplementedForStrategy(linkageTerms.linkageStrategy);
+  const roundSetSize = (isReceiver: boolean): number | Error | undefined => {
+    let values: Array<KeyCandidates>;
     try {
-      return droppingRoundSetSize(
+      values = Array.from(
         new StandardizedKeyIterable(
           key,
           dataset,
@@ -1449,11 +1460,24 @@ export function assertFirstRoundFitsWebRtcFrame(
       // round reports it, and this check refuses nothing it cannot count.
       return undefined;
     }
+    try {
+      return droppingRoundSetSize(
+        readsSingleCandidate ? values.map(requireSingleCandidate) : values,
+      );
+    } catch (refusal) {
+      return refusal as Error;
+    }
   };
+  const refusedInRole = (
+    size: number | Error | undefined,
+  ): size is number | Error =>
+    size !== undefined && (typeof size !== "number" || exceeds(size));
   const asSender = roundSetSize(false);
-  if (asSender === undefined || !exceeds(asSender)) return;
+  if (!refusedInRole(asSender)) return;
   const asReceiver = roundSetSize(true);
-  if (asReceiver === undefined || !exceeds(asReceiver)) return;
+  if (!refusedInRole(asReceiver)) return;
+  if (asSender instanceof Error) throw asSender;
+  if (asReceiver instanceof Error) throw asReceiver;
   const fewest = Math.min(asSender, asReceiver);
   throw new WebRtcFrameLimitError(
     roundOneSetTooLargeMessage(fewest, maxFrameBytes),
