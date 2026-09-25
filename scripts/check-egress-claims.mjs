@@ -231,6 +231,12 @@ export const ALLOWLIST = [
       "the same example form in the refusal of a host-less stun entry, on the same basis",
   },
   {
+    url: "https://app.example.org/",
+    match: "exact",
+    reason:
+      "the example web app address in the CLI invite's usage text and its refusal of an address with a path; a reserved documentation domain shown to the operator, never dialed",
+  },
+  {
     url: "https://github.com/georgetown-mdi/alcove",
     match: "prefix",
     reason:

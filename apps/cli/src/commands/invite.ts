@@ -61,6 +61,7 @@ import {
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
 import {
   inviterConnectionFromURL,
+  isWebAppAddress,
   type InviterConnectionConfig,
   type InviterOwnRelay,
 } from "../connectionFromUrl";
@@ -135,6 +136,9 @@ export function builder(cmd: Argv): Argv {
           "accept, and run the exchange. Offline, linkage terms are taken from a\n" +
           "pre-existing configuration file when present (the INPUT_FILE, if given,\n" +
           "is checked against it) and inferred from INPUT_FILE otherwise.\n\n" +
+          "Online, URL is the web app's address (e.g. https://app.example.org/),\n" +
+          "a ws:// or wss:// coordination server, or an sftp://, ssh://, or\n" +
+          "file:// exchange directory.\n\n" +
           "INPUT_FILE may be `-` to read the CSV from stdin.",
       ),
   )
@@ -168,7 +172,8 @@ export function builder(cmd: Argv): Argv {
     .option("turn", {
       type: "string",
       describe:
-        "online, ws:// or wss:// URL only: a TURN relay url (turn: or turns:) " +
+        "online webrtc invitation only (an http://, https://, ws://, or " +
+        "wss:// URL): a TURN relay url (turn: or turns:) " +
         "named in the invitation for your partner and saved as a " +
         "connection.turn entry. Each run signs in with a credential minted " +
         "from the shared secret, so the relay must accept those and the url " +
@@ -178,7 +183,8 @@ export function builder(cmd: Argv): Argv {
     .option("stun", {
       type: "string",
       describe:
-        "online, ws:// or wss:// URL only: a STUN server url (stun: or " +
+        "online webrtc invitation only (an http://, https://, ws://, or " +
+        "wss:// URL): a STUN server url (stun: or " +
         "stuns:) named in the invitation for your partner and saved in " +
         "connection.stun, in place of the built-in default. Repeat the flag " +
         "to name more than one.",
@@ -293,10 +299,22 @@ function plaintextEndpointWarning(remedy: string): string {
 
 // --- Positional parsing ------------------------------------------------------
 
+// The URLs an online invite takes: the transport URLs the other commands take,
+// plus a web app's address, which only this command resolves.
+function isInviteUrl(value: string): boolean {
+  if (looksLikeUrl(value)) return true;
+  try {
+    return isWebAppAddress(new URL(value));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Classify the positional arguments as an offline or online invitation. The
  * first positional is a server URL (online) when it parses as a supported
- * transport URL; otherwise it is the optional input file (offline).
+ * transport URL or a web app's `http:`/`https:` address; otherwise it is the
+ * optional input file (offline).
  *
  * @internal exported for testing
  */
@@ -308,7 +326,7 @@ export function resolveInvitePositionals(
   const arg0 =
     positionals[0] !== undefined ? String(positionals[0]) : undefined;
 
-  if (arg0 !== undefined && looksLikeUrl(arg0)) {
+  if (arg0 !== undefined && isInviteUrl(arg0)) {
     const input =
       positionals[1] !== undefined ? String(positionals[1]) : undefined;
     if (input === undefined)
@@ -613,14 +631,18 @@ export async function validateInvite(params: {
     // act, beside the disclosure warning the dial itself raises.
     if (connection.channel === "webrtc" && connection.server.secure === false)
       log.warn(
-        plaintextEndpointWarning("invite over a wss:// coordination server"),
+        plaintextEndpointWarning(
+          "invite over a wss:// coordination server or an https:// web app " +
+            "address",
+        ),
       );
     // The relay flags describe a webrtc connection's own relay; a file-sync
     // connection has none to name or save.
     if (connection.channel !== "webrtc")
       for (const name of relayFlagsGiven(ownRelay))
         log.warn(
-          `--${name} applies only to a ws:// or wss:// URL; this ` +
+          `--${name} applies only to a webrtc URL (http://, https://, ` +
+            "ws://, or wss://); this " +
             `${connection.channel} invitation names no relay and saves ` +
             "none, so it was ignored.",
         );
@@ -779,8 +801,9 @@ export async function validateInvite(params: {
   warnOptionsOverridesIgnoredOffline(options, log);
   for (const name of relayFlagsGiven(ownRelay))
     log.warn(
-      `--${name} applies only to an online invitation over a ws:// or ` +
-        "wss:// URL, so it was ignored. An offline invitation names the " +
+      `--${name} applies only to an online invitation over a webrtc URL ` +
+        "(http://, https://, ws://, or wss://), so it was ignored. An " +
+        "offline invitation names the " +
         `relay in connection.${name} of a webrtc configuration; set it there.`,
     );
 
