@@ -20,8 +20,11 @@ import type { ManagedRetakeOutcome } from "@psi/managed/managedExchangeStore";
 // The take-back's file half: it reads the command-line run's alcove.yaml with
 // the .alcove.key beside it, a pair it will not take never reaches the store,
 // and a pair on other terms or the other side is refused by the store step's
-// check. The store step itself (the locked cross-store transaction) is
-// exercised against real IndexedDB in test/browser/managedExchangeBackup.test.ts.
+// check. The store step itself -- the locked cross-store transaction, its
+// refusal of a pair on other terms or the other side included -- runs against
+// real IndexedDB in test/browser/managedExchangeBackup.test.ts, and a pair
+// import taken into a hand-off in
+// test/browser/managedCommandLinePairImport.test.ts.
 
 const at = "2026-09-01T09:00:00.000Z";
 

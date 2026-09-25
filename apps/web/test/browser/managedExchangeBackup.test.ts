@@ -1581,6 +1581,39 @@ describe("taking a command-line hand-off back", () => {
     expect(await getManagedLocalState(record.id)).toBeUndefined();
   });
 
+  test("a pair on other terms or the other side is refused, writing nothing", async () => {
+    // The key file names no exchange, so the alcove.yaml beside it is what the
+    // store step checks against the handed-off record before any write.
+    const record = await handedOff();
+    const localBefore = await getManagedLocalState(record.id);
+    const rotated = pairHolding(record, {
+      sharedSecret: generateSharedSecret(),
+    });
+
+    for (const [pair, on] of [
+      [{ ...rotated, side: "acceptor" }, "side"],
+      [
+        {
+          ...rotated,
+          exchangeFile: composeManagedExchangeFile({
+            connection: webrtcLocator,
+            linkageTerms: {
+              ...linkageTerms,
+              linkageKeys: linkageTerms.linkageKeys.slice(1),
+            },
+          }),
+        },
+        "terms",
+      ],
+    ] as const) {
+      expect(
+        await retakeHandedOffManagedExchange(record.id, retakenAt, pair),
+      ).toEqual({ kind: "mismatch", on });
+      expect(await getManagedExchange(record.id)).toEqual(record);
+      expect(await getManagedLocalState(record.id)).toEqual(localBefore);
+    }
+  });
+
   test("the refusal a run recorded against the hand-off is dropped", async () => {
     // A run that came due while the copy was handed off refused and recorded it.
     // The take-back ends the state that entry describes, so leaving it stored
