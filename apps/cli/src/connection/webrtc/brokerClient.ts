@@ -38,10 +38,13 @@ import type {
  *   mapped to an error naming that cause rather than left to become a timeout.
  * - A wrong `key` is answered `ERROR` with an "Invalid key provided" payload and
  *   closed.
- * - A message addressed to an id that is not registered is NOT delivered when
- *   that peer registers later, and no `EXPIRE` comes back. So an offer to a peer
- *   that has not arrived yet is simply lost, which is why the dialer in
- *   `weriftPeer.ts` re-sends rather than waiting on a signal.
+ * - A message addressed to an id that is not registered is held and delivered,
+ *   with every other frame held for that id, when the peer registers. Frames
+ *   still held about five seconds after the first was queued are dropped, and
+ *   each of their senders is sent one `EXPIRE` whose `src` is the absent id. A
+ *   frame refused past one of the broker's hold bounds is not held and draws
+ *   its own `EXPIRE` at once. The dialer in `weriftPeer.ts` offers again on an
+ *   `EXPIRE`, no more than once per minimum interval.
  * - A registered socket that sends nothing is closed by the broker's reaper
  *   about twenty seconds in; any traffic, heartbeat or not, resets that. Hence
  *   {@link BROKER_HEARTBEAT_INTERVAL_MS}, which is also the cadence the web
@@ -76,10 +79,10 @@ export const BROKER_HEARTBEAT_INTERVAL_MS = 5_000;
 export const BROKER_OPEN_TIMEOUT_MS = 30_000;
 
 /**
- * Largest inbound signaling frame accepted, before it is parsed. A signaling
- * frame is an SDP or a single ICE candidate -- kilobytes, even with every
- * interface's candidates inlined -- so this is orders of magnitude of headroom
- * and cannot reject a real one.
+ * Largest inbound signaling frame accepted, in UTF-8 bytes, before it is
+ * parsed. A signaling frame is an SDP or a single ICE candidate -- kilobytes,
+ * even with every interface's candidates inlined -- so this is orders of
+ * magnitude of headroom and cannot reject a real one.
  *
  * Its limit, stated rather than glossed: Node's built-in `WebSocket` exposes no
  * per-socket maximum payload, so the frame has already been read into memory by
@@ -475,9 +478,7 @@ function registrationToken(): string {
 function parseSignalingFrame(raw: unknown): BrokerMessage | undefined {
   const text = typeof raw === "string" ? raw : undefined;
   if (text === undefined) return undefined;
-  // The cap is on UTF-16 units rather than encoded bytes: it is a memory bound,
-  // and a unit is the unit the string already occupies.
-  if (text.length > MAX_SIGNALING_FRAME_BYTES) {
+  if (Buffer.byteLength(text, "utf8") > MAX_SIGNALING_FRAME_BYTES) {
     throw new ConnectionError(
       `the signaling server sent a frame larger than the ` +
         `${MAX_SIGNALING_FRAME_BYTES}-byte limit`,

@@ -561,6 +561,16 @@ test("an oversized frame is refused before it is parsed", async () => {
   expect(closes[0]?.message).toContain("limit");
 });
 
+test("the frame cap counts UTF-8 bytes, not string length", async () => {
+  const { socket, closes } = await register();
+  // Two bytes per character: half the cap in characters, just over it in bytes.
+  const body = `"${"é".repeat(128 * 1024)}"`;
+  expect(body.length).toBeLessThan(256 * 1024);
+  socket.deliver(body);
+  expect(closes[0]?.kind).toBe("protocol");
+  expect(closes[0]?.message).toContain("limit");
+});
+
 // --- teardown ---------------------------------------------------------------
 
 test("a dropped socket reports a transport failure once", async () => {

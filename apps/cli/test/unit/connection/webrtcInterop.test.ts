@@ -307,7 +307,6 @@ async function startRendezvous(side: RendezvousRole): Promise<{
   running.push(controller);
   const session = openWebRtcPeerSession({
     ...webRtcDialFrom(connectionFor(side), sharedSecret).options,
-    offerRetryIntervalMs: 60_000,
     rendezvousTimeoutMs: 60_000,
     channelOpenTimeoutMs: 60_000,
     signal: controller.signal,

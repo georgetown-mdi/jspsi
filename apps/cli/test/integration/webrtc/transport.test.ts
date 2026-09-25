@@ -84,7 +84,6 @@ function partyOptions(sharedSecret: string) {
     location: location(),
     sharedSecret,
     iceServers: HOST_ONLY_ICE,
-    offerRetryIntervalMs: 250,
     rendezvousTimeoutMs: 60_000,
     channelOpenTimeoutMs: 30_000,
     closeFlushTimeoutMs: 5_000,
