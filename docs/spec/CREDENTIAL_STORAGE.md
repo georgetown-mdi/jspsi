@@ -350,6 +350,13 @@ writes with. In order:
 7. **Readability is established by opening the parent for reading**, on POSIX
    only -- on Windows opening a directory fails outright and the parent flush is
    skipped, so there is no read requirement to verify there.
+8. **A key file that is a mount point of its own is rejected**, as a key file
+   bind-mounted alone into a container is: the write's rename cannot replace a
+   mount point and fails `EBUSY`. The key path's directory entry, its parent
+   resolved, is looked up among the mount points `/proc/self/mountinfo` lists,
+   so this is checked on Linux only; where that file cannot be read the step
+   passes. The device number is not a substitute: a bind mount can share it with
+   the directory it is mounted into.
 
 Each rejection states the remedy and that the write would otherwise fail after a
 successful key exchange, which is what the pre-flight exists to prevent.

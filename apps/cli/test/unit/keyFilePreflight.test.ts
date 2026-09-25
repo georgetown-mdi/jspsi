@@ -2,7 +2,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { getLogger } from "@alcove/core";
 
 import { writeFileOwnerOnly } from "../../src/fileUtils";
@@ -425,3 +425,51 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
     }
   },
 );
+
+// --- key file mounted on its own ---------------------------------------------
+
+/** Serve `mountinfo` as /proc/self/mountinfo while `fn` runs. */
+function withMountInfo(mountinfo: string, fn: () => void): void {
+  const realRead = fs.readFileSync;
+  const spy = vi
+    .spyOn(fs, "readFileSync")
+    .mockImplementation(((file: fs.PathOrFileDescriptor, options?: unknown) =>
+      file === "/proc/self/mountinfo"
+        ? mountinfo
+        : realRead(file, options as BufferEncoding)) as typeof fs.readFileSync);
+  try {
+    fn();
+  } finally {
+    spy.mockRestore();
+  }
+}
+
+test("rejects a key file that is a mount point of its own", () => {
+  const { log } = makeLogger();
+  const keyFilePath = path.join(dir, "the key");
+  fs.writeFileSync(keyFilePath, "{}");
+  const entry = path
+    .join(fs.realpathSync(dir), "the key")
+    .replace(/ /g, "\\040");
+  const mountinfo =
+    "165 148 0:47 /secrets /run/secrets rw,relatime - virtiofs virtiofs2 rw\n" +
+    `166 148 0:47 /secrets/key ${entry} rw,relatime - virtiofs virtiofs2 rw\n`;
+  withMountInfo(mountinfo, () => {
+    expect(() => preflightKeyFilePath(keyFilePath, log)).toThrow(
+      /is a mount point of its own.*Mount the directory that holds the key file/,
+    );
+    expect(() => preflightKeyFilePath(keyFilePath, log)).toThrow(
+      REMEDY_AND_CONSEQUENCE,
+    );
+  });
+});
+
+test("accepts a key file inside a mounted directory", () => {
+  const { log } = makeLogger();
+  const keyFilePath = path.join(dir, "key.json");
+  fs.writeFileSync(keyFilePath, "{}");
+  const mountinfo = `165 148 0:47 /secrets ${fs.realpathSync(dir)} rw,relatime - virtiofs virtiofs2 rw\n`;
+  withMountInfo(mountinfo, () =>
+    expect(preflightKeyFilePath(keyFilePath, log)).toBe(keyFilePath),
+  );
+});

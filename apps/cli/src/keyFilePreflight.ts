@@ -29,6 +29,45 @@ function nameTooLongError(keyFilePath: string, name: string): Error {
 }
 
 /**
+ * The mount points `/proc/self/mountinfo` lists: the fifth field of each line,
+ * with the octal escapes the kernel writes for a space, tab, newline, or
+ * backslash decoded.
+ */
+function mountPointsOf(mountinfo: string): Set<string> {
+  const points = new Set<string>();
+  for (const line of mountinfo.split("\n")) {
+    const field = line.split(" ")[4];
+    if (field !== undefined && field !== "")
+      points.add(
+        field.replace(/\\([0-7]{3})/g, (_, octal: string) =>
+          String.fromCharCode(parseInt(octal, 8)),
+        ),
+      );
+  }
+  return points;
+}
+
+/**
+ * Whether the directory entry at `keyFilePath` is itself a mount point, as a
+ * key file bind-mounted on its own into a container is. Read from
+ * `/proc/self/mountinfo`, so it answers only on Linux; elsewhere, or where that
+ * file cannot be read, it answers false.
+ */
+function keyFileIsMountPoint(keyFilePath: string): boolean {
+  let mountinfo: string;
+  try {
+    mountinfo = fs.readFileSync("/proc/self/mountinfo", "utf8");
+  } catch {
+    return false;
+  }
+  const entry = path.join(
+    fs.realpathSync(path.dirname(keyFilePath)),
+    path.basename(keyFilePath),
+  );
+  return mountPointsOf(mountinfo).has(entry);
+}
+
+/**
  * Pre-flight validation for an authenticated exchange's key-file path, run
  * before any credential is presented. Mirrors what {@link saveKeyFile} does
  * post-handshake (recursive parent `mkdir`, a write, and on POSIX a
@@ -46,7 +85,8 @@ function nameTooLongError(keyFilePath: string, name: string): Error {
  * - the path, or the temp name the write creates beside it, is too long;
  * - the path already exists but is a directory or other non-regular node;
  * - the parent exists but is not a directory, or cannot be created, written,
- *   or (on POSIX) read.
+ *   or (on POSIX) read;
+ * - on Linux, the key file is a mount point of its own.
  *
  * Side effect: creates the parent directory (recursively) when it does not yet
  * exist, mirroring {@link saveKeyFile}; the creation is logged and left in place
@@ -268,5 +308,15 @@ export function preflightKeyFilePath(
       }
     }
   }
+  // A bind mount of the key file alone passes every check above, but the
+  // rename that saves the rotated key fails EBUSY on a mount point.
+  if (targetStat !== undefined && keyFileIsMountPoint(kfp))
+    throw new Error(
+      `key file ${kfp} is a mount point of its own, and saving the rotated ` +
+        "key renames a new file over it, which a mount point refuses. Mount " +
+        "the directory that holds the key file instead, and name the file " +
+        "inside it with --key-file, before running the exchange; " +
+        `${FAILS_AFTER_KEY_EXCHANGE}.`,
+    );
   return kfp;
 }
