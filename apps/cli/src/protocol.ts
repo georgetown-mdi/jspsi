@@ -59,7 +59,11 @@ import {
   relayCredentialRenewal,
 } from "./connection/webrtc/weriftPeer";
 import { persistPartnerFingerprint } from "./config";
-import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
+import {
+  buildRotatedKeyFile,
+  markRotationInFlight,
+  saveKeyFile,
+} from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { loadCliPsiBackend } from "./psiBackend";
 import {
@@ -1000,6 +1004,16 @@ async function openRunTransport(params: {
   return role;
 }
 
+/** What {@link authenticateRun} states ahead of the key file it could not mark. */
+const ROTATION_MARK_PREAMBLE =
+  "the key exchange did not start because it could not be recorded in the " +
+  "key file at ";
+
+/** What {@link authenticateRun} states behind that key file and the failure. */
+const ROTATION_MARK_REMEDY =
+  " The shared secret is unchanged; fix the key file's location or " +
+  "permissions and run the exchange again.";
+
 /** What {@link authenticateRun} states ahead of the key file it could not save. */
 const ROTATED_TOKEN_SAVE_PREAMBLE =
   "authentication succeeded and the shared token was rotated, but the " +
@@ -1051,6 +1065,20 @@ async function authenticateRun(params: {
   // trimmedKeyFilePath is set whenever auth is set; they are populated
   // together in the pre-flight branch above.
   const keyFilePath = build.trimmedKeyFilePath!;
+  // Before the key exchange can rotate anything: a run that stops between the
+  // handshake and the rotated-key save leaves this marker for the next run to
+  // report. A failed write stops the run here, with nothing rotated.
+  try {
+    markRotationInFlight(keyFilePath, auth.sharedSecret, Date.now());
+  } catch (err) {
+    const message = messageWithOperatorText`${ROTATION_MARK_PREAMBLE}${operatorSuppliedText(
+      keyFilePath,
+    )}: ${err instanceof Error ? err.message : String(err)}${ROTATION_MARK_REMEDY}`;
+    throw Object.assign(
+      keepOperatorSuppliedText(new Error(message.text), message),
+      { alcoveRecoveryHintEmitted: true },
+    );
+  }
   // Set synchronously before the await so a signal arriving during the
   // key-exchange round-trip or before saveKeyFile runs can distinguish the
   // "handshake may have completed on the partner side" case from the

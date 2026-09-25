@@ -31,6 +31,12 @@ const mockState = vi.hoisted(() => ({
   // The key-file path whose post-handshake save must fail, for the case that
   // drives the refusal naming it. Every other save runs for real.
   unwritableKeyFilePath: undefined as string | undefined,
+  // The key-file path whose rotation-in-flight marker write must fail, for the
+  // case that drives the run stopping before its key exchange.
+  unmarkableKeyFilePath: undefined as string | undefined,
+  // What each key file held just before its rotated-token save replaced it, so
+  // a case can read the marker the save cleared.
+  keyFileBeforeRotation: {} as Record<string, unknown>,
   // Whether the transport close reports the ceiling as reached, for the case
   // that reads the notice a run states about its own files. Every other test
   // gets the real close and its real outcome.
@@ -170,9 +176,20 @@ vi.mock("../../src/keyFile", async (importActual) => {
       keyFilePath: string,
       file: Parameters<typeof actual.saveKeyFile>[1],
     ) => {
+      mockState.keyFileBeforeRotation[keyFilePath] = actual.loadKeyFile(
+        keyFilePath,
+        { warnOnPermissive: false },
+      );
       if (keyFilePath === mockState.unwritableKeyFilePath)
         throw new Error("EACCES: permission denied");
       actual.saveKeyFile(keyFilePath, file);
+    },
+    markRotationInFlight: (
+      ...args: Parameters<typeof actual.markRotationInFlight>
+    ) => {
+      if (args[0] === mockState.unmarkableKeyFilePath)
+        throw new Error("EROFS: read-only file system");
+      actual.markRotationInFlight(...args);
     },
   };
 });
@@ -447,6 +464,8 @@ beforeEach(() => {
   mockState.runExchangeEntries = 0;
   mockState.lastSftpAdapterOptions = undefined;
   mockState.unwritableKeyFilePath = undefined;
+  mockState.unmarkableKeyFilePath = undefined;
+  mockState.keyFileBeforeRotation = {};
   mockState.expireTeardown = false;
   fs.mkdirSync(dropDir);
 
@@ -2596,6 +2615,114 @@ test("both key files hold the same rotated token after a successful exchange", a
   // Rotation tokens have no expiry.
   expect(loadedA?.expires).toBeUndefined();
   expect(loadedB?.expires).toBeUndefined();
+}, 20_000);
+
+test("the key exchange marks each key file before the rotation and the rotated save clears it", async () => {
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  const before = Date.now();
+  await Promise.all(
+    [keyFileA, keyFileB].map((keyFilePath, index) =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath },
+        prepared: minimalPrepared,
+        output: path.join(tmpDir, `out-${index}.csv`),
+        verbosity: -1,
+        loggerName: `test-${index}`,
+      }),
+    ),
+  );
+
+  for (const keyFilePath of [keyFileA, keyFileB]) {
+    const replaced = mockState.keyFileBeforeRotation[keyFilePath] as {
+      sharedSecret: string;
+      rotationInFlightSince?: string;
+    };
+    expect(replaced.sharedSecret).toBe(TOKEN_A);
+    expect(
+      Date.parse(replaced.rotationInFlightSince ?? ""),
+    ).toBeGreaterThanOrEqual(before - 1000);
+    const after = loadKeyFile(keyFilePath);
+    expect(after?.sharedSecret).not.toBe(TOKEN_A);
+    expect(after?.rotationInFlightSince).toBeUndefined();
+  }
+}, 20_000);
+
+test("a run that stops between the handshake and the rotated save leaves its marker, and only on its side", async () => {
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+  mockState.unwritableKeyFilePath = keyFileA;
+
+  const [resultA] = await Promise.allSettled(
+    [keyFileA, keyFileB].map((keyFilePath, index) =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath },
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: `test-${index}`,
+      }),
+    ),
+  );
+  expect(resultA.status).toBe("rejected");
+
+  // This side still holds the secret the handshake replaced, marked; the
+  // partner saved the rotated secret, and its save cleared its own marker.
+  const stranded = loadKeyFile(keyFileA);
+  expect(stranded?.sharedSecret).toBe(TOKEN_A);
+  expect(stranded?.rotationInFlightSince).toBeDefined();
+  const partner = loadKeyFile(keyFileB);
+  expect(partner?.sharedSecret).not.toBe(TOKEN_A);
+  expect(partner?.rotationInFlightSince).toBeUndefined();
+}, 20_000);
+
+test("a marker that cannot be written stops the run before the key exchange, the secret unchanged", async () => {
+  const keyFileA = path.join(tmpDir, "a.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  mockState.unmarkableKeyFilePath = keyFileA;
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+
+  const [resultA] = await Promise.allSettled(
+    [keyFileA, keyFileB].map((keyFilePath, index) =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: {
+            ...TWO_PARTY_OPTIONS,
+            peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
+          },
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath },
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: `test-${index}`,
+      }),
+    ),
+  );
+  expect(resultA.status).toBe("rejected");
+  const thrown = (resultA as PromiseRejectedResult).reason as Error;
+  expect(thrown.message).toContain("the key exchange did not start");
+  expect(thrown.message).toContain("The shared secret is unchanged");
+  expect(loadKeyFile(keyFileA)).toEqual({ sharedSecret: TOKEN_A });
+  expect(mockState.keyFileBeforeRotation[keyFileA]).toBeUndefined();
 }, 20_000);
 
 test("a token_max_age_days policy stamps expires onto both rotated key files", async () => {

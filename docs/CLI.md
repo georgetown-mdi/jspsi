@@ -1127,6 +1127,12 @@ The [online invitation](#online-invitation) is not a recovery route. It reports 
 
 A party that already holds its configuration and needs only the new secret can instead re-provision offline with [`alcove exchange --invitation`](#provisioning-the-key-file-from-an-invitation), which writes the key file and runs the exchange in one command -- replacing that party's step 3 and their own run in step 4; the other party still runs `alcove exchange`.
 
+#### A key exchange that stopped partway
+
+Before its key exchange starts, `alcove exchange` records in the key file that a rotation is in flight, and the write that saves the rotated token removes that record again. A run stopped between the two -- killed, out of power, or failing partway through the key exchange -- leaves it in place, so the next run starts with a warning: an earlier key exchange began at the time it names and did not save its rotated token, and your partner may hold a token this key file does not.
+
+The warning does not say the two of you are out of sync; it says what to watch for. If the run after it fails authentication or never meets your partner, a stopped rotation is the probable cause, and the recovery is the re-invite above. If neither of you had a run stop partway, treat an authentication failure as unexplained and confirm with your partner over a channel you trust before re-inviting. A run that completes its key exchange saves the new token and removes the record, and the warning does not appear again.
+
 ### Token loss
 
 If a key file is lost and no backup is available, reset as in [Out-of-sync tokens](#out-of-sync-tokens): coordinate with the partner out-of-band, both parties delete their existing key files, and the pair re-invites and accepts.

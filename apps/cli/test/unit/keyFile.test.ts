@@ -12,7 +12,9 @@ import {
   buildRotatedKeyFile,
   checkKeyFileExpiry,
   loadKeyFile,
+  markRotationInFlight,
   provisionKeyFileFromInvitation,
+  rotationInFlightNotice,
   saveKeyFile,
 } from "../../src/keyFile";
 
@@ -412,4 +414,75 @@ test("checkKeyFileExpiry handles a fractional threshold (non-multiple of 3)", ()
       { warnThresholdDays: threshold },
     ),
   ).toBe("ok");
+});
+
+// --- rotation-in-flight marker -----------------------------------------------
+
+const OTHER_SECRET = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
+
+test("markRotationInFlight stamps the instant and keeps the secret and expiry", () => {
+  const keyPath = path.join(dir, ".alcove.key");
+  saveKeyFile(keyPath, {
+    sharedSecret: TOKEN,
+    expires: "2030-01-01T00:00:00.000Z",
+  });
+  markRotationInFlight(keyPath, TOKEN, Date.parse("2026-03-01T12:00:00Z"));
+  expect(loadKeyFile(keyPath)).toEqual({
+    sharedSecret: TOKEN,
+    expires: "2030-01-01T00:00:00.000Z",
+    rotationInFlightSince: "2026-03-01T12:00:00.000Z",
+  });
+});
+
+test("markRotationInFlight keeps an earlier marker's instant", () => {
+  const keyPath = path.join(dir, ".alcove.key");
+  saveKeyFile(keyPath, { sharedSecret: TOKEN });
+  markRotationInFlight(keyPath, TOKEN, Date.parse("2026-03-01T12:00:00Z"));
+  markRotationInFlight(keyPath, TOKEN, Date.parse("2026-03-08T12:00:00Z"));
+  expect(loadKeyFile(keyPath)?.rotationInFlightSince).toBe(
+    "2026-03-01T12:00:00.000Z",
+  );
+});
+
+test("markRotationInFlight writes nothing where no key file holds the secret", () => {
+  const missing = path.join(dir, "missing.key");
+  markRotationInFlight(missing, TOKEN, Date.now());
+  expect(fs.existsSync(missing)).toBe(false);
+
+  const keyPath = path.join(dir, ".alcove.key");
+  saveKeyFile(keyPath, { sharedSecret: OTHER_SECRET });
+  markRotationInFlight(keyPath, TOKEN, Date.now());
+  expect(loadKeyFile(keyPath)).toEqual({ sharedSecret: OTHER_SECRET });
+});
+
+test("the rotated key file holds no marker, so its save clears one", () => {
+  const keyPath = path.join(dir, ".alcove.key");
+  saveKeyFile(keyPath, { sharedSecret: TOKEN });
+  markRotationInFlight(keyPath, TOKEN, Date.now());
+  saveKeyFile(keyPath, buildRotatedKeyFile(OTHER_SECRET, 30, Date.now()));
+  expect(loadKeyFile(keyPath)?.rotationInFlightSince).toBeUndefined();
+});
+
+test("loadKeyFile rejects a marker that is not an ISO 8601 datetime", () => {
+  const keyPath = path.join(dir, ".alcove.key");
+  fs.writeFileSync(
+    keyPath,
+    JSON.stringify({ sharedSecret: TOKEN, rotationInFlightSince: "soon" }),
+  );
+  expect(() => loadKeyFile(keyPath)).toThrow();
+});
+
+test("rotationInFlightNotice names the instant, the re-invite remedy, and the confirm-first step", () => {
+  const notice = rotationInFlightNotice(
+    "/srv/alcove/.alcove.key",
+    "2026-03-01T12:00:00.000Z",
+  );
+  expect(notice).toContain("/srv/alcove/.alcove.key");
+  expect(notice).toContain("2026-03-01T12:00:00.000Z");
+  expect(notice).toContain("probably hold different secrets");
+  expect(notice).toContain("re-invite");
+  expect(notice).toContain('"Out-of-sync tokens"');
+  expect(notice).toContain(
+    "confirm with your partner over a channel you trust before re-inviting",
+  );
 });

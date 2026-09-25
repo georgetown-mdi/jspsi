@@ -357,6 +357,33 @@ test("injects expires from key file when present", () => {
   expect(result.authentication.expires).toBe("2030-01-01T00:00:00.000Z");
 });
 
+test("a key file still marked from an interrupted key exchange is reported at the next run's start", () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    rotationInFlightSince: "2026-03-01T12:00:00.000Z",
+  });
+  const result = loadConfig(baseOptions());
+  expect(result.authentication.sharedSecret).toBe(TOKEN_A);
+  const notices = mockState.warnings.filter((w) =>
+    w.includes("did not save its rotated shared secret"),
+  );
+  expect(notices).toHaveLength(1);
+  expect(notices[0]).toContain("2026-03-01T12:00:00.000Z");
+  expect(notices[0]).toContain("re-invite");
+});
+
+test("a key file with no marker loads without the interrupted-rotation notice", () => {
+  fs.writeFileSync(configFile, YAML.stringify(minimalSFTPConfig));
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  loadConfig(baseOptions());
+  expect(
+    mockState.warnings.some((w) =>
+      w.includes("did not save its rotated shared secret"),
+    ),
+  ).toBe(false);
+});
+
 test("injects sharedSecret from key file even when a top-level authentication block is present in config", () => {
   // A top-level authentication block in alcove.yaml has no injected fields
   // (those come from the key file); an empty one must not break loading.
