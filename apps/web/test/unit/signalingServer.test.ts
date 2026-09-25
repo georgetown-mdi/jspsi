@@ -58,7 +58,8 @@ interface CoResidentUpgrade {
    * its release window installed any of its own. */
   handlesBeforeWindow: HandleCounts;
   /** Handles once the window is open: the signaling server's `upgrade` listener
-   * runs before the co-resident one, so its watch is on by this point. */
+   * runs before the co-resident one, whichever was registered first, so its
+   * watch is on by this point. */
   handlesAtWindowOpen: HandleCounts;
   /** Handles once the co-resident listener has adopted it, so the difference
    * from the line above is the adopter's own. */
@@ -88,8 +89,8 @@ interface Signaling {
    * client, so this is where a test sees whether the process still holds one. */
   accepted: Array<net.Socket>;
   /** Each upgrade the co-resident listener was handed. The signaling server's own
-   * `upgrade` listener is registered first and so has already run, which makes an
-   * entry here the observable that its release window is open. */
+   * `upgrade` listener runs first and so has already run, which makes an entry
+   * here the observable that its release window is open. */
   coResidentUpgrades: Array<CoResidentUpgrade>;
   /** Each streaming response the server has begun, in request order. */
   streamed: Array<StreamingResponse>;
@@ -110,6 +111,10 @@ async function startSignaling(
      * (Vite's HMR handler at `/`), that either adopts the upgrades this server
      * leaves it or ignores them. */
     coResidentUpgrade?: "answers" | "ignores";
+    /** Register the co-resident listener before the signaling server is
+     * constructed, the order a dev server has: Vite attaches its HMR handler at
+     * startup, and the signaling server attaches on first use. */
+    coResidentRegisteredFirst?: boolean;
     /** Answer ordinary (non-upgrade) requests, the other half of a shared
      * server: a connection can then reach the upgrade path with response bytes
      * already written on it, or -- on `STREAMING_PATH` -- with a response of the
@@ -139,16 +144,36 @@ async function startSignaling(
       res.end(ORDINARY_RESPONSE_BODY);
     });
   }
-  // Registered ahead of the signaling server's own `upgrade` listener, so it
-  // sees each socket as the server was handed it: the baseline the release
-  // window's handles are added to, and the one they have to come back to. Only
-  // the co-resident shapes get it -- in the sole-listener shape it would be the
-  // second `upgrade` listener and so change the very thing under test.
   let handlesBeforeWindow: HandleCounts = { error: 0, close: 0 };
+  const coResidentUpgrades: Array<CoResidentUpgrade> = [];
+  let coResidentListener:
+    | ((req: http.IncomingMessage, socket: Duplex, head: Buffer) => void)
+    | undefined;
   if (opts.coResidentUpgrade !== undefined) {
-    server.on("upgrade", (_req, socket) => {
-      handlesBeforeWindow = handleCounts(socket);
-    });
+    const adopter =
+      opts.coResidentUpgrade === "answers"
+        ? new WsServer({ noServer: true })
+        : null;
+    coResidentListener = (req, socket, head): void => {
+      // Only the upgrades the signaling server declined are this listener's; an
+      // upgrade on the signaling path has already been adopted by it.
+      if (req.url?.startsWith("/api/peerjs")) return;
+      const handlesAtWindowOpen = handleCounts(socket);
+      // An adopter owns the errors of the connection it took, as Vite's HMR
+      // handler does, so the adopted socket gets a listener of its own here.
+      adopter?.handleUpgrade(req, socket, head, (adopted) => {
+        adopted.on("error", () => {});
+      });
+      coResidentUpgrades.push({
+        url: req.url ?? "",
+        handlesBeforeWindow,
+        handlesAtWindowOpen,
+        handlesAfterAdopt: handleCounts(socket),
+      });
+    };
+  }
+  if (coResidentListener && opts.coResidentRegisteredFirst) {
+    server.on("upgrade", coResidentListener);
   }
 
   const realm = new Realm();
@@ -166,28 +191,17 @@ async function startSignaling(
   const errors: Array<Error> = [];
   wss.on("error", (error: Error) => errors.push(error));
 
-  const coResidentUpgrades: Array<CoResidentUpgrade> = [];
-  if (opts.coResidentUpgrade !== undefined) {
-    const adopter =
-      opts.coResidentUpgrade === "answers"
-        ? new WsServer({ noServer: true })
-        : null;
-    server.on("upgrade", (req, socket, head) => {
-      // Only the upgrades the signaling server declined are this listener's; an
-      // upgrade on the signaling path has already been adopted by it.
-      if (req.url?.startsWith("/api/peerjs")) return;
-      const handlesAtWindowOpen = handleCounts(socket);
-      // An adopter owns the errors of the connection it took, as Vite's HMR
-      // handler does, so the adopted socket gets a listener of its own here.
-      adopter?.handleUpgrade(req, socket, head, (adopted) => {
-        adopted.on("error", () => {});
-      });
-      coResidentUpgrades.push({
-        url: req.url ?? "",
-        handlesBeforeWindow,
-        handlesAtWindowOpen,
-        handlesAfterAdopt: handleCounts(socket),
-      });
+  if (coResidentListener && !opts.coResidentRegisteredFirst) {
+    server.on("upgrade", coResidentListener);
+  }
+  // Prepended ahead of the signaling server's own `upgrade` listener, so it
+  // sees each socket as the server was handed it: the baseline the release
+  // window's handles are added to, and the one they have to come back to. Only
+  // the co-resident shapes get it -- in the sole-listener shape it would be the
+  // second `upgrade` listener and so change the very thing under test.
+  if (coResidentListener) {
+    server.prependListener("upgrade", (_req, socket) => {
+      handlesBeforeWindow = handleCounts(socket);
     });
   }
 
@@ -653,6 +667,38 @@ describe("signaling socket release", () => {
       await settlesWithin(peer.released, SOCKET_RELEASE_TIMEOUT_MS * 2),
     ).toBe(false);
     expect(sig.errors).toEqual([]);
+  }, 15_000);
+
+  test("an upgrade answered by a co-resident listener registered first is not taken back", async () => {
+    // The dev-server order: Vite's HMR listener is attached before the
+    // signaling server exists and answers the upgrade within the same emit. That
+    // answer must still count as one, or HMR is cut at the bound and the page
+    // reloads every second.
+    const sig = await startSignaling({
+      coResidentUpgrade: "answers",
+      coResidentRegisteredFirst: true,
+    });
+
+    const peer = openRawUpgrade(sig.port, "/not-the-signaling-path");
+    await waitFor(() => peer.received().includes("101 Switching Protocols"));
+
+    expect(await settlesWithin(peer.released, RELEASE_MARGIN_MS)).toBe(false);
+    expect(sig.accepted[0].destroyed).toBe(false);
+    expect(sig.errors).toEqual([]);
+  }, 15_000);
+
+  test("an upgrade ignored by a co-resident listener registered first is released on the bound", async () => {
+    const sig = await startSignaling({
+      coResidentUpgrade: "ignores",
+      coResidentRegisteredFirst: true,
+    });
+
+    const peer = openRawUpgrade(sig.port, "/not-the-signaling-path");
+
+    expect(await settlesWithin(peer.released, RELEASE_MARGIN_MS)).toBe(true);
+    expect(peer.received()).toBe("");
+    expect(sig.errors).toHaveLength(1);
+    expect(sig.errors[0].message).toContain("no co-resident listener answered");
   }, 15_000);
 
   test("an adopted socket is left holding none of the release window's handles", async () => {
