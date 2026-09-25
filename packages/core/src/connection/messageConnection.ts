@@ -12,9 +12,10 @@ import type { Connection } from "../types";
  *   CLI's error->exit boundary maps to 77 (EX_NOPERM).
  * - `usage`: the connection was misconfigured or used incorrectly (e.g. a send
  *   after close, a path shared by another session). The caller must fix
- *   something before retrying. The CLI's error->exit boundary maps only this
- *   kind to 64 (EX_USAGE) alongside `UsageError`; every other kind takes 69,
- *   apart from the `AuthenticationError` subclass above.
+ *   something before retrying. The CLI's error->exit boundary maps this kind
+ *   to 64 (EX_USAGE) alongside `UsageError`, as it does a `transport` wrap
+ *   whose cause is either; every other kind takes 69, apart from the
+ *   `AuthenticationError` subclass above.
  * - `protocol`: the peer violated the message protocol (e.g. sent out of turn).
  * - `closed`: a parked operation was cancelled by a local
  *   {@link MessageConnection.close} (e.g. a signal-driven shutdown). Nothing
@@ -222,6 +223,21 @@ const DEFAULT_CAPACITY = 1024;
 // unset (no deadline) unless a caller opts in.
 export const DEFAULT_INACTIVITY_TIMEOUT_MS = 120_000;
 
+// The failures a parked receive's own deadline raised: the peer-silence case,
+// told apart from every other `transport`-kind failure by identity rather than
+// by message text.
+const receiveDeadlineFailures = new WeakSet<ConnectionError>();
+
+/**
+ * Whether `error` is the failure a parked {@link MessageConnection.receive}'s
+ * deadline raised -- the connection's inactivity bound or the caller's
+ * `timeoutMs` override firing with no message -- rather than any other
+ * `transport`-kind failure, such as a transport refusal or a dropped link.
+ */
+export function isReceiveDeadlineFailure(error: unknown): boolean {
+  return error instanceof ConnectionError && receiveDeadlineFailures.has(error);
+}
+
 /**
  * The terminal lifecycle of a {@link QueuedMessageConnection} as a single
  * source of truth: `undefined` is the only non-terminal (open) state, and every
@@ -336,16 +352,16 @@ export class QueuedMessageConnection implements MessageConnection {
       } catch {
         hint = undefined;
       }
-      this.fail(
-        new ConnectionError(
-          `no message received within ${ms}ms; the peer appears to have ` +
-            "gone silent" +
-            // Append the transport's guidance, if any, as a trailing sentence;
-            // a caller that supplies none gets the bare diagnostic unchanged.
-            (hint !== undefined ? `. ${hint}` : ""),
-          "transport",
-        ),
+      const deadline = new ConnectionError(
+        `no message received within ${ms}ms; the peer appears to have ` +
+          "gone silent" +
+          // Append the transport's guidance, if any, as a trailing sentence;
+          // a caller that supplies none gets the bare diagnostic unchanged.
+          (hint !== undefined ? `. ${hint}` : ""),
+        "transport",
       );
+      receiveDeadlineFailures.add(deadline);
+      this.fail(deadline);
     }, ms);
   }
 

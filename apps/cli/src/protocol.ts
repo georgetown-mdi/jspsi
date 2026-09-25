@@ -6,6 +6,7 @@ import {
   getLogger,
   describeExchangeStages,
   runExchange,
+  SINGLE_PASS_STAGE_IDS,
   exchangeRecordFromFailure,
   exchangeRecordOwedButUnbuilt,
   countIsPartnerReported,
@@ -38,6 +39,7 @@ import type {
   MessageConnection,
   PreparedExchange,
   ExchangeBootstrapResult,
+  ExchangeStageDefinition,
   RelayCredential,
   SigningIdentity,
   WebRTCConnectionConfig,
@@ -538,6 +540,30 @@ function createStageTimer(
   };
 }
 
+// The single-pass stages core does not enumerate, since which of them a party
+// passes through follows the role the handshake resolves. Listed in the order
+// either role passes them, so the `stages` event names every id a `stage`
+// event can hold.
+const SINGLE_PASS_STAGE_DEFINITIONS: ExchangeStageDefinition[] = [
+  {
+    id: SINGLE_PASS_STAGE_IDS.encryptingOwnData,
+    label: "Encrypting my data",
+  },
+  {
+    id: SINGLE_PASS_STAGE_IDS.encryptingPartnerData,
+    label: "Doubly-encrypting partner's data",
+  },
+  {
+    id: SINGLE_PASS_STAGE_IDS.identifyingSharedValues,
+    label: "Identifying shared elements",
+  },
+];
+
+// What linkViaSinglePassPSI passes to onStage as its last call: the end of the
+// round rather than a stage, so the last stage's timing runs to the end of the
+// exchange and no unlisted id reaches the stream. The web seat skips it too.
+const SINGLE_PASS_END_MARKER = "done";
+
 /**
  * The run's exchange stage: announce the PSI stages, then run the two-party
  * exchange over the negotiated transport, reporting each stage transition,
@@ -582,7 +608,12 @@ async function runExchangeStage(params: {
     log,
     emit,
   } = params;
-  const stageDefinitions = describeExchangeStages(prepared);
+  const stageDefinitions = [
+    ...describeExchangeStages(prepared),
+    ...(prepared.linkageTerms.linkageStrategy === "single-pass"
+      ? SINGLE_PASS_STAGE_DEFINITIONS
+      : []),
+  ];
   const stageLabels = Object.fromEntries(
     stageDefinitions.map(({ id, label }) => [id, label]),
   );
@@ -661,6 +692,7 @@ async function runExchangeStage(params: {
       // either party's data reaches the display.
       onPsiProgress: (progress) => psiProgress.report(progress),
       onStage: (id: string) => {
+        if (id === SINGLE_PASS_END_MARKER) return;
         const label = stageLabels[id] ?? id;
         // The label derives from linkage-key names the partner may have
         // authored, so it goes through the display-boundary escape before
@@ -1716,10 +1748,11 @@ async function writeExchangeOutputs(params: {
     signedReceipt,
   } = outcome;
 
-  // The result-write failure, held until the audit artifacts below have been
-  // written. A box rather than the error itself, since a thrower may raise any
-  // value, `undefined` included.
-  let undelivered: { error: unknown } | undefined;
+  // The result's failure -- a table that could not be built from the partner's
+  // payload, or a write that did not deliver it -- held until the audit
+  // artifacts below have been written. A box rather than the error itself,
+  // since a thrower may raise any value, `undefined` included.
+  let resultFailure: { error: unknown; notice: string } | undefined;
 
   // A count-only exchange produces no matched pairing for either party,
   // so there is no result file to write and nothing was withheld from
@@ -1770,16 +1803,34 @@ async function writeExchangeOutputs(params: {
     // file reads back through the delimiter this party chose. A party that
     // named none, or chose detection, gets a comma-separated result.
     const resultDelimiter = resultCsvDelimiter(csvDelimiter);
-    const { headers, rows } = buildOutputTable(
-      associationTable,
-      prepared.rawRows,
-      prepared.metadata,
-      partnerPayload,
-      prepared.includeOwnColumns,
-      resultDelimiter,
-    );
+    let table: ReturnType<typeof buildOutputTable> | undefined;
     try {
-      await writeOutput(output, headers, rows, log, undefined, resultDelimiter);
+      table = buildOutputTable(
+        associationTable,
+        prepared.rawRows,
+        prepared.metadata,
+        partnerPayload,
+        prepared.includeOwnColumns,
+        resultDelimiter,
+      );
+    } catch (err) {
+      resultFailure = {
+        error: err,
+        notice:
+          "the result could not be built from your partner's payload, so " +
+          "no result was written",
+      };
+    }
+    try {
+      if (table !== undefined)
+        await writeOutput(
+          output,
+          table.headers,
+          table.rows,
+          log,
+          undefined,
+          resultDelimiter,
+        );
     } catch (err) {
       // The result did not reach where it was owed -- a file that did
       // not reach disk, or a stdout reader that stopped taking it before
@@ -1803,7 +1854,10 @@ async function writeExchangeOutputs(params: {
       // occurred is owed its record whatever became of the result
       // (docs/notes/record-durability-point.md), and a result the reader of
       // a pipe refused leaves the disk the record goes to untouched.
-      undelivered = { error: err };
+      resultFailure = {
+        error: err,
+        notice: "the result was not delivered",
+      };
     }
   }
 
@@ -1815,7 +1869,7 @@ async function writeExchangeOutputs(params: {
   // is core's own composition over integers it formats itself -- the same one
   // the browser seat renders, so no two sinks drift -- and holds no
   // partner-authored text.
-  if (entityClusters !== undefined && undelivered === undefined)
+  if (entityClusters !== undefined && resultFailure === undefined)
     log.info(describeEntityClusters(entityClusters));
 
   // Every audit artifact this run was asked for and could not produce,
@@ -1888,10 +1942,10 @@ async function writeExchangeOutputs(params: {
   // before the throw, on the same two channels every other completed-run loss
   // takes, since the partner may hold the recurring setup this side skipped
   // and the terminal error alone names only the result.
-  if (undelivered !== undefined) {
+  if (resultFailure !== undefined) {
     if (onOutputComplete !== undefined) {
       const skipped =
-        "the result was not delivered, so the post-exchange persistence " +
+        `${resultFailure.notice}, so the post-exchange persistence ` +
         "step did not run: what this run would have saved after the result " +
         "-- a configuration, a key file, or the payload set recorded for a " +
         "later run -- did not reach disk, and your partner may have saved a " +
@@ -1901,7 +1955,7 @@ async function writeExchangeOutputs(params: {
       log.error(skipped);
       reportPersistenceLoss(skipped, eventStream);
     }
-    throw undelivered.error;
+    throw resultFailure.error;
   }
 
   // The caller's own last persistence, run here rather than after this function

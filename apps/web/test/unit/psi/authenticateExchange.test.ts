@@ -134,8 +134,8 @@ describe("authenticateExchange", () => {
   test("a transport drop is re-thrown unchanged, not re-tagged as a trust failure", async () => {
     const [connA, connB] = createMessagePipe();
     // The responder parks awaiting the initiator's first frame; dropping the peer
-    // produces a transport ConnectionError, which the kex remaps to its timeout
-    // error (a plain Error wrapping the transport cause). That is a retryable
+    // produces a transport ConnectionError, which the kex re-throws as it is (no
+    // receive deadline fired, so it is not the kex timeout). That is a retryable
     // transport drop, NOT a trust failure, so authenticateExchange must not
     // re-tag it as security.
     const responder = authenticateExchange(connB, "responder", SECRET_A);
@@ -152,12 +152,10 @@ describe("authenticateExchange", () => {
     expect(err instanceof ConnectionError && err.kind === "security").toBe(
       false,
     );
-    // ...and the underlying transport ConnectionError is preserved in the cause
-    // chain (the kex timeout wraps it), proving the failure was passed through as
-    // a retryable transport drop, not swallowed or flattened to a generic Error.
-    const cause = (err as { cause?: unknown }).cause;
-    expect(cause).toBeInstanceOf(ConnectionError);
-    expect((cause as ConnectionError).kind).toBe("transport");
+    // ...and it is the transport ConnectionError itself, passed through as a
+    // retryable transport drop, not swallowed or flattened to a generic Error.
+    expect(err).toBeInstanceOf(ConnectionError);
+    expect((err as ConnectionError).kind).toBe("transport");
   });
 
   test("a protocol violation (peer out of turn) is re-tagged as a security trust failure", async () => {

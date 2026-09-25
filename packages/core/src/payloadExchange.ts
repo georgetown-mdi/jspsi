@@ -954,7 +954,8 @@ export async function exchangePayloads(
   const partnerPayload = toPartnerPayload(
     await receiveParsed(conn, payloadWireSchema),
   );
-  // This is the exchange's terminal frame. On a buffering transport (WebRTC)
+  // This is the exchange's terminal frame on an unsigned run; on a signing
+  // run the receipt swap follows it. On a buffering transport (WebRTC)
   // it looks racy: the responder's last act is a fire-and-forget send
   // (resolves on local hand-off, not peer delivery) right before the caller
   // tears the connection down. It is safe because the transport delivery

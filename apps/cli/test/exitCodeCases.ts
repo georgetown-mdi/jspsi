@@ -42,9 +42,43 @@ export const ERROR_CLASS_EXIT_CODES: ReadonlyArray<{
     plant: () => new ConnectionError("the server went away", "transport"),
   },
   {
+    planted: 'a UsageError behind a ConnectionError of kind "transport"',
+    code: 64,
+    plant: () =>
+      new ConnectionError("the directory holds a foreign file", "transport", {
+        cause: new UsageError("unexpected file(s) appeared"),
+      }),
+  },
+  {
+    planted: 'a UsageError behind a ConnectionError of kind "security"',
+    code: 69,
+    plant: () =>
+      new ConnectionError("a frame failed its integrity check", "security", {
+        cause: new UsageError("an inner refusal"),
+      }),
+  },
+  {
     planted: "an AuthenticationError",
     code: 77,
     plant: () => new AuthenticationError("key exchange authentication failed"),
+  },
+  {
+    planted:
+      'an AuthenticationError behind a ConnectionError of kind "transport"',
+    code: 77,
+    plant: () =>
+      new ConnectionError("the message send failed", "transport", {
+        cause: new AuthenticationError("key exchange authentication failed"),
+      }),
+  },
+  {
+    planted:
+      'an AuthenticationError behind a ConnectionError of kind "security"',
+    code: 69,
+    plant: () =>
+      new ConnectionError("a frame failed its integrity check", "security", {
+        cause: new AuthenticationError("an inner refusal"),
+      }),
   },
   {
     planted: "an InternalConsistencyError",

@@ -29,6 +29,21 @@ export function openEventStreamWithFdWired(): EventStreamEmitter {
     if (fd === EVENT_STREAM_FD) return {} as fs.Stats;
     return (realFstatSync as (...a: unknown[]) => fs.Stats)(fd, ...rest);
   }) as typeof fs.fstatSync);
+  // The preflight's zero-length write probe, answered for fd 3 alone; a spy
+  // the caller already installed on writeSync answers it instead.
+  if (!vi.isMockFunction(fs.writeSync)) {
+    const realWriteSync = fs.writeSync;
+    vi.spyOn(fs, "writeSync").mockImplementation(((
+      fd: number,
+      ...rest: unknown[]
+    ) =>
+      fd === EVENT_STREAM_FD && rest[2] === 0
+        ? 0
+        : (realWriteSync as (...a: unknown[]) => number)(
+            fd,
+            ...rest,
+          )) as typeof fs.writeSync);
+  }
   const emitter = openEventStream(true);
   if (emitter === undefined)
     throw new Error(
