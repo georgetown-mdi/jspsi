@@ -29,7 +29,7 @@ dependency and transitive in the image is therefore the exact version in the com
 lockfile: a rebuild without a lockfile change cannot re-resolve a caret range,
 and the image ships the same tree CI tested. The release SBOM covers a wider
 scope than this install -- step 9 in [RELEASES.md](../RELEASES.md) runs
-`npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev -w packages/core -w apps/cli -w apps/web`
+`npm sbom --sbom-format cyclonedx --package-lock-only --omit=dev --legacy-peer-deps -w packages/core -w apps/cli -w apps/web`
 -- because the Nitro `.output` this image copies bundles `apps/web`'s runtime
 dependencies, which the install scope above does not reach.
 
@@ -63,8 +63,10 @@ that ends up in the image is outside it -- which is why the command's shape is
 held part by part below, each part standing for a way the resolved tree and the
 instruction can disagree.
 
-Those invariants are read off `COPY` and `RUN`, so the test refuses every other
-instruction class outright, in either stage, rather than modeling it. `ADD` is
+Those invariants are read off `COPY` and `RUN`, so the test refuses every
+instruction class outside a reviewed list, in either stage, rather than modeling
+it. Beside `COPY` and `RUN` the list admits `ARG`, `ENTRYPOINT`, `ENV`, `EXPOSE`,
+`FROM`, `LABEL`, `USER` and `WORKDIR`. `ADD` is
 the one that names itself: it fetches a remote source and takes the same
 `--chown`/`--chmod` flags `COPY` does, so it can both pull in a build input the
 lockfile does not pin and land files with an ownership no assertion here reads. A
@@ -149,12 +151,11 @@ publishes the image.
 
 It floats: the instruction names no version, so a rebuild takes whatever the
 mirror holds for the pinned base's Alpine release. Measured on the base digest
-pinned here (Alpine 3.24.1): `samba-client-4.23.8-r0` and 44 dependencies, 45
+pinned here (Alpine 3.24.2): `samba-client-4.23.8-r0` and 44 dependencies, 45
 packages newly present and none removed. `apk`'s trailing `OK:` line reports the
 post-install total rather than the increment, so it reads
 `OK: 11.1 MiB in 18 packages` on the bare base and `OK: 63.1 MiB in 63 packages`
-after, on `aarch64`; the built `arm64` image goes from 520,152,837 to
-574,778,898 bytes, an increase of 54,626,061. The same 63 packages resolve on
+after, on `aarch64`, where the install's image layer is 54,625,614 bytes. The same 63 packages resolve on
 `x86_64`, where the post-install total is 54.2 MiB, so the multi-arch release
 build is not left short a package. An exact version pin was rejected because
 Alpine has exactly one version of a package per release branch, so a pin
@@ -228,8 +229,8 @@ reports -- it goes red, not green. A green build with a different module
 takes an override of the module version as well, which is a statement of which
 module was intended. What holds the committed defaults themselves is
 `scripts/dockerfile-freeze.test.mjs`, which pins all three as literals, and no
-CI path passes a build-arg -- `image_smoke.yaml` passes none, and the release
-workflow does not build this image.
+CI path passes a build-arg -- neither `image_smoke.yaml` nor the release
+workflow's builds of this image pass one.
 
 **The two tarball hashes are not `ARG`s.** Each is a literal in the
 `RUN` that fetches the tarball, selected by the same `case` arm that selects the
@@ -681,10 +682,11 @@ own files.
 An image added to the matrix records its own row the same way rather than
 starting unmeasured: its arm in the step is set to the `@unrecorded` sentinel,
 and the first run fails that leg and prints the block to paste into the arm and
-the list to paste here. The step is the last in the job so that a failure of
-either kind -- a sentinel awaiting its first measurement, or an inventory that
-has drifted -- skips no step that matters more, the variant's provider
-assertions and its end-to-end exchange among them.
+the list to paste here. The step runs after the variant's provider assertions
+and its end-to-end exchange, so a failure of either kind -- a sentinel awaiting
+its first measurement, or an inventory that has drifted -- skips none of them.
+Of the steps after it, the OS-package attribution comparison is skipped by such
+a failure; the image vulnerability scan and its report run regardless.
 
 ## What the shipped setup scripts ask of the image
 
@@ -771,7 +773,7 @@ question it records as open.
 each image's own package-manager metadata, queried against the built image by
 tag.
 
-- Default image: `apk list --installed`, apk-tools 3.0.6-r0 on Alpine 3.24.1.
+- Default image: `apk list --installed`, apk-tools 3.0.8-r0 on Alpine 3.24.2.
   `/lib/apk/db/installed` agrees with that listing on every package's name,
   version and license on both architectures; the listing is what the generator
   parses.
@@ -789,7 +791,8 @@ tag.
   architectures of an image disagree on.
 
 **What was measured.** Both images built without a layer cache at both
-architectures, 2026-09-11. A first attempt with a warm cache reported an
+architectures, the FIPS variant on 2026-09-11 and the default image on
+2026-09-24. A first attempt with a warm cache reported an
 architecture difference that was a stale layer rather than a property of the
 image, so a re-measurement builds with `--no-cache` or it measures the cache.
 
@@ -938,8 +941,8 @@ derived from the other's.
 
 ### The FIPS reference build's inventory
 
-The shipped `Dockerfile.fips` build at the pins above, re-measured 2026-09-10
-(`scratch/handoffs/fips-provider-pin-3.2.2-report.md`), installs
+The shipped `Dockerfile.fips` build at the pins above, re-measured 2026-09-10,
+installs
 **165 OS packages** and weighs 653,417,246 bytes (653 MB) on `x86_64` and
 801,950,571 bytes (802 MB) on `aarch64`. Of those 165, **37 hold a GPL-3.0 or
 LGPL-3.0 term** -- the reference build's 39 (enumerated below) minus `binutils`
