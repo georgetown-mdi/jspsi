@@ -244,9 +244,9 @@ export function markRotationInFlight(
 /**
  * Remove the rotation-in-flight marker from the key file at `keyFilePath`
  * through the same atomic owner-only write that set it, once the key exchange
- * has failed closed: nothing rotated, and that failure is the outcome the
- * operator reads. Nothing is written when the file holds no marker or a secret
- * other than `sharedSecret`.
+ * has failed closed: this side did not rotate, and that failure is the outcome
+ * the operator reads. Nothing is written when the file holds no marker or a
+ * secret other than `sharedSecret`.
  */
 export function clearRotationInFlight(
   keyFilePath: string,

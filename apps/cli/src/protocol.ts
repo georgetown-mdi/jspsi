@@ -1020,7 +1020,9 @@ const ROTATION_MARK_REMEDY =
 
 /**
  * Remove the rotation-in-flight marker after a key exchange that failed closed:
- * nothing rotated, and the failure is what the operator reads, so the next run
+ * this side did not rotate (the partner may have, which the authentication
+ * failure's confirm-first guidance covers), and the failure is what the
+ * operator reads, so the next run
  * does not treat it as a rotation that stopped partway. A crash or a dropped
  * connection never reaches here and leaves the marker. A write failure is
  * logged rather than thrown, so it cannot replace the authentication failure.
