@@ -16,7 +16,6 @@ import {
   describeResolvedMatching,
   describeResolvedRunShape,
   authenticateConnection,
-  assertFirstRoundFitsFileSyncFrame,
   assertFirstRoundFitsWebRtcFrame,
   assertSharedSecretReadyForHandshake,
   ConnectionError,
@@ -50,6 +49,7 @@ import type {
 } from "@alcove/core";
 
 import { LocalFSClient } from "./connection/localFSClient";
+import { assertFileSyncFirstRoundFits } from "./fileSyncFirstRound";
 import { SSH2SFTPClientAdapter } from "./connection/ssh2SftpAdapter";
 import { dialedBrokerAuthority } from "./connection/webrtc/brokerClient";
 import { describeIceTransportPolicy } from "./connection/webrtc/iceDiagnostics";
@@ -1707,9 +1707,9 @@ async function prepareTransport(
     if (runRelayCredential !== undefined)
       log.info(relayCredentialNotice(connection, runRelayCredential));
   } else {
-    // A first round too large for one message file is refused here, before
-    // the transport is built and before any file is written for the partner.
-    assertFirstRoundFitsFileSyncFrame(prepared);
+    // A first round too large for one message file is refused before the
+    // transport is built and before any file is written for the partner.
+    assertFileSyncFirstRoundFits(connection, prepared);
     const client =
       connection.channel === "filedrop"
         ? new LocalFSClient()

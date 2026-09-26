@@ -221,16 +221,22 @@ export class WebRtcFrameLimitError extends UsageError {
  * identically, so the CLI's generic retry advisory is suppressed.
  *
  * `setOwner` is always `"local"`: every raising site sizes this party's own
- * set. {@link isSetTooLargeError} classifies it with
+ * set. `distinctValueLimit` is the deduplication bound the set passed, when
+ * that is what refused it. {@link isSetTooLargeError} classifies it with
  * {@link WebRtcFrameLimitError}.
  */
 export class RoundSetLimitError extends UsageError {
   readonly alcoveRecoveryHintEmitted = true;
   readonly setOwner = "local" as const;
+  readonly distinctValueLimit: number | undefined;
 
-  constructor(message: string, options?: ErrorOptions) {
+  constructor(
+    message: string,
+    options?: ErrorOptions & { distinctValueLimit?: number },
+  ) {
     super(message, options);
     this.name = "RoundSetLimitError";
+    this.distinctValueLimit = options?.distinctValueLimit;
   }
 }
 

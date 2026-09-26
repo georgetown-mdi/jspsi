@@ -197,6 +197,7 @@ export function roundDistinctValueLimitRefusal(
     `A linkage key gives this party more than ${limit} distinct values in ` +
       "one round, the most one round can hold. Split the input into smaller " +
       "files and run one exchange for each.",
+    { distinctValueLimit: limit },
   );
 }
 
@@ -246,15 +247,22 @@ export function removeDuplicatesAndUndefineds(
 }
 
 /**
- * How many values a round over `keyData` sends under the rule that drops a
- * value several of this party's records hold: the set
- * {@link removeDuplicatesAndUndefineds} builds, counted. A party that keeps
- * those values sends each once instead, so this is the fewest values the
- * round sends whichever cardinality the terms resolve. A record holding a
- * candidate set contributes each candidate, as the round's own set does.
+ * How many values a round over `keyData` sends under this party's own
+ * within-round rule: every distinct value when it keeps a value several of
+ * its records hold (`keepsDuplicates`, its `deduplicate` term), the set
+ * {@link groupDuplicatesAndRemoveUndefineds} builds, and otherwise only the
+ * values exactly one record holds, the set
+ * {@link removeDuplicatesAndUndefineds} builds. A record holding a candidate
+ * set contributes each candidate, as the round's own set does.
  */
-export function droppingRoundSetSize(keyData: Iterable<KeyCandidates>): number {
-  return removeDuplicatesAndUndefineds(Array.from(keyData))[0].length;
+export function sentRoundSetSize(
+  keyData: Iterable<KeyCandidates>,
+  keepsDuplicates: boolean,
+): number {
+  const candidates = Array.from(keyData);
+  return keepsDuplicates
+    ? groupDuplicatesAndRemoveUndefineds(candidates)[0].length
+    : removeDuplicatesAndUndefineds(candidates)[0].length;
 }
 
 /**

@@ -241,6 +241,7 @@ function letters(i: number): string {
 function preparedWith(
   firstNames: Array<string>,
   strategy: LinkageStrategy = "cascade",
+  deduplicate = false,
 ) {
   return prepareForExchange(
     {
@@ -248,7 +249,7 @@ function preparedWith(
         version: "1.0.0",
         date: "2026-01-01",
         algorithm: "psi",
-        deduplicate: false,
+        deduplicate,
         linkageStrategy: strategy,
         identity: "Tester",
         output: { expectsOutput: true, shareWithPartner: true },
@@ -293,6 +294,29 @@ test("the first-round check refuses one value over the bound and admits one unde
   expect((refusal as Error).message).toMatch(
     /at least 301 values to send.*Nothing was sent/,
   );
+});
+
+test("the WebRTC first-round check counts every distinct value a deduplicating party sends", () => {
+  // 400 values each held by two records: a party that drops a shared value
+  // sends none of them, one whose terms set deduplicate sends all 400.
+  const values = Array.from({ length: 400 }, (_unused, i) => letters(i));
+  const rows = [...values, ...values];
+  const bound = webrtcFrameReceiveCharge(minimumPsiSetFrameBytes(300));
+
+  expect(() =>
+    assertFirstRoundFitsWebRtcFrame(
+      preparedWith(rows, "cascade", false),
+      bound,
+    ),
+  ).not.toThrow();
+  let refusal: unknown;
+  try {
+    assertFirstRoundFitsWebRtcFrame(preparedWith(rows, "cascade", true), bound);
+  } catch (err) {
+    refusal = err;
+  }
+  expect(refusal).toBeInstanceOf(WebRtcFrameLimitError);
+  expect((refusal as Error).message).toMatch(/at least 400 values to send/);
 });
 
 test("the first-round check leaves a single-pass exchange to its dataset ceiling", () => {

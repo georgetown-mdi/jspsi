@@ -22,6 +22,7 @@ import {
   assertFirstRoundFitsFileSyncFrame,
   fileSyncMaxRoundSetValues,
   fileSyncRoundOneSetTooLargeMessage,
+  fileSyncRoundOneTooManyDistinctMessage,
   prepareForExchange,
 } from "../../src/exchange";
 import {
@@ -57,6 +58,7 @@ function letters(i: number): string {
 function preparedWith(
   firstNames: Array<string>,
   strategy: LinkageStrategy = "cascade",
+  deduplicate = false,
 ) {
   return prepareForExchange(
     {
@@ -64,7 +66,7 @@ function preparedWith(
         version: "1.0.0",
         date: "2026-01-01",
         algorithm: "psi",
-        deduplicate: false,
+        deduplicate,
         linkageStrategy: strategy,
         identity: "Tester",
         output: { expectsOutput: true, shareWithPartner: true },
@@ -159,6 +161,32 @@ test("the check refuses one value over the bound and admits one under and at it"
   );
 });
 
+test("the file-sync first-round check counts every distinct value a deduplicating party sends", () => {
+  // 400 values each held by two records: a party that drops a shared value
+  // sends none of them, one whose terms set deduplicate sends all 400.
+  const values = Array.from({ length: 400 }, (_unused, i) => letters(i));
+  const rows = [...values, ...values];
+  const bound = boundFor(300);
+
+  expect(() =>
+    assertFirstRoundFitsFileSyncFrame(
+      preparedWith(rows, "cascade", false),
+      bound,
+    ),
+  ).not.toThrow();
+  let refusal: unknown;
+  try {
+    assertFirstRoundFitsFileSyncFrame(
+      preparedWith(rows, "cascade", true),
+      bound,
+    );
+  } catch (err) {
+    refusal = err;
+  }
+  expect(refusal).toBeInstanceOf(RoundSetLimitError);
+  expect((refusal as Error).message).toMatch(/at least 400 values to send/);
+});
+
 test("the check leaves a single-pass exchange to its dataset ceiling", () => {
   const rows = Array.from({ length: 50 }, (_unused, i) => letters(i));
   expect(() =>
@@ -241,6 +269,9 @@ test("each refusal survives the display boundary whole at the real bound", () =>
   for (const refusal of [
     new RoundSetLimitError(
       fileSyncRoundOneSetTooLargeMessage(MAX_ROUND_DISTINCT_VALUES * 10),
+    ),
+    new RoundSetLimitError(
+      fileSyncRoundOneTooManyDistinctMessage(MAX_ROUND_DISTINCT_VALUES),
     ),
     roundDistinctValueLimitRefusal(MAX_ROUND_DISTINCT_VALUES),
   ]) {

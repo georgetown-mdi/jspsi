@@ -4,9 +4,10 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import yargs, { type Arguments } from "yargs";
 import YAML from "yaml";
-import { UsageError } from "@alcove/core";
+import { RoundSetLimitError, UsageError } from "@alcove/core";
 import {
   DEFAULT_LINKAGE_RULE_SET,
+  assertFirstRoundFitsFileSyncFrame,
   csvDelimiterRefusal,
   encodeInvitation,
   generateSigningIdentity,
@@ -80,6 +81,11 @@ vi.mock("@alcove/core", async (importActual) => {
     // prepareForExchange: prepareDataset mutates the returned object (it sets
     // expectedPayloadColumns from a committed payload.receive), so a shared ref
     // would leak that field between tests.
+    // Spy-wrapped so a test can plant the refusal the check raises on an input
+    // whose first round is too large, which the stubbed preparation cannot hold.
+    assertFirstRoundFitsFileSyncFrame: vi.fn(
+      actual.assertFirstRoundFitsFileSyncFrame,
+    ),
     prepareForExchange: vi.fn(
       () =>
         ({
@@ -2545,6 +2551,40 @@ test("handler: an input that cannot satisfy the agreed terms exits 64 with no ho
     expect(mockState.errors.join("\n")).toContain(
       "cannot satisfy every linkage key the configuration declares",
     );
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+});
+
+test("handler: a first round too large for one message file exits 64 with no host-key probe", async () => {
+  // Over the same unpinned sftp config: the size check reads only the prepared
+  // input, so its refusal ends the run with the host-key step -- and so the
+  // probe that contacts the server and writes the pin -- never entered.
+  const input = writeSftpExchangeInputs();
+
+  vi.mocked(assertFirstRoundFitsFileSyncFrame).mockImplementationOnce(() => {
+    throw new RoundSetLimitError("first round too large for one file");
+  });
+  vi.mocked(establishHostKeyTrust).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(
+      handler({
+        _: [],
+        $0: "alcove",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(mockState.errors.join("\n")).toContain(
+      "first round too large for one file",
+    );
+    expect(vi.mocked(assertFirstRoundFitsFileSyncFrame)).toHaveBeenCalled();
     expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
   } finally {

@@ -11,9 +11,11 @@ import os from "node:os";
 import path from "node:path";
 import yargs, { type Arguments } from "yargs";
 import {
+  assertFirstRoundFitsFileSyncFrame,
   CONSENT_FACTS,
   getLogger,
   prepareForExchange,
+  RoundSetLimitError,
   sanitizeErrorForDisplay,
   UsageError,
 } from "@alcove/core";
@@ -72,7 +74,13 @@ vi.mock("../../../src/hostKeyTrust", () => ({
 // running the real prepare behind it.
 vi.mock("@alcove/core", async (importActual) => {
   const actual = await importActual<typeof import("@alcove/core")>();
-  return { ...actual, prepareForExchange: vi.fn(actual.prepareForExchange) };
+  return {
+    ...actual,
+    prepareForExchange: vi.fn(actual.prepareForExchange),
+    assertFirstRoundFitsFileSyncFrame: vi.fn(
+      actual.assertFirstRoundFitsFileSyncFrame,
+    ),
+  };
 });
 
 let existsSyncSpy: MockInstance;
@@ -724,6 +732,44 @@ test("handler: the dataset is prepared before host-key trust", async () => {
     const [prepared] = vi.mocked(prepareForExchange).mock.invocationCallOrder;
     const [trusted] = vi.mocked(establishHostKeyTrust).mock.invocationCallOrder;
     expect(prepared).toBeLessThan(trusted);
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: a first round too large for one message file exits 64 with no host-key probe", async () => {
+  // The size check reads only the prepared input, so its refusal ends the run
+  // over the same sftp URL with the host-key step never entered. The refusal
+  // is planted: reaching the real bound takes millions of rows.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-zerofirstround-"));
+  const exitSpy = captureProcessExit();
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    vi.mocked(assertFirstRoundFitsFileSyncFrame).mockImplementationOnce(() => {
+      throw new RoundSetLimitError("first round too large for one file");
+    });
+    vi.mocked(establishHostKeyTrust).mockClear();
+    vi.mocked(runProtocol).mockClear();
+
+    await expect(
+      handler({
+        _: ["sftp://userb@localhost:2222/drop", input],
+        $0: "alcove",
+        "config-file": path.join(dir, "alcove.yaml"),
+        "key-file": path.join(dir, ".alcove.key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "silent",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    expect(vi.mocked(assertFirstRoundFitsFileSyncFrame)).toHaveBeenCalled();
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
   } finally {
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });

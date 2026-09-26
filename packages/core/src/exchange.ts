@@ -49,7 +49,8 @@ import {
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 import {
-  droppingRoundSetSize,
+  MAX_ROUND_DISTINCT_VALUES,
+  sentRoundSetSize,
   requireSingleCandidate,
   linkViaCountOnlyPSI,
   linkViaPSI,
@@ -1408,10 +1409,11 @@ export function prepareForExchange(
  * connection opens; {@link assertFirstRoundFitsFileSyncFrame} is the SFTP and
  * synced-folder counterpart.
  *
- * It counts the values the first cascade or count-only round sends under the
- * rule that drops a value several records hold ({@link droppingRoundSetSize}),
- * the fewest that round sends whatever cardinality the terms resolve, taken in
- * both PSI roles, since which one this party plays is not yet known. It
+ * It counts the values the first cascade or count-only round sends under this
+ * party's own within-round rule ({@link sentRoundSetSize}): every distinct
+ * value when its terms set `deduplicate` on a cascade, else only the values
+ * exactly one record holds. The count is taken in both PSI roles, since which
+ * one this party plays is not yet known. It
  * refuses on a count over the bound in both roles, and on any failure to
  * count, with the failure as the refusal's cause. A {@link UsageError} the
  * round would raise in one role is left to the round when the other role
@@ -1488,10 +1490,25 @@ export function fileSyncRoundOneSetTooLargeMessage(
 }
 
 /**
+ * The refusal an SFTP or synced-folder exchange raises at its start when this
+ * party's first round holds more than `limit` distinct values, the most one
+ * round's deduplication holds. The count stops at the bound, so the message
+ * names the bound rather than a count.
+ */
+export function fileSyncRoundOneTooManyDistinctMessage(limit: number): string {
+  return (
+    "Too large for SFTP or a synced folder: the first linkage key gives " +
+    `this party more than ${limit} distinct values, the most one round ` +
+    `can hold. Nothing was sent. ${SPLIT_INPUT_REMEDY}`
+  );
+}
+
+/**
  * Refuse an SFTP or synced-folder exchange whose first round alone cannot fit
  * one message file, before anything is written for the partner: a
- * {@link RoundSetLimitError} naming the count, the bound, and the remedy.
- * Call it at the start of such an exchange, once {@link prepareForExchange}
+ * {@link RoundSetLimitError} naming the count, the bound, and the remedy, or,
+ * where the count stopped at the deduplication bound, that bound and the
+ * remedy. Call it at the start of such an exchange, once {@link prepareForExchange}
  * has returned and before the connection opens.
  *
  * It counts as {@link assertFirstRoundFitsWebRtcFrame} does, against the
@@ -1515,7 +1532,13 @@ export function assertFirstRoundFitsFileSyncFrame(
       new RoundSetLimitError(
         fileSyncRoundOneSetTooLargeMessage(fewest, maxValues),
       ),
-    tooManyDistinct: (refusal) => refusal,
+    tooManyDistinct: (refusal) =>
+      new RoundSetLimitError(
+        fileSyncRoundOneTooManyDistinctMessage(
+          refusal.distinctValueLimit ?? MAX_ROUND_DISTINCT_VALUES,
+        ),
+        { distinctValueLimit: refusal.distinctValueLimit },
+      ),
     uncounted: (failure) =>
       new RoundSetLimitError(
         "This party could not count the values the first linkage key gives " +
@@ -1558,6 +1581,10 @@ function assertFirstRoundFits(
   const readsSingleCandidate =
     linkageTerms.algorithm === "psi-c" ||
     !candidateSetIsImplementedForStrategy(linkageTerms.linkageStrategy);
+  // This party's own term decides whether it keeps a value several of its
+  // records hold; a count-only round never does.
+  const keepsDuplicates =
+    linkageTerms.deduplicate && linkageTerms.algorithm !== "psi-c";
   // A refusal the round would raise is a refusal in that role, left to the
   // round when the other role fits, since this party may not play it. Any
   // other failure to count, a resource limit among them, refuses at once.
@@ -1573,8 +1600,9 @@ function assertFirstRoundFits(
           false,
         ),
       );
-      return droppingRoundSetSize(
+      return sentRoundSetSize(
         readsSingleCandidate ? values.map(requireSingleCandidate) : values,
+        keepsDuplicates,
       );
     } catch (failure) {
       if (failure instanceof UsageError) return failure;

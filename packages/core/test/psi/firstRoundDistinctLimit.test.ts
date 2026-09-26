@@ -22,7 +22,7 @@ vi.mock("../../src/psi/link", async (importOriginal) => {
   const link = await importOriginal<typeof import("../../src/psi/link")>();
   return {
     ...link,
-    droppingRoundSetSize: () => {
+    sentRoundSetSize: () => {
       throw link.roundDistinctValueLimitRefusal(LOWERED_LIMIT);
     },
   };
@@ -71,14 +71,18 @@ test("the WebRTC check raises its own refusal, for this party's set", () => {
   );
 });
 
-test("the file-sync check raises the round's refusal", () => {
+test("the file-sync check names the bound the count stopped at", () => {
   const refusal = refusalOf(() =>
     assertFirstRoundFitsFileSyncFrame(prepared(), 1),
   );
   expect(refusal).toBeInstanceOf(RoundSetLimitError);
   expect((refusal as RoundSetLimitError).setOwner).toBe("local");
-  expect((refusal as Error).message).toMatch(
-    /more than 4 distinct values in one round/,
+  expect((refusal as RoundSetLimitError).distinctValueLimit).toBe(4);
+  expect((refusal as Error).message).toBe(
+    "Too large for SFTP or a synced folder: the first linkage key gives " +
+      "this party more than 4 distinct values, the most one round can hold. " +
+      "Nothing was sent. Split the input into smaller files and run one " +
+      "exchange for each.",
   );
 });
 

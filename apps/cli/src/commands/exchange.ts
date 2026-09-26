@@ -34,6 +34,7 @@ import {
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
 import { expandTilde } from "../fileUtils";
+import { assertFileSyncFirstRoundFits } from "../fileSyncFirstRound";
 import { establishHostKeyTrust } from "../hostKeyTrust";
 import {
   loadKeyFile,
@@ -1187,6 +1188,7 @@ export async function handler(argv: Arguments): Promise<void> {
         termsIdentity,
         options.configFile,
       );
+      assertFileSyncFirstRoundFits(connection, prepared);
     } catch (err) {
       exitWithError(log, err, exitCodeForError(err));
     }
@@ -1198,8 +1200,9 @@ export async function handler(argv: Arguments): Promise<void> {
     // resolution above because the first-use probe opens a real transport to the
     // server, while every refusal those two can raise -- the linkage terms the
     // input cannot satisfy, an unconfirmed outbound payload, a signing identity
-    // that is missing or bound to another party -- is decided from local inputs
-    // alone; deciding those first is what keeps a refused run from connecting.
+    // that is missing or bound to another party, a first round too large for
+    // one message file -- is decided from local inputs alone; deciding those
+    // first is what keeps a refused run from connecting.
     try {
       await establishHostKeyTrust(connection, {
         verbosity,

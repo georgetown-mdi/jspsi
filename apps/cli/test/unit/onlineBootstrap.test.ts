@@ -17,6 +17,7 @@ import {
   operatorSuppliedSpans,
   parseExchangeSpec,
   reconcileReceivedPayload,
+  RoundSetLimitError,
   safeParseConnectionConfig,
   setDiagnosticSink,
   SHARED_SECRET_REGEX,
@@ -73,6 +74,7 @@ import { openInputSource } from "../../src/util/dataIo";
 import { runOrExit } from "../../src/util/exit";
 import { MAX_TIMEOUT_SECONDS } from "../../src/util/flags";
 import { openEventStream } from "../../src/eventStream";
+import { assertFileSyncFirstRoundFits } from "../../src/fileSyncFirstRound";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
 import { runProtocol } from "../../src/protocol";
 import type { RunProtocolOptions } from "../../src/protocol";
@@ -94,6 +96,18 @@ vi.mock("../../src/protocol", () => ({
 vi.mock("../../src/eventStream", async (importActual) => {
   const actual = await importActual<typeof import("../../src/eventStream")>();
   return { ...actual, openEventStream: vi.fn(actual.openEventStream) };
+});
+
+// The first-round size check is spy-WRAPPED so the ordering test below can
+// plant its refusal, which reaching the real bound would take millions of rows
+// to raise.
+vi.mock("../../src/fileSyncFirstRound", async (importActual) => {
+  const actual =
+    await importActual<typeof import("../../src/fileSyncFirstRound")>();
+  return {
+    ...actual,
+    assertFileSyncFirstRoundFits: vi.fn(actual.assertFileSyncFirstRoundFits),
+  };
 });
 
 // The first-use host-key step is spy-WRAPPED for the same reason: the ordering
@@ -3520,6 +3534,33 @@ test("runOnlineBootstrap refuses a credential @path naming a missing file before
     await expect(
       runOnlineBootstrap({ ...onlineBootstrapParams(configPath), connection }),
     ).rejects.toThrow(UsageError);
+    expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+    expect(fs.existsSync(configPath)).toBe(false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runOnlineBootstrap refuses a first round too large for one message file before the host-key step", async () => {
+  // Decided from this party's own input, so settled before the step whose
+  // first-use probe contacts the server, on an unpinned connection.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  const configPath = path.join(dir, "alcove.yaml");
+  const connection: SFTPConnectionConfig = {
+    channel: "sftp",
+    server: { host: "sftp.example.org" },
+  };
+  const refusal = new RoundSetLimitError("first round too large for one file");
+  vi.mocked(assertFileSyncFirstRoundFits).mockImplementationOnce(() => {
+    throw refusal;
+  });
+  vi.mocked(establishHostKeyTrust).mockClear();
+  vi.mocked(runProtocol).mockReset();
+  try {
+    await expect(
+      runOnlineBootstrap({ ...onlineBootstrapParams(configPath), connection }),
+    ).rejects.toBe(refusal);
     expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
     expect(fs.existsSync(configPath)).toBe(false);
