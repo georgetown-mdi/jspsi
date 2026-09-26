@@ -48,6 +48,7 @@ import { recordManagedExchangeLastRun } from "./managedExchangeStore";
 import type {
   ManagedExchangeLastRun,
   ManagedExchangeRecord,
+  RunnableManagedExchangeRecord,
 } from "./managedExchangeRecord";
 import type { ManagedExchangeLockOptions } from "./managedExchangeLock";
 import type { ManagedExchangeRunResult } from "./managedExchangeRun";
@@ -72,14 +73,17 @@ interface ManagedRerunSeams<TInput, THandshake, TExchange> {
    * reject a missing file, a gone permission, or a column shape the standing terms
    * cannot satisfy as a benign {@link ManagedInputError}. Its contents are never
    * taken from the record. Its result feeds the handshake, so the connection is
-   * unreachable until this passes.
+   * unreachable until this passes. Receives the record as read inside the
+   * run+rotate lock, whose terms the input is validated against.
    */
-  acquireInput: () => Promise<TInput>;
+  acquireInput: (current: RunnableManagedExchangeRecord) => Promise<TInput>;
   /**
    * Open the side-dispatched rendezvous, authenticate the partner, and yield the
    * rotated secret plus the value the data exchange consumes. Receives the
-   * acquired input, and the rotation-in-flight marker write to await once the
-   * partner has connected and before the key exchange starts. The side
+   * acquired input, the rotation-in-flight marker write to await once the
+   * partner has connected and before the key exchange starts, and the record as
+   * read inside the run+rotate lock, whose secret it authenticates with and
+   * whose side it dispatches on. The side
    * dispatch and the fresh peer-id derivation live here (see
    * {@link ./managedRendezvous.ts}); this module only guarantees it runs after
    * the pre-connection checks and inside the run+rotate lock.
@@ -87,6 +91,7 @@ interface ManagedRerunSeams<TInput, THandshake, TExchange> {
   handshake: (
     input: TInput,
     markRotationInFlight: () => Promise<void>,
+    current: RunnableManagedExchangeRecord,
   ) => Promise<ManagedRerunHandshake<THandshake>>;
   /** Run the data exchange -- reachable only after the durable persist resolves.
    * Receives the handshake's output value. */
@@ -190,19 +195,20 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
   // boundary runManagedExchange marks. Read by the classification below (see
   // rerunFailureLastRun) and passed to the caller via onDataExchangeStart.
   let dataExchangeStarted = false;
+  // The record the run used, once the lock is granted; the expiry re-map reads
+  // it, since the bound the handshake enforced is that record's.
+  let current: RunnableManagedExchangeRecord | undefined;
 
   // The input guard, the single-writer lock, the persist-before-success rotation,
   // and the data exchange are runManagedExchange's, wired to this record's seams.
   try {
     return await runManagedExchange<TInput, THandshake, TExchange>({
-      record: {
-        id: record.id,
-        ...(record.tokenMaxAgeDays !== undefined
-          ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
-          : {}),
-      },
+      record: { id: record.id },
       runStartedAtMs,
-      acquireInput: seams.acquireInput,
+      acquireInput: (read) => {
+        current = read;
+        return seams.acquireInput(read);
+      },
       handshake: seams.handshake,
       dataExchange: seams.dataExchange,
       onDataExchangeStart: () => {
@@ -215,7 +221,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
   } catch (error) {
     // A bound that lapsed mid-run remaps to the same benign expiry (see
     // remapLapsedRunFailure).
-    const lapsed = remapLapsedRunFailure(error, record, now());
+    const lapsed = remapLapsedRunFailure(error, current ?? record, now());
     if (lapsed !== undefined) throw lapsed;
     // Everything rerunFailureLastRun does not own (see its doc) is stamped here.
     const lastRun = rerunFailureLastRun(

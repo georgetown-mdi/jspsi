@@ -88,6 +88,11 @@ const OUTPUTS: RunOutputs = vi.hoisted(() => ({
 /** The rotation-in-flight marker write the mocked orchestration hands the
  * handshake, so a case can place it among the wiring's other calls. */
 const markRotationInFlight = vi.hoisted(() => vi.fn(() => Promise.resolve()));
+// The record the stubbed orchestration hands the phases as its in-lock read;
+// unset, it hands back the record the driver was given.
+const lockedRead = vi.hoisted((): { record: unknown } => ({
+  record: undefined,
+}));
 
 // The rest of the module stays real: the launch surface's classification reads
 // its benign-outcome check.
@@ -95,18 +100,24 @@ vi.mock("../../../src/psi/managed/managedRun.js", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   runManagedRerun: vi.fn(
     async (
-      _record: unknown,
+      record: unknown,
       seams: {
-        acquireInput: () => Promise<unknown>;
+        acquireInput: (current: unknown) => Promise<unknown>;
         handshake: (
           input: unknown,
           mark: () => Promise<void>,
+          current: unknown,
         ) => Promise<{ handshake: unknown }>;
         dataExchange: (carried: unknown) => Promise<unknown>;
       },
     ) => {
-      const input = await seams.acquireInput();
-      const { handshake } = await seams.handshake(input, markRotationInFlight);
+      const current = lockedRead.record ?? record;
+      const input = await seams.acquireInput(current);
+      const { handshake } = await seams.handshake(
+        input,
+        markRotationInFlight,
+        current,
+      );
       const exchange = await seams.dataExchange(handshake);
       return { exchange, lastRun: { at: 0, outcome: "succeeded" } };
     },
@@ -339,6 +350,7 @@ function reportCloseOutcome(outcome: PeerCloseOutcome) {
 
 afterEach(() => {
   vi.clearAllMocks();
+  lockedRead.record = undefined;
 });
 
 describe("runManagedExchangeInBrowser", () => {
@@ -367,6 +379,30 @@ describe("runManagedExchangeInBrowser", () => {
       );
     },
   );
+
+  test("meets the partner and authenticates with the secret read inside the lock", async () => {
+    // The driver is handed the record a surface or a scheduled window loaded
+    // earlier; a rotation stored since then is what the run must use.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    lockedRead.record = { ...RECORD, sharedSecret: "rotated-secret" };
+
+    await runDriver(new AbortController().signal);
+
+    expect(mockedRendezvous).toHaveBeenCalledWith(
+      RECORD.side,
+      "rotated-secret",
+      RECORD.exchangeFile,
+      expect.anything(),
+    );
+    expect(mockedAuthenticate).toHaveBeenCalledWith(
+      mc,
+      "initiator",
+      "rotated-secret",
+      undefined,
+    );
+  });
 
   test("marks the rotation in flight once the channel opens and before the key exchange", async () => {
     const { mc } = makeParkedCloseMc();

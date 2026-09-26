@@ -131,7 +131,8 @@ export const MAX_WINDOW_ATTEMPTS = 64;
  * the object-URL boundary) and calls the same driver the attended surface
  * calls. */
 export interface ManagedScheduleAttempt {
-  /** The record to run, as the store held it just before this attempt. */
+  /** The record as the store held it just before this attempt. The run path
+   * reads it again inside the run+rotate lock and runs that copy. */
   record: RunnableManagedExchangeRecord;
   /** This run's input, always the persisted handle read UNATTENDED: a scheduled
    * run has no operator to answer a permission prompt, so a non-granted

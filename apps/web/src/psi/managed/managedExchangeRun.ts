@@ -8,7 +8,7 @@
  * data-exchange phase is a callback this module invokes only after the
  * durable persist resolves.
  *
- * Four invariants this module owns (normative in docs/MANAGED_EXCHANGE.md and
+ * Five invariants this module owns (normative in docs/MANAGED_EXCHANGE.md and
  * docs/spec/MANAGED_EXCHANGE_RECORD.md):
  *
  * - **Input guard before connection.** The input file is acquired and its
@@ -38,6 +38,12 @@
  *   unreadable local record, neither a hand-off nor a rotation this device
  *   failed to save.
  *
+ * - **A run uses the record as stored when it takes the lock.** The input
+ *   guard and the handshake are handed the record read inside the locked
+ *   window, never the copy a caller loaded before requesting the lock, so the
+ *   secret a run authenticates with and rotates is the one the store holds
+ *   while no other run can change it.
+ *
  * - **Persist-before-success.** A rotation-in-flight marker is written
  *   durably before the key exchange starts, and the rotated secret is written
  *   durably (a strict-durability transaction awaited to `complete`, which
@@ -56,14 +62,19 @@ import {
   succeededRun,
 } from "./managedRunRotate";
 import {
+  getManagedExchange,
   markManagedExchangeRotationInFlight,
   persistManagedExchangeRotation,
   recordManagedExchangeLastRun,
 } from "./managedExchangeStore";
 import { getManagedLocalState } from "./managedLocalState";
+import { runnableManagedExchangeOrRefuse } from "./managedExchangeRecord";
 import { withManagedExchangeLock } from "./managedExchangeLock";
 
-import type { ManagedExchangeLastRun } from "./managedExchangeRecord";
+import type {
+  ManagedExchangeLastRun,
+  RunnableManagedExchangeRecord,
+} from "./managedExchangeRecord";
 import type { ManagedExchangeLockOptions } from "./managedExchangeLock";
 import type { ManagedLocalState } from "./managedLocalStateShape";
 import type { RotationWriteBack } from "./managedRunRotate";
@@ -104,13 +115,13 @@ export class ManagedExchangeCustodyUnreadableError extends Error {
 }
 
 /** The input, handshake, and data-exchange phases the runner supplies to
- * {@link runManagedExchange}, plus the record's rotation policy. The persist and
- * lock are this module's; the runner cannot reach the data exchange before the
- * persist resolves, nor the handshake before the input is acquired and validated. */
+ * {@link runManagedExchange}. The persist and lock are this module's; the runner
+ * cannot reach the data exchange before the persist resolves, nor the handshake
+ * before the input is acquired and validated. */
 interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
-  /** The record whose secret this run rotates. Its `id` keys the lock and the
-   * field-scoped store writes; `tokenMaxAgeDays` restamps `expires`. */
-  record: { id: string; tokenMaxAgeDays?: number };
+  /** The record whose secret this run rotates. Its `id` keys the lock, the
+   * read of the record the run uses, and the field-scoped store writes. */
+  record: { id: string };
   /**
    * The instant this run began, UTC milliseconds -- before the lock was
    * requested, so it precedes every act the run makes. Passed to every
@@ -129,17 +140,20 @@ interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
    * cannot satisfy as a benign pre-run failure (`acquireValidatedManagedInput`
    * in {@link ./managedInputHandle.ts} raises a {@link ManagedInputError}).
    * Its result is handed to {@link handshake}, so the connection it opens is
-   * unreachable until the guard passes.
+   * unreachable until the guard passes. Receives the record as read inside the
+   * lock, whose terms the input is validated against.
    */
-  acquireInput: () => Promise<TInput>;
+  acquireInput: (current: RunnableManagedExchangeRecord) => Promise<TInput>;
   /** Run the authenticated handshake and yield the rotated secret (from the
    * `AuthResult`) plus whatever the data exchange needs. Runs inside the lock, after
-   * the input guard passed; receives the acquired input, and the durable
+   * the input guard passed; receives the acquired input, the durable
    * rotation-in-flight marker write it must await after the partner connects
-   * and before the key exchange starts. */
+   * and before the key exchange starts, and the record as read inside the lock,
+   * whose secret it authenticates with. */
   handshake: (
     input: TInput,
     markRotationInFlight: () => Promise<void>,
+    current: RunnableManagedExchangeRecord,
   ) => Promise<{ rotatedSecret: string; handshake: THandshake }>;
   /** Begin and complete the data exchange -- reachable only after the durable
    * persist resolves. Receives the value the handshake produced. */
@@ -177,9 +191,10 @@ export interface ManagedExchangeRunResult<TExchange> {
  * "begin this run" through the success stamp, so the payload exchange runs
  * inside it; the data exchange still cannot begin before the persist resolves.
  *
- * A spent check, then the input guard, run first inside the lock and refuse
- * before any connection is opened, recording the `handed-off` or benign
- * input `lastRun` respectively. A persist failure after rotation records a
+ * A spent check, then the read of the record the run uses, then the input
+ * guard run first inside the lock and refuse before any connection is opened,
+ * the spent check and the guard recording the `handed-off` or benign input
+ * `lastRun` respectively. A persist failure after rotation records a
  * `storage`-kind `lastRun`; a handshake or data-exchange failure propagates
  * unchanged for the runner to classify. Every bookkeeping write states
  * `runStartedAtMs`, so the store's write rules
@@ -196,6 +211,8 @@ export interface ManagedExchangeRunResult<TExchange> {
  * @throws {ManagedExchangeCustodyUnreadableError} if the sibling entry
  *   holding that state cannot be read; the `custody-unreadable` `lastRun` is
  *   recorded best-effort first, on the same no-input, no-connection terms.
+ * @throws {Error} if the record is gone or holds a configuration only when
+ *   the lock is granted; no input was read and no connection made.
  * @throws {ManagedInputError} if the input guard rejects (a missing file, a
  *   gone permission, or an unsatisfiable column shape); the benign `lastRun`
  *   is recorded best-effort first, and no connection was made.
@@ -216,13 +233,14 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
       // does: the sibling state is read here rather than trusted from whatever a
       // caller loaded, so a hand-off confirmed since that load stops this run.
       await refuseHandedOffCopy(record.id, now, runStartedAtMs);
+      const current = await readRecordToRun(record.id);
       // The input guard runs before the handshake opens any connection. A benign
       // input rejection records its classified bookkeeping inside the lock (this
       // run's record until the lock releases), then re-raises with no handshake
       // attempted.
       let input: TInput;
       try {
-        input = await phases.acquireInput();
+        input = await phases.acquireInput(current);
       } catch (error) {
         if (error instanceof ManagedInputError) {
           // Best-effort, for the same reason the storage tier is below: a failed
@@ -246,15 +264,18 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
       // classify and record.
       const gate = await runRotationCriticalSection<THandshake>({
         handshake: () =>
-          phases.handshake(input, () =>
-            markManagedExchangeRotationInFlight(
-              record.id,
-              new Date(now()).toISOString(),
-            ),
+          phases.handshake(
+            input,
+            () =>
+              markManagedExchangeRotationInFlight(
+                record.id,
+                new Date(now()).toISOString(),
+              ),
+            current,
           ),
         persist: (writeBack: RotationWriteBack) =>
           persistRotation(record.id, writeBack),
-        tokenMaxAgeDays: record.tokenMaxAgeDays,
+        tokenMaxAgeDays: current.tokenMaxAgeDays,
         now,
       }).catch(async (error: unknown) => {
         if (error instanceof RotationPersistError) {
@@ -325,6 +346,23 @@ async function refuseHandedOffCopy(
     runStartedAtMs,
   );
   throw new ManagedExchangeSpentError(id);
+}
+
+/**
+ * Read the record this run uses, inside the lock and after the hand-off
+ * refusal.
+ *
+ * @throws {Error} if no record with `id` exists, or it holds a configuration
+ *   only.
+ * @throws {ZodError} if the stored value is not a valid record.
+ */
+async function readRecordToRun(
+  id: string,
+): Promise<RunnableManagedExchangeRecord> {
+  const stored = await getManagedExchange(id);
+  if (stored === undefined)
+    throw new Error(`no managed exchange with id ${id}`);
+  return runnableManagedExchangeOrRefuse(stored);
 }
 
 /** Record a refusal's own bookkeeping, best-effort for the reason

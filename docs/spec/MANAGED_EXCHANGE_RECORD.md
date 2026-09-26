@@ -1195,7 +1195,11 @@ single device is a cross-tab single-writer lock (Web Locks) held from a run's
 begin through the success stamp it writes, so **one exchange of a record is in
 flight at a time** on a browser profile: a second tab, a second attended Run, and
 a scheduled attempt are each refused or queued across the whole run, the payload
-exchange included, rather than across its rotation alone. A [hand-off
+exchange included, rather than across its rotation alone. Once it holds the
+lock, a run reads the record again and runs that copy -- its secret, side,
+terms, and max-age policy -- rather than one its surface or its scheduled window
+read earlier, so each run, attended or scheduled, authenticates with and rotates
+the secret stored when it takes the lock. A [hand-off
 spend](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact),
 a [command-line hand-off taken back](#taking-a-command-line-hand-off-back), and a
 [re-invite's rotation write](#the-operators-response-to-it) each contend for that

@@ -60,6 +60,7 @@ import type {
   BuiltExchangeRecord,
   ExchangeRecord,
   ExchangeResult,
+  HandshakeRole,
   MessageConnection,
   ResolvedMatching,
 } from "@alcove/core";
@@ -85,14 +86,17 @@ interface ManagedRerunInput {
 }
 
 /** The held value the handshake phase hands the data exchange through the lock:
- * the open message connection, the resolved PSI library, the prepared exchange, and
- * the live peer/channel for teardown. */
+ * the open message connection, the resolved PSI library, the prepared exchange,
+ * the live peer/channel for teardown, and what the data exchange reads off the
+ * record the handshake ran. */
 interface ManagedRerunCarried {
   mc: MessageConnection;
   psiLibrary: PSILibrary;
   peer: Peer;
   conn: DataConnection;
   prepared: ReturnType<typeof prepareManagedRerunExchange>;
+  exchangeRole: HandshakeRole;
+  csvDelimiter: RunnableManagedExchangeRecord["exchangeFile"]["csvDelimiter"];
 }
 
 /** How a re-run reads its input this run, and how it is attended. `source` is the
@@ -100,8 +104,9 @@ interface ManagedRerunCarried {
  * validates it through {@link acquireValidatedManagedInput} before any
  * connection. */
 export interface ManagedRunDriverConfig {
-  /** The stored record to run from. Its `side` dispatches the rendezvous, its
-   * current `sharedSecret` authenticates and derives the peer id, and its
+  /** The stored record to run. The run re-reads it by `id` inside the
+   * run+rotate lock and runs THAT copy: its `side` dispatches the rendezvous,
+   * its `sharedSecret` authenticates and derives the peer id, and its
    * `exchangeFile` supplies the terms (the connection block is read only for the
    * webrtc dispatchability check -- the signaling location is the app's own; see
    * {@link beginManagedRendezvous}). */
@@ -187,7 +192,6 @@ export function runManagedExchangeInBrowser(
     onPairTableFactors,
     peerWaitTimeoutMs,
   } = config;
-  const exchangeRole = HANDSHAKE_ROLE_FOR_SIDE[record.side];
 
   // Two gates on the notices this run's close can raise. This run's own outputs
   // must be built: both notices speak for a completed exchange, and the failed
@@ -232,13 +236,13 @@ export function runManagedExchangeInBrowser(
       // BEFORE any connection; its contents are never taken from the record. The
       // acquired rows ride the same single parse the column guard ran on, so the
       // input is read and parsed exactly once per run.
-      acquireInput: async () => {
+      acquireInput: async (current) => {
         const acquired = await acquireValidatedManagedInput(
-          record.exchangeFile,
+          current.exchangeFile,
           source,
         );
         const prepared = prepareManagedRerunExchange(
-          record.exchangeFile,
+          current.exchangeFile,
           acquired.rows,
           acquired.columns,
         );
@@ -247,7 +251,8 @@ export function runManagedExchangeInBrowser(
       },
       // Inside the lock: open the side-dispatched rendezvous, authenticate the
       // partner, and yield the rotated secret plus the held exchange resources.
-      handshake: async (input, markRotationInFlight) => {
+      handshake: async (input, markRotationInFlight, current) => {
+        const exchangeRole = HANDSHAKE_ROLE_FOR_SIDE[current.side];
         const psiPromise = loadPsiBackend(
           { loadWasm: () => PSI() as Promise<PSILibrary> },
           { isNode: false },
@@ -258,9 +263,9 @@ export function runManagedExchangeInBrowser(
         void psiPromise.catch(() => undefined);
 
         const acquisition = await beginManagedRendezvous(
-          record.side,
-          record.sharedSecret,
-          record.exchangeFile,
+          current.side,
+          current.sharedSecret,
+          current.exchangeFile,
           {
             signal,
             ...(peerWaitTimeoutMs !== undefined ? { peerWaitTimeoutMs } : {}),
@@ -315,15 +320,15 @@ export function runManagedExchangeInBrowser(
           // between the handshake and the rotation write leaves the marker the
           // next visit reads.
           await markRotationInFlight();
-          // record.expires stays enforced at the handshake (core's pre- and
+          // current.expires stays enforced at the handshake (core's pre- and
           // post-handshake guards), covering a bound that lapses between the
           // pre-connection expiry check and here; the orchestration re-maps that
           // failure to the benign expiry state (see runManagedRerun).
           const auth = await authenticateExchange(
             mc,
             exchangeRole,
-            record.sharedSecret,
-            record.expires,
+            current.sharedSecret,
+            current.expires,
           );
           const carried: ManagedRerunCarried = {
             mc,
@@ -331,6 +336,8 @@ export function runManagedExchangeInBrowser(
             peer,
             conn,
             prepared: input.prepared,
+            exchangeRole,
+            csvDelimiter: current.exchangeFile.csvDelimiter,
           };
           return { rotatedSecret: auth.rotatedSecret, handshake: carried };
         } catch (error) {
@@ -350,7 +357,7 @@ export function runManagedExchangeInBrowser(
         try {
           const result = await runExchange(
             carried.mc,
-            exchangeRole,
+            carried.exchangeRole,
             carried.prepared,
             {
               psiLibrary: carried.psiLibrary,
@@ -399,7 +406,7 @@ export function runManagedExchangeInBrowser(
             result,
             carried.prepared,
             urls,
-            record.exchangeFile.csvDelimiter,
+            carried.csvDelimiter,
           );
           builtOutputs = true;
           return outputs;

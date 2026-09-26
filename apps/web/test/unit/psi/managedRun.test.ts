@@ -12,6 +12,7 @@ import {
   MANAGED_EXCHANGE_SCHEMA_VERSION,
   NO_STANDING_CONDITION,
   composeManagedExchangeFile,
+  runnableManagedExchangeOrRefuse,
 } from "@psi/managed/managedExchangeRecord";
 import {
   ManagedExchangeCustodyUnreadableError,
@@ -47,8 +48,21 @@ import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 // the phase boundary reported to the caller's failure classification, and the store
 // writes a run whose partner never arrives makes.
 
+// The record the run reads inside the lock. Unset, the read answers with the
+// same fixture the test handed the run.
+const storedRecord = vi.hoisted(
+  (): { value: ManagedExchangeRecord | undefined; deleted: boolean } => ({
+    value: undefined,
+    deleted: false,
+  }),
+);
 vi.mock("@psi/managed/managedExchangeStore", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
+  getManagedExchange: vi.fn(() =>
+    Promise.resolve(
+      storedRecord.deleted ? undefined : (storedRecord.value ?? record()),
+    ),
+  ),
   persistManagedExchangeRotation: vi.fn(() => Promise.resolve()),
   recordManagedExchangeLastRun: vi.fn(() => Promise.resolve()),
 }));
@@ -93,7 +107,13 @@ afterEach(() => {
   vi.mocked(persistManagedExchangeRotation).mockClear();
   handedOff.state = undefined;
   handedOff.unreadable = undefined;
+  storedRecord.value = undefined;
+  storedRecord.deleted = false;
 });
+
+/** A fixed secret per call site, so two records built from {@link record} differ
+ * only where a test says they do. */
+const HELD_SECRET = generateSharedSecret();
 
 function record(
   overrides: Partial<ManagedExchangeRecord> = {},
@@ -409,6 +429,113 @@ describe("runManagedRerun: a copy an export handed off", () => {
     });
 
     expect(result.exchange).toBe("exchanged");
+  });
+});
+
+describe("runManagedRerun: the record a run uses", () => {
+  test("a later run on a copy read before a rotation authenticates with the rotated secret", async () => {
+    // Two runs launched from one copy of the record, as a window's attempts are
+    // when the copy was read before the first of them ran: the first rotates, and
+    // the second must authenticate with what the first stored.
+    stubGrantingWebLocks();
+    const heldCopy = record({ sharedSecret: HELD_SECRET });
+    storedRecord.value = heldCopy;
+    const rotatedSecret = generateSharedSecret();
+    vi.mocked(persistManagedExchangeRotation).mockImplementationOnce(
+      (_id, rotation) => {
+        const rotated = runnableManagedExchangeOrRefuse({
+          ...heldCopy,
+          sharedSecret: rotation.sharedSecret,
+        });
+        storedRecord.value = rotated;
+        return Promise.resolve(rotated);
+      },
+    );
+    const authenticatedWith: Array<string> = [];
+    const runFromHeldCopy = () =>
+      runManagedRerun(heldCopy, {
+        acquireInput: () => Promise.resolve("rows"),
+        handshake: (_input, _mark, current) => {
+          authenticatedWith.push(current.sharedSecret);
+          return Promise.resolve({ rotatedSecret, handshake: "carried" });
+        },
+        dataExchange: () => Promise.resolve("exchanged"),
+      });
+
+    await runFromHeldCopy();
+    await runFromHeldCopy();
+
+    expect(authenticatedWith).toEqual([HELD_SECRET, rotatedSecret]);
+  });
+
+  test("the input is checked against the terms and policy the store holds", async () => {
+    stubGrantingWebLocks();
+    const edited = record({ sharedSecret: HELD_SECRET, tokenMaxAgeDays: 30 });
+    storedRecord.value = edited;
+    let inputCheckedAgainst: ManagedExchangeRecord | undefined;
+
+    await runManagedRerun(record({ tokenMaxAgeDays: 90 }), {
+      acquireInput: (current) => {
+        inputCheckedAgainst = current;
+        return Promise.resolve("rows");
+      },
+      handshake: () =>
+        Promise.resolve({
+          rotatedSecret: generateSharedSecret(),
+          handshake: "carried",
+        }),
+      dataExchange: () => Promise.resolve("exchanged"),
+    });
+
+    expect(inputCheckedAgainst).toBe(edited);
+  });
+
+  test("a record deleted before the lock is granted refuses before the input is read", async () => {
+    stubGrantingWebLocks();
+    storedRecord.deleted = true;
+    let inputRead = false;
+
+    await expect(
+      runManagedRerun(record(), {
+        acquireInput: () => {
+          inputRead = true;
+          return Promise.resolve("rows");
+        },
+        handshake: () => {
+          throw new Error("the handshake must not run for a deleted record");
+        },
+        dataExchange: () => {
+          throw new Error(
+            "the data exchange must not run for a deleted record",
+          );
+        },
+      }),
+    ).rejects.toThrow("no managed exchange with id record-under-test");
+
+    expect(inputRead).toBe(false);
+  });
+
+  test("a record holding a configuration only refuses before the input is read", async () => {
+    stubGrantingWebLocks();
+    storedRecord.value = record({ sharedSecret: undefined, side: undefined });
+    let inputRead = false;
+
+    await expect(
+      runManagedRerun(record(), {
+        acquireInput: () => {
+          inputRead = true;
+          return Promise.resolve("rows");
+        },
+        handshake: () => {
+          throw new Error("the handshake must not run without a secret");
+        },
+        dataExchange: () => {
+          throw new Error("the data exchange must not run without a secret");
+        },
+      }),
+    ).rejects.toThrow("holds a configuration only");
+
+    expect(inputRead).toBe(false);
   });
 });
 
