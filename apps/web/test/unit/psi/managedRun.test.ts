@@ -48,8 +48,9 @@ import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
 // the phase boundary reported to the caller's failure classification, and the store
 // writes a run whose partner never arrives makes.
 
-// The record the run reads inside the lock. Unset, the read answers with the
-// same fixture the test handed the run.
+// The record the run reads inside the lock. Unset, the read answers with a
+// fresh default record (its own generated shared secret), not the caller's
+// fixture.
 const storedRecord = vi.hoisted(
   (): { value: ManagedExchangeRecord | undefined; deleted: boolean } => ({
     value: undefined,

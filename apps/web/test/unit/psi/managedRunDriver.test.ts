@@ -386,14 +386,27 @@ describe("runManagedExchangeInBrowser", () => {
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
-    lockedRead.record = { ...RECORD, sharedSecret: "rotated-secret" };
+    const staleExchangeFile = {
+      csvDelimiter: ",",
+    } as RunnableManagedExchangeRecord["exchangeFile"];
+    const lockedExchangeFile = {
+      csvDelimiter: ";",
+    } as RunnableManagedExchangeRecord["exchangeFile"];
+    lockedRead.record = {
+      ...RECORD,
+      sharedSecret: "rotated-secret",
+      exchangeFile: lockedExchangeFile,
+    };
 
-    await runDriver(new AbortController().signal);
+    await runDriver(new AbortController().signal, undefined, {
+      ...RECORD,
+      exchangeFile: staleExchangeFile,
+    });
 
     expect(mockedRendezvous).toHaveBeenCalledWith(
       RECORD.side,
       "rotated-secret",
-      RECORD.exchangeFile,
+      lockedExchangeFile,
       expect.anything(),
     );
     expect(mockedAuthenticate).toHaveBeenCalledWith(
@@ -401,6 +414,14 @@ describe("runManagedExchangeInBrowser", () => {
       "initiator",
       "rotated-secret",
       undefined,
+    );
+    // The outputs are built with the delimiter read inside the lock, not the
+    // one on the record the driver was handed before it.
+    expect(mockedBuildRunOutputs).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      ";",
     );
   });
 
