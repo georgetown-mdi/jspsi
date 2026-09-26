@@ -4044,6 +4044,17 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     expect(out).toContain("        - 1 excluded value");
     expect(out).toContain("        - values must be valid");
     expect(out).toContain("        - allowed characters: A-Za-z");
+    // The unverified note comes before the first partner-supplied class it
+    // qualifies, so no class is read as if it were checked.
+    const renderedLines = out.split("\n");
+    const noteLine = renderedLines.indexOf(
+      `    ${CONSENT_FACTS.allowedCharacterPatterns.note}`,
+    );
+    const classLine = renderedLines.indexOf(
+      "        - allowed characters: A-Za-z",
+    );
+    expect(noteLine).toBeGreaterThanOrEqual(0);
+    expect(noteLine).toBeLessThan(classLine);
     // Both payload directions, and the attached agreement.
     expect(out).toContain("    - risk_score");
     expect(out).toContain("    - program_outcome");
@@ -6033,6 +6044,8 @@ async function expectedConsentSurface(
 async function runOfflineAcceptCapturingStdio(params: {
   encoded: string;
   fixture: ReturnType<typeof offlineAcceptFixture>;
+  /** The URL an online acceptance names ahead of the invitation. */
+  url?: string;
   /**
    * The positionals after the invitation, defaulting to the fixture's input CSV.
    * An empty array is the acceptance given no input file, which writes a
@@ -6042,7 +6055,7 @@ async function runOfflineAcceptCapturingStdio(params: {
   flags?: Record<string, unknown>;
   onPrompt?: (stderrWrites: ReadonlyArray<string>) => boolean;
 }): Promise<{ stderrWrites: Array<string>; stdoutWrites: Array<string> }> {
-  const { encoded, fixture, positionals, flags, onPrompt } = params;
+  const { encoded, fixture, url, positionals, flags, onPrompt } = params;
   // A real invocation creates getLogger("accept") after applying --log-level, so
   // the command's logger has the level the flag names. This suite runs many
   // invocations in one process, where that logger already exists and loglevel's
@@ -6069,7 +6082,11 @@ async function runOfflineAcceptCapturingStdio(params: {
       _: [],
       $0: "alcove",
       identity: "Agency B",
-      args: [encoded, ...(positionals ?? [fixture.input])],
+      args: [
+        ...(url !== undefined ? [url] : []),
+        encoded,
+        ...(positionals ?? [fixture.input]),
+      ],
       "config-file": fixture.configFile,
       "key-file": fixture.keyFile,
       record: false,
@@ -6089,6 +6106,170 @@ async function runOfflineAcceptCapturingStdio(params: {
 
 /** The line a declined confirmation leaves the operator with. */
 const DECLINE_LINE = "invitation declined; no files were written";
+
+describe("handler: an acceptance names the directories its invitation supplies", () => {
+  // The inviter's pair; this party reads where the inviter writes and writes
+  // where the inviter reads.
+  const inviterIn = platformAbsolutePath("/srv/exchange/inviter-in");
+  const inviterOut = platformAbsolutePath("/srv/exchange/inviter-out");
+  const splitEndpoint: ConnectionEndpoint = {
+    channel: "filedrop",
+    inboundPath: inviterIn,
+    outboundPath: inviterOut,
+  };
+  const directoriesHeading =
+    "This acceptance runs the exchange in the two directories this " +
+    "invitation names, in place of the path in your URL:";
+  const inboundLine =
+    "  inbound directory, where you read your partner's files: " +
+    pathAsDisplayed(inviterOut);
+  const outboundLine =
+    "  outbound directory, where you write your files: " +
+    pathAsDisplayed(inviterIn);
+  const url = platformFileUrl("/mnt/share").href;
+
+  test("handler: both directories are shown before the question, which states the run", async () => {
+    const fixture = offlineAcceptFixture();
+    try {
+      const encoded = await encodeInvitation(
+        splitEndpointToken(FUTURE(), splitEndpoint),
+      );
+      let atPrompt: Array<string> | undefined;
+      await runOfflineAcceptCapturingStdio({
+        encoded,
+        fixture,
+        url,
+        onPrompt: (stderrWrites) => {
+          atPrompt = stderrLines([...stderrWrites]);
+          return false;
+        },
+      });
+      expect(atPrompt).toBeDefined();
+      const heading = atPrompt!.indexOf(directoriesHeading);
+      expect(heading).toBeGreaterThanOrEqual(0);
+      expect(atPrompt!.slice(heading + 1, heading + 4)).toEqual([
+        inboundLine,
+        outboundLine,
+        "  Confirming runs the exchange in these directories, and your " +
+          "configuration keeps them for later exchanges. To use your own " +
+          "directories, decline and run again with --outbound-path.",
+      ]);
+      expect(heading).toBeLessThan(atPrompt!.indexOf(SURFACE_HEADING));
+      // Repeated as the last lines before the question, so the paths are on
+      // screen when it is asked.
+      expect(atPrompt!.slice(-2)).toEqual([inboundLine, outboundLine]);
+      expect(promptConfirmMock).toHaveBeenCalledWith(
+        "Accept this invitation and run the exchange now, in the directories " +
+          "named above?",
+      );
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: an offline acceptance names the directories its configuration will record", async () => {
+    const fixture = offlineAcceptFixture();
+    try {
+      const encoded = await encodeInvitation(
+        splitEndpointToken(FUTURE(), splitEndpoint),
+      );
+      let atPrompt: Array<string> | undefined;
+      await runOfflineAcceptCapturingStdio({
+        encoded,
+        fixture,
+        onPrompt: (stderrWrites) => {
+          atPrompt = stderrLines([...stderrWrites]);
+          return false;
+        },
+      });
+      expect(atPrompt).toBeDefined();
+      expect(atPrompt).not.toContain(directoriesHeading);
+      const heading = atPrompt!.indexOf(
+        "The configuration this acceptance writes uses the two directories " +
+          "this invitation names:",
+      );
+      expect(heading).toBeGreaterThanOrEqual(0);
+      expect(atPrompt!.slice(heading + 1, heading + 4)).toEqual([
+        inboundLine,
+        outboundLine,
+        "  Confirming records these directories in your configuration, where " +
+          "'alcove exchange' reads and writes the exchange files. To use your " +
+          "own directories, edit the configuration's connection block before " +
+          "running 'alcove exchange'.",
+      ]);
+      expect(heading).toBeLessThan(atPrompt!.indexOf(SURFACE_HEADING));
+      expect(atPrompt!.slice(-2)).toEqual([inboundLine, outboundLine]);
+      expect(promptConfirmMock).toHaveBeenCalledWith(
+        "Accept this invitation and write configuration?",
+      );
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: an online acceptance on its own URL's path asks to run the exchange", async () => {
+    const fixture = offlineAcceptFixture();
+    try {
+      const encoded = await encodeInvitation(sampleToken(FUTURE()));
+      let atPrompt: Array<string> | undefined;
+      await runOfflineAcceptCapturingStdio({
+        encoded,
+        fixture,
+        url,
+        onPrompt: (stderrWrites) => {
+          atPrompt = stderrLines([...stderrWrites]);
+          return false;
+        },
+      });
+      expect(atPrompt).toBeDefined();
+      expect(atPrompt).not.toContain(directoriesHeading);
+      expect(promptConfirmMock).toHaveBeenCalledWith(
+        "Accept this invitation and run the exchange now?",
+      );
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: under --consent-to-terms the default-level log names both directories before the run", async () => {
+    const fixture = offlineAcceptFixture();
+    const runStarted = "run started";
+    const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+    runOnlineBootstrapMock.mockImplementation(() => {
+      process.stderr.write(`${runStarted}\n`);
+      return Promise.resolve({ configWriteError: undefined });
+    });
+    try {
+      const encoded = await encodeInvitation(
+        splitEndpointToken(FUTURE(), splitEndpoint),
+      );
+      const { stderrWrites } = await runOfflineAcceptCapturingStdio({
+        encoded,
+        fixture,
+        url,
+        flags: { "consent-to-terms": true },
+      });
+      expect(promptConfirmMock).not.toHaveBeenCalled();
+      expect(runOnlineBootstrapMock).toHaveBeenCalledTimes(1);
+      const lines = stderrLines(stderrWrites);
+      const started = lines.indexOf(runStarted);
+      expect(started).toBeGreaterThan(0);
+      const heading = lines.indexOf(directoriesHeading);
+      expect(heading).toBeGreaterThanOrEqual(0);
+      expect(lines.slice(heading + 1, heading + 3)).toEqual([
+        inboundLine,
+        outboundLine,
+      ]);
+      expect(heading).toBeLessThan(started);
+      expect(lines[heading + 3]).toContain(
+        "--consent-to-terms recorded that consent in advance",
+      );
+    } finally {
+      runOnlineBootstrapMock.mockReset();
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("handler: the consent surface reaches wherever the prompt asks", () => {
   test("handler: nothing reaches the operator between the terms and the question", async () => {

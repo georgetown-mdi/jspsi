@@ -18,6 +18,7 @@ import {
 } from "@alcove/core";
 
 import { singlePassDisclosureNotice } from "./onlineBootstrap";
+import type { EndpointDirectories } from "./onlineBootstrap";
 import { writePromptLine } from "./util/prompt";
 
 import type { DialedBrokerHostAndPort } from "./connection/webrtc/brokerClient";
@@ -270,6 +271,85 @@ function logAcceptanceRunsExchange(
 }
 
 /**
+ * The directory pair an acceptance takes from the invitation's endpoint, and
+ * whether this acceptance runs the exchange in it now (online) or records it in
+ * the configuration it writes for a later `alcove exchange` (offline).
+ */
+export interface EndpointDirectoriesOnSurface {
+  directories: EndpointDirectories;
+  runsExchange: boolean;
+}
+
+/**
+ * The two directory lines, each a fixed first-party label and then the
+ * partner-supplied path escaped at this sink. Printed at the head of the
+ * surface and again beneath the repeated decision block, so the paths are
+ * on screen when the question is asked.
+ */
+function logEndpointDirectoryLines(
+  emit: ConsentSurfaceSink,
+  directories: EndpointDirectories,
+): void {
+  emit(
+    "  inbound directory, where you read your partner's files: " +
+      `${redactAndSanitizeForDisplay(directories.inboundPath)}`,
+  );
+  emit(
+    "  outbound directory, where you write your files: " +
+      `${redactAndSanitizeForDisplay(directories.outboundPath)}`,
+  );
+}
+
+/**
+ * States that this acceptance uses directories the invitation names, names
+ * both, and says what confirming does with them: online, the run reads and
+ * writes exchange files there and the configuration keeps them (a fresh one
+ * records them, a kept one already holds them); offline, the configuration it
+ * writes records them for `alcove exchange`.
+ */
+function logEndpointDirectories(
+  emit: ConsentSurfaceSink,
+  { directories, runsExchange }: EndpointDirectoriesOnSurface,
+  promptFollows: boolean,
+): void {
+  if (runsExchange) {
+    emit(
+      "This acceptance runs the exchange in the two directories this " +
+        "invitation names, in place of the path in your URL:",
+    );
+    logEndpointDirectoryLines(emit, directories);
+    emit(
+      promptFollows
+        ? "  Confirming runs the exchange in these directories, and your " +
+            "configuration keeps them for later exchanges. To use your own " +
+            "directories, decline and run again with --outbound-path."
+        : "  This run reads and writes the exchange files in these " +
+            "directories, and your configuration keeps them for later " +
+            "exchanges; --consent-to-terms recorded that consent in advance. " +
+            "To use your own directories, run again with --outbound-path.",
+    );
+    return;
+  }
+  emit(
+    "The configuration this acceptance writes uses the two directories this " +
+      "invitation names:",
+  );
+  logEndpointDirectoryLines(emit, directories);
+  emit(
+    promptFollows
+      ? "  Confirming records these directories in your configuration, where " +
+          "'alcove exchange' reads and writes the exchange files. To use your " +
+          "own directories, edit the configuration's connection block before " +
+          "running 'alcove exchange'."
+      : "  This acceptance records these directories in your configuration, " +
+          "where 'alcove exchange' reads and writes the exchange files; " +
+          "--consent-to-terms recorded that consent in advance. To use your " +
+          "own directories, edit the configuration's connection block before " +
+          "running 'alcove exchange'.",
+  );
+}
+
+/**
  * The heading above the repeated decision block on the prompting path, where the
  * question this block is answered against comes next.
  */
@@ -452,12 +532,19 @@ function displayLinkageKey(
  * regular expression, never paraphrased as a vetted allow-list -- a
  * crafted class (a leading `^` negation, a shorthand or bracket breakout)
  * admits a different set than it displays as. Its caveat is emitted once,
- * for the whole list.
+ * for the whole list, ahead of the first class it qualifies, so no class
+ * is read before the note that it is unverified.
  */
 function displayLinkageFields(
   emit: ConsentSurfaceSink,
   summary: InvitationSummary,
 ): void {
+  if (summary.linkageFields.some((f) => f.allowedCharacters !== undefined)) {
+    emit(
+      `  ${marked("allowed-character patterns", "allowedCharacterPatterns")}:`,
+    );
+    emit(`    ${CONSENT_FACTS.allowedCharacterPatterns.note}`);
+  }
   emit(`  ${marked("personal data used", "personalDataCategories")}:`);
   for (const field of summary.linkageFields) {
     emit(`    - ${field.label}`);
@@ -469,12 +556,6 @@ function displayLinkageFields(
       `      ${marked("declared data standards", "declaredDataStandards")}:`,
     );
     logList(emit, "        ", standards);
-  }
-  if (summary.linkageFields.some((f) => f.allowedCharacters !== undefined)) {
-    emit(
-      `  ${marked("allowed-character patterns", "allowedCharacterPatterns")}:`,
-    );
-    emit(`    ${CONSENT_FACTS.allowedCharacterPatterns.note}`);
   }
 }
 
@@ -669,6 +750,10 @@ export function logDecisionFacts(
  * `runsExchangeThrough` is the coordination server a self-conducting
  * acceptance will dial, present on that path alone
  * ({@link logAcceptanceRunsExchange}).
+ *
+ * `endpointDirectories` is the directory pair an acceptance takes from the
+ * invitation's endpoint, present only when it does
+ * ({@link logEndpointDirectories}).
  */
 export function displayInvitation(params: {
   token: Parameters<typeof summarizeInvitation>[0];
@@ -676,6 +761,7 @@ export function displayInvitation(params: {
   emit: ConsentSurfaceSink;
   promptFollows: boolean;
   runsExchangeThrough?: DialedBrokerHostAndPort;
+  endpointDirectories?: EndpointDirectoriesOnSurface;
   surface?: ConsentSurfaceKind;
 }): void {
   const {
@@ -684,11 +770,14 @@ export function displayInvitation(params: {
     emit,
     promptFollows,
     runsExchangeThrough,
+    endpointDirectories,
     surface = "invitation",
   } = params;
   const summary = summarizeInvitation(token);
   if (runsExchangeThrough !== undefined)
     logAcceptanceRunsExchange(emit, runsExchangeThrough, promptFollows);
+  if (endpointDirectories !== undefined)
+    logEndpointDirectories(emit, endpointDirectories, promptFollows);
   emit(SURFACE_HEADINGS[surface].details);
   logDecisionFacts(emit, summary, ownOutboundSend);
   // The retain fact's shared caveat, once, directly under the block's own
@@ -959,15 +1048,19 @@ export function displayInvitation(params: {
   if (summary.expires !== undefined)
     emit(`  ${marked("expires", "invitationExpiry")}: ${summary.expires}`);
 
-  // Nothing prints after this, so the prompt is answered against these
-  // facts, not the tail of the key list. Both headings say "repeated"
-  // since the block introduces nothing new; only the framing differs --
-  // with no prompt following, a heading suggesting a decision follows
-  // would be wrong.
+  // Only this block and, where the invitation supplies them, the two
+  // directory lines print after this, so the prompt is answered against
+  // these facts, not the tail of the key list; the directory lines come
+  // last so the paths are on screen at the question. Both headings say
+  // "repeated" since the block introduces nothing new; only the framing
+  // differs -- with no prompt following, a heading suggesting a decision
+  // follows would be wrong.
   emit(
     promptFollows
       ? SURFACE_HEADINGS[surface].beforePrompt
       : REPEATED_FACTS_HEADING_UNATTENDED,
   );
   logDecisionFacts(emit, summary, ownOutboundSend);
+  if (endpointDirectories !== undefined)
+    logEndpointDirectoryLines(emit, endpointDirectories.directories);
 }
