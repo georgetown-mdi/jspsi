@@ -30,6 +30,15 @@ const readRoot = (relative) =>
 const BEFORE_EXPIRY = "2026-10-01";
 const AFTER_EXPIRY = "2026-12-25";
 
+/**
+ * A backstop on the one case below that scans this whole repository through a
+ * child process, sized as a safety check for a hang rather than an assertion
+ * about how fast a loaded machine runs `git grep`: that scan cost 0.6-2.1 s on
+ * this container idle and rose to 3.6 s with eight parallel `npm run
+ * test:scripts` runs contending for CPU -- past vitest's 5,000 ms default.
+ */
+const REPO_SCAN_HANG_BACKSTOP_MS = 30_000;
+
 // The script driven as the workflow runs it, against `root` or -- with no root
 // -- against this repository.
 function runCheck({ root, today = BEFORE_EXPIRY } = {}) {
@@ -180,11 +189,15 @@ describe("the check, driven as the workflow runs it", () => {
     expect(runCheck({ root, today: "tomorrow" }).status).toBe(2);
   });
 
-  it("passes this repository before the expiry", () => {
-    const result = runCheck();
-    expect(result.stderr).toBe("");
-    expect(result.status).toBe(0);
-  });
+  it(
+    "passes this repository before the expiry",
+    { timeout: REPO_SCAN_HANG_BACKSTOP_MS },
+    () => {
+      const result = runCheck();
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+    },
+  );
 });
 
 describe("the check's registration", () => {
