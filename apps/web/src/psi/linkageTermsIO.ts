@@ -4,6 +4,7 @@
 import { stringify as stringifyYaml } from "yaml";
 
 import {
+  JsonStructureBoundError,
   parseSensitiveJson,
   parseSensitiveYaml,
   safeParseLinkageTerms,
@@ -101,10 +102,12 @@ function linkageTermsWithin(raw: unknown): unknown {
  * return a readable rejection. Accepts either an exported terms document or
  * an exchange configuration defining `linkage_terms` (see
  * {@link linkageTermsWithin}). Format is auto-detected: JSON first (stricter,
- * cheaper), then YAML. Validated by {@link safeParseLinkageTerms}, which
- * camelizes first, so a document from {@link exportLinkageTerms} round-trips.
- * Length-capped at {@link MAX_IMPORT_CHARS} before either parse; YAML alias
- * expansion is bounded by the `yaml` parser's default `maxAliasCount`.
+ * cheaper), then YAML. A document that is JSON over the bounded parser's key,
+ * element or depth limits is refused rather than re-read as YAML, which has
+ * none. Validated by {@link safeParseLinkageTerms}, which camelizes first, so
+ * a document from {@link exportLinkageTerms} round-trips. Length-capped at
+ * {@link MAX_IMPORT_CHARS} before either parse; YAML alias expansion is
+ * bounded by the `maxAliasCount` that `parseSensitiveYaml` sets.
  */
 export function importLinkageTerms(text: string): LinkageTermsImportResult {
   if (text.length > MAX_IMPORT_CHARS)
@@ -121,7 +124,14 @@ export function importLinkageTerms(text: string): LinkageTermsImportResult {
   let raw: unknown;
   try {
     raw = parseSensitiveJson(text, label);
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.cause instanceof JsonStructureBoundError)
+      return {
+        success: false,
+        error:
+          "This document has more entries or deeper nesting than linkage " +
+          "terms can hold; check that you pasted the right file.",
+      };
     try {
       raw = parseSensitiveYaml(text, label);
     } catch {

@@ -1,7 +1,10 @@
 import YAML, { type Document } from "yaml";
 
 import { UsageError } from "./errors.js";
-import { parseBoundedJson } from "./utils/boundedJson.js";
+import {
+  JsonStructureBoundError,
+  parseBoundedJson,
+} from "./utils/boundedJson.js";
 import {
   keepOperatorSuppliedText,
   messageWithOperatorText,
@@ -85,9 +88,13 @@ export type SensitiveFileLabel = string | MessageWithOperatorText;
 function labelledFailure(
   fileLabel: SensitiveFileLabel,
   reason: string,
+  options?: ErrorOptions,
 ): UsageError {
   const message = messageWithOperatorText`${fileLabel} ${reason}`;
-  return keepOperatorSuppliedText(new UsageError(message.text), message);
+  return keepOperatorSuppliedText(
+    new UsageError(message.text, options),
+    message,
+  );
 }
 
 function yamlParseFailure(fileLabel: SensitiveFileLabel): UsageError {
@@ -153,7 +160,8 @@ export function editSensitiveYamlDocument(
  * it inherits the structural pre-bound that stops a pathological object/array
  * from driving the parser into an uncatchable, process-terminating abort. Both
  * the bound's byte-free error and `JSON.parse`'s source-bearing one are caught
- * here and replaced with the path-only failure.
+ * here and replaced with the path-only failure; the byte-free bound error
+ * stays on as its `cause`.
  */
 export function parseSensitiveJson(
   source: string,
@@ -161,7 +169,11 @@ export function parseSensitiveJson(
 ): unknown {
   try {
     return parseBoundedJson(source);
-  } catch {
-    throw labelledFailure(fileLabel, "could not be parsed as JSON");
+  } catch (err) {
+    throw labelledFailure(
+      fileLabel,
+      "could not be parsed as JSON",
+      err instanceof JsonStructureBoundError ? { cause: err } : undefined,
+    );
   }
 }

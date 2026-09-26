@@ -3,6 +3,10 @@ import YAML from "yaml";
 
 import { UsageError } from "../src/errors";
 import {
+  JsonStructureBoundError,
+  MAX_JSON_NESTING_DEPTH,
+} from "../src/utils/boundedJson";
+import {
   messageWithOperatorText,
   operatorSuppliedText,
 } from "../src/utils/operatorSuppliedText";
@@ -160,4 +164,25 @@ test("a marked label leaves a control character unrenderable", () => {
     caught = err;
   }
   expect(sanitizeErrorForDisplay(caught)).not.toContain("\u001b");
+});
+
+test("a JSON document over the structural bound keeps the bound error as its cause", () => {
+  const deep = "[".repeat(MAX_JSON_NESTING_DEPTH + 1);
+  let overBound: unknown;
+  try {
+    parseSensitiveJson(deep, "the document");
+  } catch (err) {
+    overBound = err;
+  }
+  expect(overBound).toBeInstanceOf(UsageError);
+  expect((overBound as Error).cause).toBeInstanceOf(JsonStructureBoundError);
+
+  let malformed: unknown;
+  try {
+    parseSensitiveJson(`${SECRET} not json`, "the document");
+  } catch (err) {
+    malformed = err;
+  }
+  expect(malformed).toBeInstanceOf(UsageError);
+  expect((malformed as Error).cause).toBeUndefined();
 });

@@ -222,6 +222,21 @@ describe("importLinkageTerms rejection", () => {
     }
   });
 
+  test("rejects a JSON document over the parser's structural limits", () => {
+    const exported = JSON.parse(exportLinkageTerms(TERMS, "json")) as Record<
+      string,
+      unknown
+    >;
+    const wide = Object.fromEntries(
+      Array.from({ length: 70_000 }, (_unused, i) => [`k${i}`, 0]),
+    );
+    const text = JSON.stringify({ ...exported, extra: wide });
+    expect(text.length).toBeLessThan(MAX_IMPORT_CHARS);
+    const result = importLinkageTerms(text);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error).toMatch(/deeper nesting/);
+  });
+
   test("rejects an over-length document before parsing", () => {
     const huge = " ".repeat(MAX_IMPORT_CHARS + 1);
     const result = importLinkageTerms(huge);
