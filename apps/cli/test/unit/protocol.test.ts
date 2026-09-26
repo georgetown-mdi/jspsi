@@ -2736,6 +2736,9 @@ test("a marker whose directory flush fails after the rename stops the run before
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
+  // Only descriptors still open on the directory count: the key-file
+  // pre-flight opens and closes it first, and a later open can reuse that
+  // number for the marker's temp file.
   const keyDirFds = new Set<number>();
   const realOpen = fs.openSync;
   const openSpy = vi
@@ -2745,6 +2748,11 @@ test("a marker whose directory flush fails after the rename stops the run before
       if (String(args[0]) === keyDirA) keyDirFds.add(fd);
       return fd;
     });
+  const realClose = fs.closeSync;
+  const closeSpy = vi.spyOn(fs, "closeSync").mockImplementation((fd) => {
+    keyDirFds.delete(fd);
+    realClose(fd);
+  });
   const realFsync = fs.fsyncSync;
   const fsyncSpy = vi.spyOn(fs, "fsyncSync").mockImplementation((fd) => {
     if (keyDirFds.has(fd)) throw new Error("EIO: i/o error, fsync");
@@ -2773,6 +2781,7 @@ test("a marker whose directory flush fails after the rename stops the run before
     );
   } finally {
     openSpy.mockRestore();
+    closeSpy.mockRestore();
     fsyncSpy.mockRestore();
   }
   const [resultA] = results;
