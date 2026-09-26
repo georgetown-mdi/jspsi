@@ -135,6 +135,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      # The layer cache is keyed by ISO week as well as by variant. A cached
+      # layer is replayed until an instruction above it changes, and the
+      # default image's `apk add --no-cache samba-client` names no version, so
+      # without the week a package the Alpine mirror has already fixed would
+      # stay in the scanned image until the base digest moved. The week bounds
+      # that at seven days: the scheduled Monday run on the default branch
+      # builds the new week's scope from the mirror, and every pull request
+      # can read it from then on. The variant's dnf transactions resolve
+      # against a fixed release snapshot, so on that leg the week costs one
+      # cold build a week and changes nothing it installs; one rule for both
+      # legs keeps the scope names the restricted-egress job reads simple.
+      - name: Compute the layer cache week
+        id: cache_week
+        run: echo "week=$(date -u +%G-W%V)" >>"$GITHUB_OUTPUT"
+
       # Single-arch, load into the runner's Docker so the smoke steps can run
       # it. No push, no QEMU, no multi-arch -- that is the release job's
       # concern. The cache is scoped per variant: the two images share no layer,
@@ -147,8 +162,8 @@ jobs:
           load: true
           push: false
           tags: ${{ matrix.tag }}
-          cache-from: type=gha,scope=${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+          cache-from: type=gha,scope=${{ matrix.variant }}-${{ steps.cache_week.outputs.week }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}-${{ steps.cache_week.outputs.week }}
 
       # Both published images run unprivileged, and every other step here would
       # pass just as happily as uid 0 -- so a dropped or widened USER line is
@@ -999,6 +1014,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      # The smoke job's week stamp, computed the same way, so this reads the
+      # scope that job writes. A run straddling midnight UTC on a Monday can
+      # compute the next week here and build cold, which costs time only.
+      - name: Compute the layer cache week
+        id: cache_week
+        run: echo "week=$(date -u +%G-W%V)" >>"$GITHUB_OUTPUT"
+
       # The subject is the image an operator runs, so it is built here rather
       # than approximated by the CLI on the runner. Reads the smoke job's cache
       # scope and writes none of its own: the two jobs run concurrently, and a
@@ -1011,7 +1033,7 @@ jobs:
           load: true
           push: false
           tags: ${{ env.ALCOVE_IMAGE }}
-          cache-from: type=gha,scope=default
+          cache-from: type=gha,scope=default-${{ steps.cache_week.outputs.week }}
 
       # The SSH server whose host key the probe reads. It listens on the
       # permitted port AND on a second one, so the denied-port row below
