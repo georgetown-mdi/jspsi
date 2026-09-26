@@ -27,11 +27,12 @@
 // the passed tier, a fork's model is a real choice again: delete the exemption
 // below, its test, and this note.
 //
-// Fail-open scaffolding follows block-protected-push.mjs: JSON event on stdin, exit
-// 0 allows, exit 2 blocks and feeds stderr back to Claude. An unexpected failure
-// falls through to exit 0 -- EXCEPT the bare-spawn path (no explicit model), which
-// fails CLOSED: a bare spawn is the risky call with no downstream safety check, so if
-// the allowlist read throws we exit 2 rather than let an unverifiable pin through.
+// JSON event on stdin; exit 0 allows, exit 2 blocks and feeds stderr back to
+// Claude. An event that cannot be read, or one for another tool, is allowed:
+// lib/event.mjs absorbs a stdin fault before any check runs. Past that read the
+// hook fails CLOSED at both catches -- the bare-spawn allowlist read, and the
+// outer catch around main() -- because a spawn let through on an error is one
+// whose model nothing verified, which is the leak this hook exists to stop.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -103,10 +104,9 @@ function main() {
     process.exit(0);
   }
 
-  // Bare spawn (no explicit model). This path fails CLOSED: any error in resolving
-  // the project dir or reading the allowlist blocks rather than allows, so the path
-  // construction stays inside the try (an event missing both CLAUDE_PROJECT_DIR and
-  // cwd would otherwise throw out here and reach the fail-open outer catch).
+  // Bare spawn (no explicit model): any error in resolving the project dir or
+  // reading the allowlist blocks with a message naming the remedy, so the path
+  // construction stays inside the try.
   let pinned;
   try {
     const projectDir = process.env.CLAUDE_PROJECT_DIR || event.cwd;
@@ -140,8 +140,9 @@ function main() {
 
 try {
   main();
-} catch {
-  // Fail open on any error outside the bare-spawn read (that path exits inside
-  // main before returning here); never stall Agent spawns on an unexpected error.
-  process.exit(0);
+} catch (error) {
+  block(
+    `the hook failed while checking this spawn (${error?.message ?? error}); ` +
+      `fix the hook or report it to the maintainer`,
+  );
 }

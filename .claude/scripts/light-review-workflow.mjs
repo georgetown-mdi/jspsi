@@ -228,12 +228,15 @@ Review the branch's own changes and nothing else. Anything attributable to stagi
 // dropped it in; and a scratch file left in the tree under review wedges every
 // later round of that branch, because the clean-tree gate statuses that tree.
 const workingTreeClause = worktreePath
-  ? `The tree holding ${targetRef} is checked out at ${worktreePath}. Scope EVERY command to it -- \`cd ${worktreePath} && <command>\` or \`git -C ${worktreePath} <command>\` -- rather than relying on an earlier cd, which does not carry from one call to the next.`
+  ? `The tree holding ${targetRef} is checked out at ${worktreePath}. Scope EVERY command to it -- \`env -C ${worktreePath} <command>\` or \`git -C ${worktreePath} <args>\` -- rather than relying on an earlier cd, which does not persist from one call to the next.`
   : `No working tree holds ${targetRef}. Read files at the ref with \`git show ${targetRef}:<path>\` and never check it out; if judging this diff needs code RUN rather than read, say so and stop rather than checking anything out.`;
 
 const scratchClause = `Put every file you create -- probe scripts, temporary tests, scratch notes -- under /tmp, never inside a repository working tree.`;
 
 const groundRules = `${workingTreeClause} ${scratchClause}`;
+
+const requiredKeysClause = (schema) =>
+  `Your structured result must have every one of these top-level keys: ${schema.required.map((key) => `\`${key}\``).join(", ")}.`;
 
 const salvage = (who) =>
   `${who} returned no structured result -- the structured-output retries were exhausted. The analysis usually survives in the rejected attempts: read subagents/workflows/<runId>/agent-<id>.jsonl for this run and salvage it before re-running the round.`;
@@ -284,7 +287,9 @@ ${docsClause}Your contract is the named list of claims below. Take each one as s
 The claims:
 ${claims.map((claim, i) => `${i + 1}. ${claim}`).join("\n")}
 
-Anything else you find in this diff that is worth the caller knowing goes in findings, separate from the claims -- do not stretch a claim to cover it, and do not invent a claim you were not given.`;
+Anything else you find in this diff that is worth the caller knowing goes in findings, separate from the claims -- do not stretch a claim to cover it, and do not invent a claim you were not given.
+
+${requiredKeysClause(ROLE_SCHEMA)}`;
 
   const result = await agent(rolePrompt, {
     label: input.role,
@@ -396,7 +401,9 @@ ${docsClause}Review for: correctness bugs, logic errors, security issues, missin
 
 Do NOT flag missing comments or ask for more explanatory prose unless a non-obvious constraint is stated nowhere in the code, names, types, or tests -- this codebase treats prose as a last resort and a check, test, or rename as the preferred place for it.
 
-Separately from the findings, answer the shape question: is there a materially simpler shape for this branch's change -- a different factoring, an existing mechanism it should have reused, a smaller surface? Set simpler=true ONLY if you can name the shape in one sentence (put it in reason); otherwise simpler=false with a short reason. Do not force it.`;
+Separately from the findings, answer the shape question: is there a materially simpler shape for this branch's change -- a different factoring, an existing mechanism it should have reused, a smaller surface? Set simpler=true ONLY if you can name the shape in one sentence (put it in reason); otherwise simpler=false with a short reason. Do not force it.
+
+${requiredKeysClause(REVIEWER_SCHEMA)}`;
 
 const reviews = (
   await parallel(
@@ -425,7 +432,9 @@ ${groundRules}
 ${docsClause}In a single pass -- no sub-agents, no iteration:
 1. Drop any finding that is not about ${targetRef}'s own changes (anything describing the branch's base moving, or staging's progress since the fork) -- discard it before clustering, do not even list it as refuted.
 2. Cluster findings that describe the same underlying issue across reviewers; flaggedBy is the number of distinct reviewers in the cluster.
-3. Verify each cluster's core claim by reading only the specific hunks or files it names -- not the whole diff -- and set verification confirmed/refuted/unverifiable with a one-line verificationNote.`;
+3. Verify each cluster's core claim by reading only the specific hunks or files it names -- not the whole diff -- and set verification confirmed/refuted/unverifiable with a one-line verificationNote.
+
+${requiredKeysClause(CONSOLIDATOR_SCHEMA)}`;
 
 const consolidated = await agent(consolidatorPrompt, {
   label: "consolidator",

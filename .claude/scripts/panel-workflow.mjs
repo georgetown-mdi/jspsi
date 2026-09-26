@@ -84,7 +84,9 @@ const prompt = (
 ${docsClause}Weigh the question primarily through the lens of ${lens}, then answer it directly -- an answer, not a survey of options.
 
 The question:
-${input.question}`;
+${input.question}
+
+Your structured result must have every one of these top-level keys: ${SCHEMA.required.map((key) => `\`${key}\``).join(", ")}.`;
 
 return (
   await parallel([

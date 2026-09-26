@@ -13,14 +13,21 @@ const HOOK = fileURLToPath(
 // stdin. Exit 0 allows the spawn, exit 2 blocks it and feeds stderr back to
 // Claude. CLAUDE_PROJECT_DIR is always pinned at a fixture so the bare-spawn
 // path reads a controlled agents dir, never this repo's real definitions.
-function runHook(payload, projectDir) {
-  const { status, stderr } = spawnSync("node", [HOOK], {
+function runHook(payload, projectDir, nodeArgs = []) {
+  const { status, stderr } = spawnSync("node", [...nodeArgs, HOOK], {
     input: JSON.stringify(payload),
     encoding: "utf8",
     env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir ?? tmpdir() },
   });
   return { status, stderr };
 }
+
+// A preload making Set.prototype.has throw: the explicit-model tier check then
+// throws past every inner handler, so only the catch around main() sees it.
+const INJECT_THROW = [
+  "--import",
+  "data:text/javascript,Set.prototype.has=()=>{throw new Error('injected fault')}",
+];
 
 // Build a throwaway CLAUDE_PROJECT_DIR whose .claude/agents holds one <name>.md
 // per entry, each with the given `model:` value in frontmatter (null writes a
@@ -194,5 +201,24 @@ describe("require-agent-model hook", () => {
     );
     expect(status).toBe(2);
     expect(stderr).toContain("could not read agent definitions");
+  });
+
+  it("fails closed when the hook throws after reading the event", () => {
+    const { status, stderr } = runHook(
+      { tool_name: "Agent", tool_input: { model: "opus", prompt: "x" } },
+      undefined,
+      INJECT_THROW,
+    );
+    expect(status).toBe(2);
+    expect(stderr).toContain("Blocked by require-agent-model hook");
+    expect(stderr).toContain("injected fault");
+  });
+
+  it("still allows an unreadable event under the same injected fault", () => {
+    const { status } = spawnSync("node", [...INJECT_THROW, HOOK], {
+      input: "not json",
+      encoding: "utf8",
+    });
+    expect(status).toBe(0);
   });
 });
