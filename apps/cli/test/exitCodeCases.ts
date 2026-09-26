@@ -87,6 +87,15 @@ export const ERROR_CLASS_EXIT_CODES: ReadonlyArray<{
       new InternalConsistencyError("two derivations of one size disagreed"),
   },
   {
+    planted:
+      'an InternalConsistencyError behind a ConnectionError of kind "transport"',
+    code: 70,
+    plant: () =>
+      new ConnectionError("the message send failed", "transport", {
+        cause: new InternalConsistencyError("a send ran before synchronize"),
+      }),
+  },
+  {
     planted: "an Error with its own exitCode",
     code: PERSISTENCE_LOSS_EXIT_CODE,
     plant: () =>

@@ -29,6 +29,7 @@ import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import { singleIssueArray } from "./utils/singleIssueArray.js";
 import { loneSurrogateIndex } from "./utils/wellFormedString.js";
 import {
+  InternalConsistencyError,
   OutboundDisclosureRefusalError,
   UsageError,
   isTransportPublishIndeterminate,
@@ -1092,13 +1093,13 @@ export function buildOutputTable(
   // party's choice unresolved -- the reserved detect word above all -- would
   // quote every cell against a string no join could split back on.
   if (!isCsvDelimiter(delimiter))
-    throw new Error(
+    throw new InternalConsistencyError(
       "result delimiter is not a single accepted character: resolve the " +
         "party's choice through resultCsvDelimiter before building the table",
     );
   const quote = (value: string): string => quoteCsvField(value, delimiter);
   if (associationTable[0].length !== associationTable[1].length) {
-    throw new Error(
+    throw new InternalConsistencyError(
       "association table arrays have different lengths: " +
         `${associationTable[0].length} vs ${associationTable[1].length}`,
     );

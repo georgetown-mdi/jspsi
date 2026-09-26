@@ -101,7 +101,7 @@ class RowForest {
 export function entityClusters(table: AssociationTable): Array<EntityCluster> {
   const [localRows, partnerRows] = table;
   if (localRows.length !== partnerRows.length)
-    throw new Error(
+    throw new InternalConsistencyError(
       "the association table's halves have different lengths: " +
         `${localRows.length} vs ${partnerRows.length}. Each entry is one ` +
         "matched pair, so the two halves are read together.",
@@ -241,7 +241,7 @@ export function assertRoundDiagonalClosure(
   blocks: ReadonlyArray<ClosureBlock>,
 ): EntityClusterSummary {
   if (roundOfPair.length !== table[0].length)
-    throw new Error(
+    throw new InternalConsistencyError(
       `${id}: the closure check was given ${roundOfPair.length} round ` +
         `label(s) for ${table[0].length} matched pair(s)`,
     );
@@ -285,7 +285,7 @@ export function assertRoundDiagonalClosure(
   const pairsCoveredByBlocks = new Set<string>();
   for (const block of blocks) {
     if (block.localRows.length === 0 || block.partnerRows.length === 0)
-      throw new Error(
+      throw new InternalConsistencyError(
         `${id}: the closure check was given a block with no record on one ` +
           "side, where a block is the records that contributed one matched value",
       );

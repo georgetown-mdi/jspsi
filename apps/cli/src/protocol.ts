@@ -5,6 +5,7 @@ import {
   DEFAULT_PEER_TIMEOUT_MS,
   getLogger,
   describeExchangeStages,
+  InternalConsistencyError,
   runExchange,
   SINGLE_PASS_STAGE_IDS,
   exchangeRecordFromFailure,
@@ -845,7 +846,9 @@ async function openRunTransport(params: {
     // Resolved by the prepare block for exactly this channel; the check is
     // what licenses treating the dial as present.
     if (build.webRtcDial === undefined)
-      throw new Error("the webrtc rendezvous was not resolved");
+      throw new InternalConsistencyError(
+        "the webrtc rendezvous was not resolved",
+      );
     log.info(
       "rendezvousing through the signaling server at",
       // dialedBrokerAuthority (see its doc) is what the socket actually
@@ -931,7 +934,9 @@ async function openRunTransport(params: {
     // every file-sync channel; the check is what licenses the rest of the
     // block treating them as present.
     if (build.fileSync === undefined || build.transport === undefined)
-      throw new Error("the file-sync transport was not constructed");
+      throw new InternalConsistencyError(
+        "the file-sync transport was not constructed",
+      );
     const fileSyncConn = build.fileSync;
     await fileSyncConn.open(connection);
     run.opened = true;
@@ -979,7 +984,7 @@ async function openRunTransport(params: {
     // Invariant: synchronize() throws on all failure paths, so role is always
     // defined when synchronize() returns normally.
     if (rendezvousRole === undefined)
-      throw new Error(
+      throw new InternalConsistencyError(
         "connection did not establish a handshake role after synchronization",
       );
     role = rendezvousRole;
@@ -1615,7 +1620,7 @@ async function prepareTransport(
     // `never` binding holds the other half at build time: it compiles only
     // while the dispatch below covers every channel the type admits.
     const unsupported: never = connection;
-    throw new Error(
+    throw new InternalConsistencyError(
       `unsupported channel: ` +
         (unsupported as unknown as { channel: string }).channel,
     );
@@ -1628,7 +1633,7 @@ async function prepareTransport(
   // the authenticated channel with nothing reading it back. Reject the
   // combination rather than leave the mistake open to a future caller.
   if (auth && saveIntent !== undefined)
-    throw new Error(
+    throw new InternalConsistencyError(
       "saveIntent is only valid on an unauthenticated (zero-setup) exchange; " +
         "an authenticated exchange must not pass it",
     );
@@ -1638,7 +1643,7 @@ async function prepareTransport(
   // front, so a future caller wiring a hook to a zero-setup exchange gets
   // a clear error instead of a persistence step that never runs.
   if (!auth && onAuthenticated !== undefined)
-    throw new Error(
+    throw new InternalConsistencyError(
       "onAuthenticated is only valid on an authenticated exchange; an " +
         "unauthenticated (zero-setup) exchange has no acceptance step to hook",
     );
@@ -1648,7 +1653,7 @@ async function prepareTransport(
   // session key to derive the replay binder from, so a caller that wired
   // it would get a receipt-less exchange with no signal why.
   if (!auth && signing !== null)
-    throw new Error(
+    throw new InternalConsistencyError(
       "a signing identity is only valid on an authenticated exchange; an " +
         "unauthenticated (zero-setup) exchange has no session key to bind the " +
         "signed receipt to",
@@ -2477,7 +2482,9 @@ export async function runProtocol(
     // Set by the prepare block on the file-sync channels and by the rendezvous
     // above on webrtc; either way the exchange has a transport to run over.
     if (build.transport === undefined)
-      throw new Error("no transport was established for this exchange");
+      throw new InternalConsistencyError(
+        "no transport was established for this exchange",
+      );
     const mc = build.transport;
 
     if (auth) {

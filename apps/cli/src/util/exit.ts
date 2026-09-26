@@ -19,8 +19,8 @@ import {
  * The process exit code for a failure in this implementation rather than in
  * anything the operator, the partner, or the transport supplied: `EX_SOFTWARE`
  * (70), the sysexits code for an internal software error. Held by core's
- * {@link InternalConsistencyError}, which core raises where it finds one of
- * its own invariants broken.
+ * {@link InternalConsistencyError}, which core and the CLI raise where a
+ * check on their own state fails.
  *
  * Distinct from both neighbours: 64 would name the operator's input as what to
  * fix when the run already found their declared sizes within budget, and 69
@@ -90,9 +90,9 @@ export function worseReceiptVerdictExitCode(a: number, b: number): number {
  * The process exit code a caught command error reports: EX_USAGE (64) for a
  * {@link UsageError} or a {@link ConnectionError} of kind `usage`, bare or
  * behind `transport`-kind wraps ({@link firstLinkBehindTransportWraps}),
- * {@link INTERNAL_FAULT_EXIT_CODE} (70) for an {@link InternalConsistencyError},
- * {@link AUTHENTICATION_FAILED_EXIT_CODE} (77) for an
- * {@link AuthenticationError}, bare or behind the same wraps, otherwise the
+ * {@link INTERNAL_FAULT_EXIT_CODE} (70) for an {@link InternalConsistencyError}
+ * and {@link AUTHENTICATION_FAILED_EXIT_CODE} (77) for an
+ * {@link AuthenticationError}, each bare or behind the same wraps, otherwise the
  * error's own numeric `exitCode`
  * when it has one, else EX_UNAVAILABLE (69). The classification a boundary
  * reads when its errors vary; a boundary whose errors are all usage faults
@@ -116,7 +116,8 @@ export function worseReceiptVerdictExitCode(a: number, b: number): number {
 export function exitCodeForError(err: unknown): number {
   const unwrapped = firstLinkBehindTransportWraps(err);
   if (isUsageFault(unwrapped)) return 64;
-  if (err instanceof InternalConsistencyError) return INTERNAL_FAULT_EXIT_CODE;
+  if (unwrapped instanceof InternalConsistencyError)
+    return INTERNAL_FAULT_EXIT_CODE;
   if (unwrapped instanceof AuthenticationError)
     return AUTHENTICATION_FAILED_EXIT_CODE;
   const own = (err as { exitCode?: unknown } | null | undefined)?.exitCode;
@@ -135,8 +136,9 @@ function isUsageFault(err: unknown): boolean {
  * {@link ConnectionError}, walking at most {@link MAX_ERROR_CAUSE_DEPTH}
  * links; `err` itself when it is not one. The message bridge
  * (`fromEventConnection`) wraps every send and poll failure that way, so a
- * {@link UsageError} the file-sync transport raised, or an
- * {@link AuthenticationError}, reaches a command boundary behind it. Any other
+ * {@link UsageError} the file-sync transport raised, an
+ * {@link InternalConsistencyError}, or an {@link AuthenticationError}, reaches
+ * a command boundary behind it. Any other
  * kind ends the walk, so a `security` failure keeps its own code whatever it
  * wraps.
  */

@@ -11,6 +11,7 @@ import {
   DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
   DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
   disclosedColumnNames,
+  InternalConsistencyError,
   linkageRuleSetVerdictNote,
   redactAndSanitizeForDisplay,
   ruleSetCitation,
@@ -171,7 +172,7 @@ function displayContradictedRuleSetCitation(
   // remedy missing from under it.
   const caveat = linkageRuleSetVerdictNote("contradicted", "citing-party");
   if (caveat === undefined)
-    throw new Error(
+    throw new InternalConsistencyError(
       "no citing-party caveat for a disproved linkage rule set citation",
     );
   emit(`    ${caveat}`);

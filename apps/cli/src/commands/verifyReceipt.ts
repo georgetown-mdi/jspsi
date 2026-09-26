@@ -9,6 +9,7 @@ import {
   EXCHANGE_KEYS_VERSION,
   EXCHANGE_RECORD_VERSION,
   FINGERPRINT_REGEX,
+  InternalConsistencyError,
   loadCSVFile,
   parseDualSignedRecord,
   parseExchangeRecord,
@@ -447,7 +448,7 @@ function missingTermsInputs(supplied: SuppliedVerificationInputs): string[] {
 function termsRemediation(supplied: SuppliedVerificationInputs): string {
   const missing = missingTermsInputs(supplied);
   if (missing.length === 0)
-    throw new Error(
+    throw new InternalConsistencyError(
       "the agreed-terms hash is reported as not checked while both parties' " +
         "terms were supplied",
     );

@@ -1,7 +1,11 @@
 import fs from "node:fs";
 
 import type { ConnectionConfig, ExchangeSpec, HttpAuth } from "@alcove/core";
-import { HOST_KEY_FINGERPRINT_REGEX, UsageError } from "@alcove/core";
+import {
+  HOST_KEY_FINGERPRINT_REGEX,
+  InternalConsistencyError,
+  UsageError,
+} from "@alcove/core";
 
 import { expandTilde } from "../fileUtils";
 
@@ -270,7 +274,7 @@ export function readConnectionCredentials(
  */
 function readValueFor(value: string | undefined, field: string): string {
   if (value === undefined)
-    throw new Error(
+    throw new InternalConsistencyError(
       `internal error: the connection credential ${field} was applied ` +
         `without having been read`,
     );

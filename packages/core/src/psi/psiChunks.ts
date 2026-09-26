@@ -3,6 +3,7 @@ import type {
   Request as PSIRequest,
   Response as PSIResponse,
 } from "@openmined/psi.js/implementation/proto/psi_pb.d.ts";
+import { InternalConsistencyError } from "../errors";
 
 // Splitting one PSI crypto operation into chunks, and reassembling the chunk
 // results into the message a single call over the whole set produces. The
@@ -109,7 +110,7 @@ export function chunkRangesOfSize(
   size: number,
 ): PsiChunkRange[] {
   if (!Number.isInteger(size) || size < 1)
-    throw new Error(
+    throw new InternalConsistencyError(
       `the PSI engine's chunkElements option must be a positive integer, not ${String(size)}`,
     );
   return chunkRanges(total, Math.max(1, Math.ceil(total / size)));

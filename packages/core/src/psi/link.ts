@@ -795,7 +795,7 @@ export async function linkViaPSI(
   reportEntityClusters?: (summary: EntityClusterSummary) => void,
 ) {
   if (participant.config.role === "either")
-    throw new Error("participants role is unresolved");
+    throw new InternalConsistencyError("participants role is unresolved");
   const sendFirst = participant.config.role === "starter";
   const { partnerRecordCount } = bounds;
 
@@ -1521,7 +1521,7 @@ export async function linkViaCountOnlyPSI(
   setStage?: (id: string) => void,
 ): Promise<number | undefined> {
   if (participant.config.role === "either")
-    throw new Error("participants role is unresolved");
+    throw new InternalConsistencyError("participants role is unresolved");
   if (data.length !== 1)
     throw new UsageError(COUNT_ONLY_SHAPE_REFUSALS.linkageKeys);
 
@@ -1545,7 +1545,7 @@ export async function linkViaCountOnlyPSI(
   // flag is derived from the agreed terms, so the two never diverge.
   if (participant.config.role === "joiner") {
     if (count === undefined)
-      throw new Error(
+      throw new InternalConsistencyError(
         `${participant.id}: the count-only round produced no count to report`,
       );
     await sendCountReport(conn, count);
@@ -1846,9 +1846,9 @@ export async function linkViaSinglePassPSI(
   reportEntityClusters?: (summary: EntityClusterSummary) => void,
 ): Promise<AssociationTable> {
   if (participant.config.role === "either")
-    throw new Error("participants role is unresolved");
+    throw new InternalConsistencyError("participants role is unresolved");
   if (!singlePassResolves(protocol.cardinality)) {
-    throw new Error(
+    throw new InternalConsistencyError(
       `psi for cardinality '${protocol.cardinality}' not yet implemented`,
     );
   }
@@ -1864,7 +1864,7 @@ export async function linkViaSinglePassPSI(
   // Guaranteed by the schema (linkageKeys is .min(1)); checked so a direct caller
   // with empty data cannot make the receiver's frame-length guard below vacuous.
   if (numLinkageKeys < 1)
-    throw new Error(
+    throw new InternalConsistencyError(
       `${participant.id}: single-pass requires at least one linkage key`,
     );
 
@@ -1876,7 +1876,7 @@ export async function linkViaSinglePassPSI(
   const { partnerRecordCount, keyWidths, localFanOutFactor } = bounds;
 
   if (keyWidths.length !== numLinkageKeys)
-    throw new Error(
+    throw new InternalConsistencyError(
       `${participant.id}: single-pass was given ${keyWidths.length} declared ` +
         `key width(s) for ${numLinkageKeys} linkage key(s)`,
     );
@@ -2405,7 +2405,7 @@ function getDistinctValuesAndIndices(
     if (j === 0) {
       numRecords = column.length;
     } else if (column.length !== numRecords) {
-      throw new Error(
+      throw new InternalConsistencyError(
         `single-pass: linkage key ${j} has ${column.length} records, ` +
           `expected ${numRecords}; all columns must have the same length`,
       );

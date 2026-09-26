@@ -11,6 +11,7 @@
 // number, so integrality is checked here too: a fractional index addresses
 // nothing and is `undefined`.
 import { ConnectionError } from "../connection/messageConnection";
+import { InternalConsistencyError } from "../errors";
 
 /**
  * A partner-frame violation, tagged `"protocol"` so it is classified exactly like
@@ -213,13 +214,13 @@ export function assertPartnerIndices(
     (grouping.rounds.length !== indices.length ||
       grouping.groups.length !== indices.length)
   )
-    throw new Error(
+    throw new InternalConsistencyError(
       `${what}: a grouped index check needs one group per entry, given ` +
         `${grouping.rounds.length} round(s) and ${grouping.groups.length} ` +
         `group(s) for ${entryCount(indices.length)}`,
     );
   if (grouping !== undefined && rules.repeats === true)
-    throw new Error(
+    throw new InternalConsistencyError(
       `${what}: each rule that relaxes distinctness holds every repeat to a ` +
         "different thing, so at most one of them applies to a list",
     );
@@ -382,7 +383,7 @@ export function resolveRunGroupedReturn(
     runs.runLengths.length !== runCount ||
     runs.ownerStarts.length !== runCount + 1
   )
-    throw new Error(
+    throw new InternalConsistencyError(
       `${what}: a run-grouped return needs one length and one owner list per ` +
         `run, given ${runs.runLengths.length} and ` +
         `${runs.ownerStarts.length - 1} for ${runCount} run(s)`,
@@ -438,7 +439,7 @@ export function resolveRunGroupedReturn(
     const seen = new Set<number>();
     for (let k = 0; k < runs.runLengths[run]; ++k, ++entry) {
       if (entry >= indices.length)
-        throw new Error(
+        throw new InternalConsistencyError(
           `${what}: a run-grouped return needs its runs to cover the list, ` +
             `given runs running past ${entryCount(indices.length)}`,
         );
@@ -461,7 +462,7 @@ export function resolveRunGroupedReturn(
     }
   }
   if (entry !== indices.length)
-    throw new Error(
+    throw new InternalConsistencyError(
       `${what}: a run-grouped return needs its runs to cover the list, given ` +
         `runs totalling ${entry} for ${entryCount(indices.length)}`,
     );
@@ -636,7 +637,7 @@ export function assertPartnerPairTable(
   maxPairs: number,
 ): void {
   if (!Number.isSafeInteger(maxPairs) || maxPairs < 0)
-    throw new Error(
+    throw new InternalConsistencyError(
       `${ascendingHalf.what}: a pair-count bound is a whole number of pairs ` +
         `this party's own counts give exactly, given ${maxPairs}`,
     );

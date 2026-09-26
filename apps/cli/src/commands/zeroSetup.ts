@@ -4,6 +4,7 @@ import fs from "node:fs";
 import {
   assertDeduplicateImplemented,
   getLogger,
+  InternalConsistencyError,
   operatorSuppliedText,
   prepareForExchange,
   redactAndRenderOperatorSuppliedText,
@@ -415,7 +416,7 @@ export function finalizeBootstrap(params: {
   // contradiction (the secret frame is gated on this party's own intent in
   // runExchange). Fail loudly rather than silently discard a negotiated secret.
   if (!save && bootstrap.sharedSecret !== undefined)
-    throw new Error(
+    throw new InternalConsistencyError(
       "internal error: a shared secret was established but this party did not " +
         "opt to save; refusing to silently discard it",
     );
@@ -782,7 +783,7 @@ export async function handler(argv: Arguments): Promise<void> {
               // marks on the returned result. Fail it into the report below
               // instead of skipping the save in silence.
               if (bootstrap === undefined)
-                throw new Error(
+                throw new InternalConsistencyError(
                   "internal error: the completed exchange returned no " +
                     "bootstrap result, though a --save intent was passed",
                 );

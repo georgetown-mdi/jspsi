@@ -17,7 +17,7 @@
 
 import { MAX_LINKAGE_ENTRIES } from "./config/linkageTermsBounds.js";
 import type { LinkageKey, LinkageTerms } from "./config/linkageTermsSchema.js";
-import { UsageError } from "./errors.js";
+import { InternalConsistencyError, UsageError } from "./errors.js";
 import { fuzzyCandidateCeiling } from "./fuzzyComparisons.js";
 import { elementValueWidthBound } from "./keyElementWidth.js";
 
@@ -73,7 +73,7 @@ export function withNoListedFanOutFunctions<T>(body: () => T): T {
       typeof (result as { then?: unknown } | null | undefined)?.then ===
       "function"
     ) {
-      throw new Error(
+      throw new InternalConsistencyError(
         "withNoListedFanOutFunctions supports synchronous bodies only: the listing is restored when body returns, so an async body would run with it restored",
       );
     }

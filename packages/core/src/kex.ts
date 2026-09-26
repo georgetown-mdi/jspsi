@@ -14,7 +14,11 @@ import {
   isReceiveDeadlineFailure,
   type MessageConnection,
 } from "./connection/messageConnection.js";
-import { AuthenticationError, markPeerWaitTimeout } from "./errors.js";
+import {
+  AuthenticationError,
+  InternalConsistencyError,
+  markPeerWaitTimeout,
+} from "./errors.js";
 
 // The authenticated key exchange that produces the exchange session key: an
 // ephemeral P-256 Diffie-Hellman pinned to the Noise NNpsk0 pattern plus an
@@ -508,7 +512,9 @@ export async function runKex(
   requestEncryption: boolean,
 ): Promise<KexResult> {
   if (psk.length !== PSK_LEN) {
-    throw new Error(`runKex: psk must be ${PSK_LEN} bytes, got ${psk.length}`);
+    throw new InternalConsistencyError(
+      `runKex: psk must be ${PSK_LEN} bytes, got ${psk.length}`,
+    );
   }
 
   const { privateKey: mySecret, publicKey: myPublic } =

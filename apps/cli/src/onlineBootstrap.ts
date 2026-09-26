@@ -3,6 +3,7 @@ import type { Arguments } from "yargs";
 import {
   endpointRequiresRetainedFiles,
   getLogger,
+  InternalConsistencyError,
   loadCSVFile,
   prepareForExchange,
   inferMetadata,
@@ -213,7 +214,7 @@ export function connectionFromEndpoint(
         // undefined path reach connection.ts as an opaque schema failure
         // (onlineBootstrap.test.ts, "connectionFromEndpoint: throws on a
         // filedrop endpoint naming no directory").
-        throw new Error(
+        throw new InternalConsistencyError(
           "filedrop endpoint has neither a path nor a split " +
             "inbound_path/outbound_path pair",
         );
@@ -350,7 +351,7 @@ export function applyEndpointSplitDirectories(
     // both halves are optional in the type, so guard a caller that bypasses
     // decode (onlineBootstrap.test.ts, "applyEndpointSplitDirectories: throws
     // on an endpoint naming only one directory").
-    throw new Error(
+    throw new InternalConsistencyError(
       "split endpoint names only one of inbound_path and outbound_path",
     );
   const { inboundPath, outboundPath } = directories;
@@ -683,7 +684,9 @@ export function buildDataSpec(args: {
       // always has terms); guards a direct caller against an empty spec
       // (onlineBootstrap.test.ts, "buildDataSpec: neither terms nor input rows
       // is refused rather than yielding an empty spec").
-      throw new Error("buildDataSpec requires either terms or input rows");
+      throw new InternalConsistencyError(
+        "buildDataSpec requires either terms or input rows",
+      );
     return { linkageTerms: terms };
   }
 
@@ -944,7 +947,7 @@ export async function runOnlineBootstrap(params: {
     params.persistObservedReceivedPayload &&
     params.receivedPayloadLockIn !== undefined
   )
-    throw new Error(
+    throw new InternalConsistencyError(
       "runOnlineBootstrap received both receivedPayloadLockIn (the acceptor's " +
         "up-front token lock-in) and persistObservedReceivedPayload (the " +
         "inviter's observe-on-save); these are mutually exclusive.",

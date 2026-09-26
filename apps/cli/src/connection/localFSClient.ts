@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import {
+  InternalConsistencyError,
   retryPromise,
   withTimeout,
   TimeoutError,
@@ -204,17 +205,23 @@ export class LocalFSClient implements FileTransportClient {
   async connect(options: Record<string, unknown>): Promise<void> {
     const dirPath = options["path"];
     if (typeof dirPath !== "string")
-      throw new Error("LocalFSClient.connect: options.path is required");
+      throw new InternalConsistencyError(
+        "LocalFSClient.connect: options.path is required",
+      );
 
     const connectTimeoutMs =
       (options["connectTimeoutMs"] as number | undefined) ??
       DEFAULT_SERVER_CONNECT_TIMEOUT_MS;
     if (connectTimeoutMs < 0)
-      throw new Error("connectTimeoutMs must be non-negative");
+      throw new InternalConsistencyError(
+        "connectTimeoutMs must be non-negative",
+      );
     const maxReconnects =
       (options["maxReconnectAttempts"] as number | undefined) ?? 3;
     if (maxReconnects < 0)
-      throw new Error("maxReconnectAttempts must be non-negative");
+      throw new InternalConsistencyError(
+        "maxReconnectAttempts must be non-negative",
+      );
 
     // fs.access on a stalled NFS/CIFS hard mount blocks a libuv thread-pool
     // worker, not the event loop, so setTimeout fires normally and this race
@@ -384,7 +391,7 @@ export class LocalFSClient implements FileTransportClient {
     if (typeof src === "string") {
       // ssh2-sftp-client interprets a string src as a local file path to copy
       // from; LocalFSClient does not support that usage.
-      throw new Error(
+      throw new InternalConsistencyError(
         "LocalFSClient.put: string src is not supported; pass a Buffer or " +
           "stream",
       );

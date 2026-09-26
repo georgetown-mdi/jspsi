@@ -29,6 +29,7 @@ import {
 import { parseBoundedJson } from "../utils/boundedJson";
 import type { getLoggerForVerbosity } from "../utils/logger";
 import {
+  InternalConsistencyError,
   UsageError,
   chainDetailCauses,
   FrameSizeExceededError,
@@ -370,12 +371,12 @@ export class FileSyncMessageLoop {
   async send(data: unknown) {
     const { deps } = this;
     if (!deps.connected() || deps.path() === undefined)
-      throw new Error("not connected");
+      throw new InternalConsistencyError("not connected");
 
     // peerId is committed by synchronize() in all rendezvous paths; guard here
     // (before mode-specific branches) so both retain and non-retain modes
     // require synchronize() to have completed first.
-    if (!deps.peerId()) throw new Error("not synchronized");
+    if (!deps.peerId()) throw new InternalConsistencyError("not synchronized");
 
     // A publish whose outcome the transport could not settle spends its seq
     // slot without advancing the counter (see the rename in the try below):
@@ -640,13 +641,13 @@ export class FileSyncMessageLoop {
     if (!this.pollerActive) return;
 
     if (!deps.connected() || deps.path() === undefined)
-      throw new Error("not connected");
+      throw new InternalConsistencyError("not connected");
 
     // Rejects an empty peerId too ("" is falsy): the peer message scan below
     // keys on `${peerId}-`, so a committed peerId="" would match every
     // "-"-prefixed file. synchronize()'s scans never commit an empty id, so
     // this is a safety check against the scan running wild on one.
-    if (!deps.peerId()) throw new Error("not synchronized");
+    if (!deps.peerId()) throw new InternalConsistencyError("not synchronized");
 
     // `path` is the inbound directory: every peer-file read here (the listing,
     // the message get, the peer abort-marker read) is from inbound.

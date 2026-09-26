@@ -91,6 +91,7 @@ import {
   ReceiptVerificationError,
 } from "./records/signedReceipt.js";
 import {
+  InternalConsistencyError,
   OperatorConfigError,
   RoundSetLimitError,
   UsageError,
@@ -435,7 +436,7 @@ export function assertMatchedPairsWellFormed(
 ): void {
   const [matchedRows, partnerRows] = associationTable;
   if (matchedRows.length !== partnerRows.length)
-    throw new Error(
+    throw new InternalConsistencyError(
       "the association table's halves have different lengths: " +
         `${matchedRows.length} vs ${partnerRows.length}. Each entry is one ` +
         "matched pair, so the two halves are read together.",
@@ -451,14 +452,14 @@ export function assertMatchedPairsWellFormed(
       continue;
     }
     if (matchedRows[i] < matchedRows[i - 1])
-      throw new Error(
+      throw new InternalConsistencyError(
         "the association table's local half is not in ascending order: the " +
           "result rows, the payload rows, and the re-supply path that " +
           "reproduces both from the retained result all read it in this " +
           "party's own row order.",
       );
     if (!localRowMayRepeat)
-      throw new Error(
+      throw new InternalConsistencyError(
         "the association table repeats a local row index, which the " +
           `"${cardinality}" cardinality this exchange resolved does not ` +
           "produce: one of this party's records stands in exactly one pair " +
@@ -469,7 +470,7 @@ export function assertMatchedPairsWellFormed(
       );
     if (runStart === i - 1) runPartnerRows.add(partnerRows[runStart]);
     if (runPartnerRows.has(partnerRows[i]))
-      throw new Error(
+      throw new InternalConsistencyError(
         "the association table repeats a matched pair: the attested result " +
           "size counts pairs and the result file writes one row per pair, so " +
           "one link would be counted twice and written twice.",

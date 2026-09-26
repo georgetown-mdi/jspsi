@@ -1,6 +1,10 @@
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import { isNamedDiagnosis, markNamedDiagnosis } from "../errors";
+import {
+  InternalConsistencyError,
+  isNamedDiagnosis,
+  markNamedDiagnosis,
+} from "../errors";
 import {
   InProcessPsiEngine,
   type InProcessPsiEngineOptions,
@@ -197,7 +201,9 @@ export class WorkerPsiEngine implements PsiEngine {
 
   private call<T>(body: PsiWorkerRequestBody): Promise<T> {
     if (this.disposed)
-      return Promise.reject(localWorkerFault(new Error(DISPOSED_MESSAGE)));
+      return Promise.reject(
+        localWorkerFault(new InternalConsistencyError(DISPOSED_MESSAGE)),
+      );
     // A worker crash left the engine terminal: fail fast with the crash cause
     // rather than posting to a dead worker and hanging.
     if (this.terminalError) return Promise.reject(this.terminalError);
@@ -207,7 +213,7 @@ export class WorkerPsiEngine implements PsiEngine {
     if (this.pending.size > 0)
       return Promise.reject(
         localWorkerFault(
-          new Error(
+          new InternalConsistencyError(
             "PSI worker engine received a concurrent request; the exchange must be strictly lockstep",
           ),
         ),

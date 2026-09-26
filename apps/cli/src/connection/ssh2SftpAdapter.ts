@@ -12,6 +12,7 @@ import {
   FileTransportClient,
   FrameSizeExceededError,
   GetOptions,
+  InternalConsistencyError,
   PutOptions,
   PutSource,
   TransportOperationStalledError,
@@ -811,7 +812,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         return this.abandonedTransitionValue(transition);
       default: {
         const unhandled: never = disposition;
-        throw new Error(
+        throw new InternalConsistencyError(
           `unhandled abandoned-transition disposition ${String(unhandled)}`,
         );
       }
@@ -824,7 +825,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // state, so it is checked here instead of asserted in the record's comment.
   private abandonedTransitionValue<T>(transition: SessionTransition<T>): T {
     if (!("abandoned" in transition))
-      throw new Error(
+      throw new InternalConsistencyError(
         `the ${transition.kind} session transition's stated abandon disposition ` +
           `returns its own value, but the transition has none`,
       );
@@ -854,7 +855,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     held: HeldSessionTransition,
   ): void {
     if (this.transitionInProgress === held) return;
-    throw new Error(
+    throw new InternalConsistencyError(
       `${mechanism} was driven outside the SFTP session transition that owns ` +
         `it; every dial and every close of this adapter's session runs inside ` +
         `the runTransition call that acquired for it, so that two can never ` +
@@ -871,7 +872,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // its body. That assumption is the check.
   private assertAbandonedTeardownMayForceClose(): void {
     if (this.session.isClosing) return;
-    throw new Error(
+    throw new InternalConsistencyError(
       `an abandoned teardown's forced transport close was driven with no ` +
         `teardown latched; it is exempt from the held-transition check only ` +
         `because end() latches before it enqueues, which is what keeps every ` +
@@ -1370,7 +1371,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   ): Promise<RecoveryRedialOutcome> {
     const options = this.originalConnectOptions;
     if (options === undefined)
-      throw new Error(
+      throw new InternalConsistencyError(
         "SFTP session recovery reached the re-dial with no retained connect " +
           "options; a server-driven operation ran before connect()",
       );
@@ -1497,7 +1498,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // socket behind. Refusing the dial is the alternative to clearing the memo,
       // which would cost the once-per-connection guarantees the close rests on.
       skipped: () => {
-        throw new Error(
+        throw new InternalConsistencyError(
           "this SFTP connection has already been closed; a closed connection " +
             "cannot be reopened - open a new one instead",
         );
@@ -2606,7 +2607,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         if (sftp) return true;
         const options = this.originalConnectOptions;
         if (options === undefined)
-          throw new Error(
+          throw new InternalConsistencyError(
             "ephemeral SFTP re-dial reached with no retained connect options; " +
               "a poll cycle ran before connect()",
           );

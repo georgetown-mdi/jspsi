@@ -2,7 +2,11 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { parentPort, workerData } from "node:worker_threads";
 
-import { sanitizeErrorForDisplay, servePsiWorker } from "@alcove/core";
+import {
+  InternalConsistencyError,
+  sanitizeErrorForDisplay,
+  servePsiWorker,
+} from "@alcove/core";
 import type {
   PsiWorkerInit,
   PsiWorkerRequest,
@@ -35,7 +39,9 @@ if (typeof globalWithGc.gc !== "function") {
 async function main(): Promise<void> {
   const port = parentPort;
   if (!port)
-    throw new Error("PSI worker started outside a worker_threads worker");
+    throw new InternalConsistencyError(
+      "PSI worker started outside a worker_threads worker",
+    );
   const init = workerData as PsiWorkerInit;
   const { library } = await loadCliPsiBackend();
   const handle = servePsiWorker(library, init, (response: PsiWorkerResponse) =>

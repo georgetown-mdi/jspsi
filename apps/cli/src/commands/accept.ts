@@ -7,6 +7,7 @@ import {
   CONNECTION_BLOCK_NOTICE,
   disclosedColumnNames,
   getLogger,
+  InternalConsistencyError,
   parseExchangeSpec,
   keepOperatorSuppliedText,
   messageWithOperatorText,
@@ -1368,7 +1369,7 @@ export async function handler(argv: Arguments): Promise<void> {
 
       if (ready.reuseExistingConfig) {
         if (relayRefresh === undefined)
-          throw new Error(
+          throw new InternalConsistencyError(
             "internal error: the kept configuration's records were not refreshed",
           );
         log.info(

@@ -3,6 +3,7 @@ import type { Argv, Arguments } from "yargs";
 import {
   FileSyncConnection,
   HOST_KEY_FINGERPRINT_REGEX,
+  InternalConsistencyError,
   UsageError,
   redactAndSanitizeForDisplay,
 } from "@alcove/core";
@@ -168,7 +169,7 @@ export function buildProbeConfig(
  */
 function assertCanonicalFingerprint(presented: PresentedHostKey): void {
   if (!HOST_KEY_FINGERPRINT_REGEX.test(presented.fingerprint))
-    throw new Error(
+    throw new InternalConsistencyError(
       "the server's presented host-key fingerprint is not in canonical " +
         "OpenSSH SHA256 form",
     );

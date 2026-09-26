@@ -1,5 +1,6 @@
 import { hkdfDerive, fromBase64Url, toHex } from "./utils/crypto.js";
 import { SHARED_SECRET_REGEX } from "./config/connection.js";
+import { InternalConsistencyError } from "./errors.js";
 
 /**
  * The two roles in a WebRTC rendezvous. Each party derives a deterministic
@@ -65,7 +66,7 @@ export async function deriveRendezvousPeerId(
   role: RendezvousRole,
 ): Promise<string> {
   if (!SHARED_SECRET_REGEX.test(sharedSecret)) {
-    throw new Error(
+    throw new InternalConsistencyError(
       "deriveRendezvousPeerId: sharedSecret must be a base64url-encoded " +
         "32-byte value matching SHARED_SECRET_REGEX",
     );
@@ -75,7 +76,7 @@ export async function deriveRendezvousPeerId(
   // the two parties never agree on, showing up only as a rendezvous that
   // never connects.
   if (!(RENDEZVOUS_ROLES as readonly string[]).includes(role)) {
-    throw new Error(
+    throw new InternalConsistencyError(
       `deriveRendezvousPeerId: unknown role ${JSON.stringify(role)}; ` +
         `expected one of ${RENDEZVOUS_ROLES.map((r) => JSON.stringify(r)).join(", ")}`,
     );

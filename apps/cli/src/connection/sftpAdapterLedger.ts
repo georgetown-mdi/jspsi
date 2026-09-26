@@ -1,3 +1,4 @@
+import { InternalConsistencyError } from "@alcove/core";
 /**
  * The operator-facing accounting one SFTP adapter keeps over a run: the sessions
  * it established and lost, the counters its end-of-run summary reports, the
@@ -139,7 +140,7 @@ export class SftpAdapterLedger {
    */
   dialSucceeded(): number {
     if (this.live !== undefined)
-      throw new Error(
+      throw new InternalConsistencyError(
         `an SFTP dial established session generation ${this.generations + 1} ` +
           `while generation ${this.live} was still live, so that generation ` +
           `ended with no recorded cause; every transition that ends a session ` +

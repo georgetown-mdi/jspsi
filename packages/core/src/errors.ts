@@ -599,10 +599,15 @@ export class TransportOperationStalledError extends UsageError {
 }
 
 /**
- * Thrown when two derivations of the same quantity inside one party
- * disagree -- a fault in this implementation rather than in anything an
- * operator, a partner, or a transport supplied. Its raise site is the
- * single-pass send-time reply-cap check: the reply this party built
+ * Thrown when a check on this implementation's own state fails -- two
+ * derivations of the same quantity inside one party disagreeing, an
+ * exhaustiveness branch reached, or a precondition its own callers
+ * guarantee broken: a fault in this implementation rather than in anything
+ * an operator, a partner, or a transport supplied. Every such guard in
+ * core and the CLI throws this class rather than a plain `Error`, which
+ * `scripts/check-internal-fault-throws.mjs` holds for the two shapes it
+ * can read. The worked case below is the single-pass send-time reply-cap
+ * check: the reply this party built
  * outgrew the byte cap both parties derive from their declared sizes, on
  * an exchange whose declared sizes the over-ceiling gate has already
  * cleared, so no dataset either operator controls and no transport

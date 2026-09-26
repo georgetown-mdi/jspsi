@@ -15,6 +15,7 @@ import type {
 import type { DualSignedRecord, SignedReceiptParty } from "./signedReceipt.js";
 import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 import type { HandshakeRole } from "../types.js";
+import { InternalConsistencyError } from "../errors.js";
 
 // The verification consumer for the DUAL-SIGNED record (the signed evidence
 // bundle the signed-receipt step produces): per party it checks the record's
@@ -863,7 +864,7 @@ function refuseAnchorOutsideTheUnion(party: SignedReceiptPartyReport): void {
     party.certificateAnchor !== "local-identity" &&
     party.certificateAnchor !== "unanchored"
   )
-    throw new Error(
+    throw new InternalConsistencyError(
       `a dual-signed record reports the ${party.role}'s certificate anchor ` +
         `as ${party.certificateAnchor}: the verdict would have a status no ` +
         "surface has words for",
@@ -879,7 +880,7 @@ function anchoredSlot(
   // exist -- evidence overstated -- so the verdict fails loudly here instead, once
   // for all of them.
   if (party.certificateAnchor === "unanchored")
-    throw new Error(
+    throw new InternalConsistencyError(
       `a verified dual-signed record leaves the ${party.role}'s certificate ` +
         "unanchored: the verdict would claim both certificates were anchored " +
         "when one was not",
@@ -936,7 +937,7 @@ function decideGuidance(
     // line below would tell the verifier to pin a fingerprint they had already
     // pinned, so the verdict refuses the report instead.
     if (report.pinnedFingerprints !== "not-supplied")
-      throw new Error(
+      throw new InternalConsistencyError(
         "a dual-signed record anchors neither certificate while a pinned " +
           `fingerprint is reported as ${report.pinnedFingerprints}: the ` +
           "guidance would ask for a pinned value that was already supplied",
@@ -1026,7 +1027,7 @@ export function decideSignedReceiptVerdict(
     report.localIdentity === "unmatched" &&
     report.localIdentitySource === undefined
   )
-    throw new Error(
+    throw new InternalConsistencyError(
       "a signing identity matched neither certificate in this record, and how " +
         "it reached the verification was not stated: a named identity " +
         "contradicts the record, one resolved without being asked does not",
@@ -1059,7 +1060,7 @@ export function decideSignedReceiptVerdict(
       ([, row]) => row.tone === "failed",
     );
     if (failed !== undefined)
-      throw new Error(
+      throw new InternalConsistencyError(
         `a verified dual-signed record reports ${failed[0]} as ` +
           `${failed[1].status}: the verdict would read verified over a row ` +
           "that failed",

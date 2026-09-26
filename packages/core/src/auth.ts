@@ -5,6 +5,7 @@ import type { HandshakeRole } from "./types.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import { SHARED_SECRET_REGEX } from "./config/connection.js";
 import type { Authentication } from "./config/connection.js";
+import { InternalConsistencyError } from "./errors.js";
 
 // --- Public API --------------------------------------------------------------
 
@@ -88,7 +89,7 @@ export async function deriveAeadKey(
   context: AeadContext,
 ): Promise<Uint8Array<ArrayBuffer>> {
   if (!(AEAD_CONTEXTS as readonly string[]).includes(context)) {
-    throw new Error(
+    throw new InternalConsistencyError(
       `deriveAeadKey: unknown AEAD context ${JSON.stringify(context)}; ` +
         `expected one of ${AEAD_CONTEXTS.map((l) => JSON.stringify(l)).join(", ")}`,
     );
@@ -128,7 +129,7 @@ export async function deriveAbortToken(
   role: AbortTokenRole,
 ): Promise<Uint8Array<ArrayBuffer>> {
   if (!(ABORT_TOKEN_ROLES as readonly string[]).includes(role)) {
-    throw new Error(
+    throw new InternalConsistencyError(
       `deriveAbortToken: unknown abort-token role ${JSON.stringify(role)}; ` +
         `expected one of ${ABORT_TOKEN_ROLES.map((r) => JSON.stringify(r)).join(", ")}`,
     );

@@ -4,7 +4,7 @@ import type { LocalFile } from "papaparse";
 
 import { CSV_DELIMITER_DETECT, DEFAULT_CSV_DELIMITER } from "./csvDelimiter.js";
 import { decodedCSVTextSource } from "./csvTextSource.js";
-import { UsageError } from "./errors.js";
+import { InternalConsistencyError, UsageError } from "./errors.js";
 import { stripNameControlChars } from "./utils/nameControls.js";
 
 /**
@@ -556,7 +556,11 @@ async function runSharedCSVParse(
         // executable invariant rather than a silent fallback that could mask a
         // future PapaParse callback-ordering change.
         if (meta === undefined) {
-          reject(new Error("CSV parse completed without producing a chunk"));
+          reject(
+            new InternalConsistencyError(
+              "CSV parse completed without producing a chunk",
+            ),
+          );
           return;
         }
         // The header must be a flat list of string column names. A correct
@@ -568,7 +572,7 @@ async function runSharedCSVParse(
         // `toLowerCase` crash.
         if (meta.fields?.some((field) => typeof field !== "string")) {
           reject(
-            new Error(
+            new InternalConsistencyError(
               "CSV header parsed to a non-string column; the file could not be " +
                 "read correctly",
             ),
@@ -824,7 +828,11 @@ function readCSVColumnSample(
         // file -- so columns is set unless the parse produced no chunk. Reject that
         // unreachable case rather than mask it, matching loadCSVFile's invariant.
         if (columns === undefined) {
-          reject(new Error("CSV parse completed without producing a chunk"));
+          reject(
+            new InternalConsistencyError(
+              "CSV parse completed without producing a chunk",
+            ),
+          );
           return;
         }
         resolve({

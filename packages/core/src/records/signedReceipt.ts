@@ -29,6 +29,7 @@ import type { CanonicalValue } from "../utils/canonical.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 import type { SigningCertificate, SigningIdentity } from "./signingIdentity.js";
+import { InternalConsistencyError } from "../errors.js";
 
 // Certificate-backed signed exchange receipts (the sign/exchange step): both
 // parties sign one shared receipt content over signer-bound bytes and swap
@@ -96,7 +97,7 @@ export async function deriveReceiptBinder(
   role: HandshakeRole,
 ): Promise<string> {
   if (role !== "initiator" && role !== "responder")
-    throw new Error(
+    throw new InternalConsistencyError(
       `deriveReceiptBinder: unknown role ${JSON.stringify(role)}; expected ` +
         `"initiator" or "responder"`,
     );

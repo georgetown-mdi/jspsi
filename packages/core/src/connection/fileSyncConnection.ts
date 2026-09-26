@@ -19,6 +19,7 @@ import type { HandshakeRole } from "../types";
 import { errorMessage } from "./messageConnection";
 import {
   AuthenticationError,
+  InternalConsistencyError,
   UsageError,
   ConnectionClosedError,
   TransportOperationStalledError,
@@ -1529,7 +1530,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   // entry-time log line. Returns the path/display scope the phases below thread.
   private validateSynchronizeEntry(): RendezvousScope {
     if (!this.connected || this.path === undefined)
-      throw new Error("not connected");
+      throw new InternalConsistencyError("not connected");
 
     // Captured once, narrowed by the guard above (this.path is reset to
     // undefined only by close(), which a single-caller synchronize() never races
@@ -1550,7 +1551,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
       split ? outboundPath : undefined,
     );
 
-    if (this.peerId) throw new Error("already synchronized");
+    if (this.peerId) throw new InternalConsistencyError("already synchronized");
 
     // Re-arm cancellation per session: each genuine rendezvous (including a
     // retry on the same instance after a failed synchronize()) starts with a

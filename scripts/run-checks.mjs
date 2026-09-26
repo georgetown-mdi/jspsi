@@ -174,6 +174,11 @@ export const CHECKS = [
       "packages/core/src/main.ts publishes a named list, with no wildcard re-export putting a module's whole surface on the main entry.",
   },
   {
+    script: "check:internal-fault-throws",
+    description:
+      'No exhaustiveness branch or "internal error" guard in packages/core/src or apps/cli/src throws a plain Error, which the CLI would exit 69 rather than 70.',
+  },
+  {
     script: "check:warning-sources",
     description:
       "The warning `source` values each stream emits are the set its spec publishes to a supervisor's author -- the CLI's in docs/spec/CLI_EVENTS.md, the console relay's synthesized notices in docs/spec/SERVER_JOB_API.md -- and no value is on both.",

@@ -7,6 +7,7 @@ import {
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   displayText,
   distinctLinkageRuleSetVerdicts,
+  InternalConsistencyError,
   LINKAGE_RULE_SET_VERDICT_COPY,
   MAX_DECLARED_NAMES_SHOWN,
   PROPOSED_NOT_APPLIED_NOTES,
@@ -596,7 +597,7 @@ export function logDecisionFacts(
   // that refusal, so printing "(none)" here can never mask a disclosure
   // that actually happens.
   if (countOnly && (ownOutboundSend?.length ?? 0) > 0)
-    throw new Error(
+    throw new InternalConsistencyError(
       "count-only exchange resolved a non-empty outbound column set: a psi-c " +
         "run sends no payload in either direction",
     );

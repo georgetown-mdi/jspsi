@@ -7,6 +7,7 @@ import {
 } from "./utils/crypto.js";
 import { SHARED_SECRET_REGEX } from "./config/connection.js";
 import type { WebRTCConnectionConfig } from "./config/connection.js";
+import { InternalConsistencyError } from "./errors.js";
 
 /**
  * HKDF info label for the per-exchange relay key. A single fixed label in the
@@ -46,7 +47,7 @@ export interface RelayCredential {
  */
 export async function deriveRelayKey(sharedSecret: string): Promise<string> {
   if (!SHARED_SECRET_REGEX.test(sharedSecret)) {
-    throw new Error(
+    throw new InternalConsistencyError(
       "deriveRelayKey: sharedSecret must be a base64url-encoded 32-byte value " +
         "matching SHARED_SECRET_REGEX",
     );
@@ -88,10 +89,10 @@ export async function mintRelayCredential({
   now,
 }: MintRelayCredentialOptions): Promise<RelayCredential> {
   if (key.length === 0) {
-    throw new Error("mintRelayCredential: key is empty");
+    throw new InternalConsistencyError("mintRelayCredential: key is empty");
   }
   if (label.length === 0 || label.includes(":")) {
-    throw new Error(
+    throw new InternalConsistencyError(
       `mintRelayCredential: label ${JSON.stringify(label)} must be non-empty ` +
         "and must not contain ':', which separates it from the expiry",
     );
@@ -101,14 +102,16 @@ export async function mintRelayCredential({
     ttlSeconds < 1 ||
     ttlSeconds > RELAY_CREDENTIAL_MAX_TTL_SECONDS
   ) {
-    throw new Error(
+    throw new InternalConsistencyError(
       `mintRelayCredential: ttlSeconds must be whole seconds from 1 to ` +
         `${RELAY_CREDENTIAL_MAX_TTL_SECONDS}; got ${ttlSeconds}`,
     );
   }
   const nowMs = now.getTime();
   if (!Number.isFinite(nowMs)) {
-    throw new Error("mintRelayCredential: now is not a valid date");
+    throw new InternalConsistencyError(
+      "mintRelayCredential: now is not a valid date",
+    );
   }
   const expirySeconds = Math.floor(nowMs / 1000) + ttlSeconds;
   const username = `${expirySeconds}:${label}`;

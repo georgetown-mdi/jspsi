@@ -29,6 +29,7 @@ import type {
   LinkageTerms,
   TransformStep,
 } from "../config/linkageTermsSchema.js";
+import { InternalConsistencyError } from "../errors.js";
 
 /**
  * @internal
@@ -204,7 +205,9 @@ function probeTransforms(terms: LinkageTerms): Array<Array<TransformStep>> {
     .map((element) => element.transform)
     .filter((transform) => transform !== undefined);
   if (transforms.length === 0)
-    throw new Error("the consent probe base declares no element transform");
+    throw new InternalConsistencyError(
+      "the consent probe base declares no element transform",
+    );
   return transforms;
 }
 
@@ -217,7 +220,9 @@ function fieldOfType<T extends LinkageField["type"]>(
       candidate.type === type,
   );
   if (field === undefined)
-    throw new Error(`the consent probe base declares no ${type} field`);
+    throw new InternalConsistencyError(
+      `the consent probe base declares no ${type} field`,
+    );
   return field;
 }
 
@@ -1066,7 +1071,7 @@ export function consentRepresentationProbes(
   for (const [path, entry] of Object.entries(classification)) {
     if (entry.classification !== "consent-relevant") continue;
     if (entry.shapes !== undefined && entry.requiredVariantCopy !== undefined)
-      throw new Error(
+      throw new InternalConsistencyError(
         `${path} declares shapes and an entry-level requiredVariantCopy: a ` +
           `field measured under shapes pins its copy per shape, so the ` +
           `entry-level list would go unmeasured. Move each sentence onto the ` +

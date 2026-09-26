@@ -4,6 +4,7 @@ import {
   authorityMovingSignalingField,
   chainDetailCauses,
   ConnectionError,
+  InternalConsistencyError,
   UsageError,
   deriveRendezvousPeerId,
   getLogger,
@@ -481,7 +482,7 @@ export function iceServersFromConnection(
   }
   const minted = (): RelayCredential => {
     if (runRelayCredential === undefined)
-      throw new Error(
+      throw new InternalConsistencyError(
         "iceServersFromConnection: a TURN url that takes the run's credential " +
           "is selected but no relay credential was minted for this run",
       );
