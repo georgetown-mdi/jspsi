@@ -630,6 +630,21 @@ describe("GET /api/jobs/:jobId/receipt serves only a workdir-contained receipt",
     expect(Buffer.concat(chunks).toString("utf8")).toBe(receipt);
   });
 
+  test("the receipt download sends exactly its type, file name, nosniff and no-store", async () => {
+    const { manager, id } = await createSettledJob();
+    seedReceipt(manager, id, RECEIPT_JSON);
+
+    const response = await getReceipt(id);
+    expect(response.status).toBe(200);
+    expect(Object.fromEntries(response.headers.entries())).toEqual({
+      "cache-control": "no-store",
+      "content-disposition": 'attachment; filename="alcove-receipt.json"',
+      "content-type": "application/json; charset=utf-8",
+      "x-content-type-options": "nosniff",
+    });
+    await response.body!.cancel();
+  });
+
   test("a run that did NOT succeed still serves its receipt", async () => {
     // The receipt is written from the mutually-verifiable facts once the
     // signature swap completes, so it survives an exit the local record build did

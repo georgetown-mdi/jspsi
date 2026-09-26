@@ -794,6 +794,27 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
     expect(Buffer.concat(chunks).toString("utf8")).toBe(log);
   });
 
+  test("the log download sends exactly its type, file name, nosniff and no-store", async () => {
+    const id = await createSucceededJob(
+      { STUB_OUTPUT_FILE: "id\n1\n" },
+      { ...validIntent(), diagnosticRun: true },
+    );
+    seedLog(id, "[2026-08-22] [DEBUG] rendezvous opened\n");
+
+    const response = (await handlersOf(LogRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/log`),
+      params: { jobId: id },
+    })) as Response;
+    expect(response.status).toBe(200);
+    expect(Object.fromEntries(response.headers.entries())).toEqual({
+      "cache-control": "no-store",
+      "content-disposition": `attachment; filename="alcove-run-${id}.log"`,
+      "content-type": "text/plain; charset=utf-8",
+      "x-content-type-options": "nosniff",
+    });
+    await response.body!.cancel();
+  });
+
   /** The status body's two log fields, as a client watching for the log reads
    * them. */
   async function logStatusOf(
@@ -1023,6 +1044,67 @@ describe("a download whose file is removed after the route's existence check is 
       removal.mockRestore();
       fs.writeFileSync(filePath, contents);
     }
+  });
+});
+
+describe("a download closes the file it streams", () => {
+  /** Spy on the next `fsp.open`, wrapping the real handle's `close` so the
+   * test sees every call while the file still closes. */
+  function spyOnNextClose(): { close: () => ReturnType<typeof vi.fn> } {
+    const open = fsp.open.bind(fsp);
+    let close: ReturnType<typeof vi.fn> | undefined;
+    vi.spyOn(fsp, "open").mockImplementationOnce(async (...args) => {
+      const handle = await open(...args);
+      const realClose = handle.close.bind(handle);
+      close = vi.fn(realClose);
+      handle.close = close as typeof handle.close;
+      return handle;
+    });
+    return {
+      close: () => {
+        if (close === undefined) throw new Error("fsp.open was not called");
+        return close;
+      },
+    };
+  }
+
+  async function downloadLog(): Promise<{ id: string; response: Response }> {
+    const id = await createSucceededJob(
+      { STUB_OUTPUT_FILE: "id\n1\n" },
+      { ...validIntent(), diagnosticRun: true },
+    );
+    fs.writeFileSync(
+      (
+        globalThis as { jobManagerInstance?: JobManagerType }
+      ).jobManagerInstance!.getJobView(id)!.logPath!,
+      multiChunkText("[2026-08-22] [DEBUG]"),
+    );
+    const response = (await handlersOf(LogRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/log`),
+      params: { jobId: id },
+    })) as Response;
+    expect(response.status).toBe(200);
+    return { id, response };
+  }
+
+  test("a download cancelled mid-stream closes its file handle", async () => {
+    const spy = spyOnNextClose();
+    const { response } = await downloadLog();
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    await reader.cancel();
+    await vi.waitFor(() => expect(spy.close()).toHaveBeenCalledOnce());
+  });
+
+  test("a download read to the end closes its file handle once", async () => {
+    const spy = spyOnNextClose();
+    const { response } = await downloadLog();
+    const chunks = await readBodyChunks(response);
+    expect(chunks.length).toBeGreaterThan(1);
+    await vi.waitFor(() => expect(spy.close()).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(spy.close()).toHaveBeenCalledOnce();
   });
 });
 
