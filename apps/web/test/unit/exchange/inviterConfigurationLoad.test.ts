@@ -52,6 +52,7 @@ import { outputForDirection } from "@psi/authoring/advancedInvite";
 import {
   INVITER_SCREEN_INITIAL,
   inviterScreenReducer,
+  sectionToRestore,
 } from "@exchange/inviterScreenModel";
 
 import { composeSftpConfigSpec } from "@jobs/intentConfig";
@@ -1367,6 +1368,36 @@ describe("a delimiter a late read lands under a committed file", () => {
     const landed = loadedInto(committed, sftpDocument({ csvDelimiter: "|" }));
     expect(landed.section).toBe("file");
     expect(landed.consoleSource).toBe(committed.consoleSource);
+  });
+
+  // The drop returns to the file step without moving the browser's history
+  // cursor, so the entries pushed on the way to the review step still name
+  // steps the dropped file backed.
+  test("a Back or Forward to an entry past the file step stays on the file step", () => {
+    const landed = loadedInto(
+      advancedWhileReading("review"),
+      sftpDocument({ csvDelimiter: "|" }),
+    );
+    for (const entry of ["columns", "review", "keys"] as const) {
+      const settled = sectionToRestore(landed, entry, false);
+      expect(settled).toBe("file");
+      const restored = inviterScreenReducer(landed, {
+        type: "section-shown",
+        section: settled,
+      });
+      expect(restored.section).toBe("file");
+      expect(restored.intakeAlert?.title).toBe("Choose your file again");
+    }
+  });
+
+  test("once the file is chosen again the entry is restored as it names", () => {
+    const landed = loadedInto(
+      advancedWhileReading("review"),
+      sftpDocument({ csvDelimiter: "|" }),
+    );
+    expect(sectionToRestore(withFileRead(landed), "review", false)).toBe(
+      "review",
+    );
   });
 });
 
