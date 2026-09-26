@@ -22,7 +22,7 @@ import {
   InternalConsistencyError,
   LinkageTermsUnsatisfiableError,
   OutboundDisclosureRefusalError,
-  WebRtcFrameLimitError,
+  isSetTooLargeError,
 } from "@alcove/core";
 
 import { PartnerNoShowError } from "../transport/waitForConnection";
@@ -252,8 +252,9 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
  * cap safety check also raises it mid-data-exchange, coinciding with a bound
  * lapsing during a long run as readily as with a real expiry, and re-mapping it
  * would report a defect in Alcove as a benign expiry that a fresh invitation
- * cannot fix. {@link WebRtcFrameLimitError} is excluded the same way: it holds
- * the tag too, and a fresh invitation leaves the set it refused as large.
+ * cannot fix. A set too large to send ({@link isSetTooLargeError}) is excluded
+ * the same way: it holds the tag too, and a fresh invitation leaves the set it
+ * refused as large.
  */
 export function remapLapsedRunFailure(
   error: unknown,
@@ -261,7 +262,7 @@ export function remapLapsedRunFailure(
   now: number,
 ): ManagedExchangeExpiredError | undefined {
   if (error instanceof InternalConsistencyError) return undefined;
-  if (error instanceof WebRtcFrameLimitError) return undefined;
+  if (isSetTooLargeError(error)) return undefined;
   if (!hasRecoveryHint(error)) return undefined;
   if (!managedExchangeLapsed(record, now)) return undefined;
   // expires is defined here: managedExchangeLapsed returns true only when it is
@@ -289,8 +290,8 @@ export function remapLapsedRunFailure(
  * since both are deterministic local states an abort cannot produce:
  * {@link OutboundDisclosureRefusalError} before the data exchange began
  * records `consent`; {@link PartnerNoShowError} before the data exchange began
- * records the benign `missed` outcome ({@link missedRun}). A
- * {@link WebRtcFrameLimitError} records `too-large`, with the refusal's
+ * records the benign `missed` outcome ({@link missedRun}). A set too large to
+ * send ({@link isSetTooLargeError}) records `too-large`, with the refusal's
  * `setOwner`, on either side of the data exchange boundary: a round past the
  * first refuses after data has moved, and the same files refuse identically
  * at every window. `aborted` then records `cancelled`. A `security`-kind
@@ -324,7 +325,7 @@ export function rerunFailureLastRun(
     return failedRun(at, "failed", "consent");
   if (error instanceof PartnerNoShowError && !dataExchangeStarted)
     return missedRun(at);
-  if (error instanceof WebRtcFrameLimitError)
+  if (isSetTooLargeError(error))
     return {
       ...failedRun(at, "failed", "too-large"),
       tooLargeSetOwner: error.setOwner,
@@ -415,7 +416,7 @@ export function benignRerunOutcome(
     return "already-running";
   if (error instanceof PartnerNoShowError && !dataExchangeStarted)
     return "missed";
-  if (error instanceof WebRtcFrameLimitError) return "too-large";
+  if (isSetTooLargeError(error)) return "too-large";
   return undefined;
 }
 

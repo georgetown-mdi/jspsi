@@ -1,6 +1,7 @@
 import {
   ConnectionError,
   LinkageTermsUnsatisfiableError,
+  RoundSetLimitError,
   UsageError,
   WebRtcFrameLimitError,
   assertFirstRoundFitsWebRtcFrame,
@@ -663,6 +664,46 @@ describe("the too-large tier: a set over the bound one WebRTC message holds", ()
         NOW,
       ),
     ).toBeUndefined();
+  });
+
+  test("a round's distinct-value refusal records too-large and is not re-mapped to an expiry", () => {
+    const distinctRefusal = new RoundSetLimitError(
+      "A linkage key gives this party more than 16777216 distinct values in " +
+        "one round, the most one round can hold. Split the input into smaller " +
+        "files and run one exchange for each.",
+    );
+    const lastRun = rerunFailureLastRun(
+      distinctRefusal,
+      Date.parse(RUN_AT),
+      false,
+      true,
+    );
+    expect(lastRun).toEqual({
+      at: RUN_AT,
+      outcome: "failed",
+      failureKind: "too-large",
+      tooLargeSetOwner: "local",
+    });
+    expect(
+      remapLapsedRunFailure(
+        distinctRefusal,
+        { expires: "2026-07-01T00:00:00.000Z" },
+        NOW,
+      ),
+    ).toBeUndefined();
+    const failure = classifyManagedRunFailure(
+      distinctRefusal,
+      { atLaunch: record(), afterRun: record({ lastRun }) },
+      undefined,
+      NOW,
+      true,
+    );
+    if (failure.kind === "handed-off")
+      throw new Error("expected the too-large alert");
+    expect(failure.kind).toBe("too-large");
+    expect(failure.title).toBe("Your file is too large for a browser exchange");
+    expect(failure.message).toBe(distinctRefusal.message);
+    expect(managedRunRetryable(failure)).toBe(false);
   });
 
   test("the next visit states the bound and the remedy, and offers no retry", () => {

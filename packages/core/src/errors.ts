@@ -219,14 +219,34 @@ export class WebRtcFrameLimitError extends UsageError {
  * count, the bound, and the remedy, and is composed only from counts and
  * fixed constants. Holds `alcoveRecoveryHintEmitted`: a retry refuses
  * identically, so the CLI's generic retry advisory is suppressed.
+ *
+ * `setOwner` is always `"local"`: every raising site sizes this party's own
+ * set. {@link isSetTooLargeError} classifies it with
+ * {@link WebRtcFrameLimitError}.
  */
 export class RoundSetLimitError extends UsageError {
   readonly alcoveRecoveryHintEmitted = true;
+  readonly setOwner = "local" as const;
 
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "RoundSetLimitError";
   }
+}
+
+/**
+ * Whether `error` refuses a PSI set as too large to send: a
+ * {@link WebRtcFrameLimitError} or a {@link RoundSetLimitError}. Both refuse
+ * identically on every retry and at every window, and both name whose set it
+ * was in `setOwner`.
+ */
+export function isSetTooLargeError(
+  error: unknown,
+): error is WebRtcFrameLimitError | RoundSetLimitError {
+  return (
+    error instanceof WebRtcFrameLimitError ||
+    error instanceof RoundSetLimitError
+  );
 }
 
 /**

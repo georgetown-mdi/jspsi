@@ -29,6 +29,7 @@ export {
   causeChainSome,
   chainDetailCauses,
   isPeerWaitTimeout,
+  isSetTooLargeError,
 } from "./errors";
 export { PSIParticipant, ProcessState } from "./psi/participant";
 export type {

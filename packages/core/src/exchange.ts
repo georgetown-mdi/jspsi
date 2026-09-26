@@ -97,10 +97,12 @@ import {
   causeChainSome,
 } from "./errors.js";
 import { MAX_WEBRTC_FRAME_BYTES } from "./connection/binaryPackBounds.js";
+import { AEAD_ENVELOPE_OVERHEAD_BYTES } from "./connection/encryptedMessageConnection.js";
 import { MESSAGE_HEADER_BYTES } from "./connection/fileSyncFraming.js";
 import {
   minimumPsiSetFrameBytes,
   PSI_ENCODED_ELEMENT_BYTES,
+  PSI_SET_MAX_FRAMING_BYTES,
   ROUND_ONE_SET_UNCOUNTED_MESSAGE,
   roundOneSetTooLargeMessage,
   webrtcFrameExceedsBound,
@@ -1413,7 +1415,9 @@ export function prepareForExchange(
  * refuses on a count over the bound in both roles, and on any failure to
  * count, with the failure as the refusal's cause. A {@link UsageError} the
  * round would raise in one role is left to the round when the other role
- * fits. Every later round, and a frame this bound cannot size from a count,
+ * fits; raised in both, it is thrown as it is, except that the count passing
+ * the round's distinct-value bound raises this refusal with its message.
+ * Every later round, and a frame this bound cannot size from a count,
  * is checked on the frame the round builds (`PSIParticipant`). Where the
  * round reads one candidate per record, a record holding a candidate set
  * raises the round's own fan-out refusal rather than this one. A single-pass
@@ -1438,6 +1442,8 @@ export function assertFirstRoundFitsWebRtcFrame(
         roundOneSetTooLargeMessage(fewest, maxFrameBytes),
         "local",
       ),
+    tooManyDistinct: (refusal) =>
+      new WebRtcFrameLimitError(refusal.message, refusal.setOwner),
     uncounted: (failure) =>
       new WebRtcFrameLimitError(ROUND_ONE_SET_UNCOUNTED_MESSAGE, "local", {
         cause: failure,
@@ -1447,16 +1453,18 @@ export function assertFirstRoundFitsWebRtcFrame(
 
 /**
  * The most values one PSI set in an SFTP or synced-folder message file can
- * hold under a frame bound of `maxFrameBytes`: the file's envelope header plus
- * {@link PSI_ENCODED_ELEMENT_BYTES} per value, the fewest bytes a set of that
- * many values takes.
+ * hold under a frame bound of `maxFrameBytes`, so that the file stays within
+ * the bound whichever first-round message holds the set.
  */
 export function fileSyncMaxRoundSetValues(
   maxFrameBytes: number = MAX_FRAME_SIZE_BYTES,
 ): number {
-  return Math.floor(
-    (maxFrameBytes - MESSAGE_HEADER_BYTES) / PSI_ENCODED_ELEMENT_BYTES,
-  );
+  // File header 10 + AEAD envelope 30 + setup framing 6, then 35 per value.
+  const perFileBytes =
+    MESSAGE_HEADER_BYTES +
+    AEAD_ENVELOPE_OVERHEAD_BYTES +
+    PSI_SET_MAX_FRAMING_BYTES;
+  return Math.floor((maxFrameBytes - perFileBytes) / PSI_ENCODED_ELEMENT_BYTES);
 }
 
 const SPLIT_INPUT_REMEDY =
@@ -1507,6 +1515,7 @@ export function assertFirstRoundFitsFileSyncFrame(
       new RoundSetLimitError(
         fileSyncRoundOneSetTooLargeMessage(fewest, maxValues),
       ),
+    tooManyDistinct: (refusal) => refusal,
     uncounted: (failure) =>
       new RoundSetLimitError(
         "This party could not count the values the first linkage key gives " +
@@ -1519,13 +1528,15 @@ export function assertFirstRoundFitsFileSyncFrame(
 
 // The first-round count both channel checks above share. `exceeds` is the
 // channel's bound on a set of that many values, `tooLarge` its refusal on the
-// fewest values the round sends in either role, `uncounted` its refusal when
-// the count fails for a reason other than a refusal of the round's own.
+// fewest values the round sends in either role, `tooManyDistinct` its refusal
+// when the count passes the round's distinct-value bound, which the round
+// itself would refuse, `uncounted` its refusal when the count fails otherwise.
 function assertFirstRoundFits(
   prepared: PreparedExchange,
   bound: {
     exceeds: (elementCount: number) => boolean;
     tooLarge: (fewest: number) => Error;
+    tooManyDistinct: (refusal: RoundSetLimitError) => Error;
     uncounted: (failure: unknown) => Error;
   },
 ): void {
@@ -1576,8 +1587,12 @@ function assertFirstRoundFits(
   if (!refusedInRole(asSender)) return;
   const asReceiver = roundSetSize(true);
   if (!refusedInRole(asReceiver)) return;
-  if (typeof asSender !== "number") throw asSender;
-  if (typeof asReceiver !== "number") throw asReceiver;
+  const refusal = (roundRefusal: UsageError): Error =>
+    roundRefusal instanceof RoundSetLimitError
+      ? bound.tooManyDistinct(roundRefusal)
+      : roundRefusal;
+  if (typeof asSender !== "number") throw refusal(asSender);
+  if (typeof asReceiver !== "number") throw refusal(asReceiver);
   throw bound.tooLarge(Math.min(asSender, asReceiver));
 }
 

@@ -10,7 +10,7 @@
  * value except the record's own local `expires`.
  */
 
-import { WebRtcFrameLimitError, sanitizeErrorForDisplay } from "@alcove/core";
+import { isSetTooLargeError, sanitizeErrorForDisplay } from "@alcove/core";
 
 import {
   CONSENT_FAILURE_TITLE,
@@ -376,8 +376,7 @@ function recordedTooLargeFailure(
  * first-round count could not be taken and why, so it is the state's whole
  * message. The titles are the one-shot seats' own for the same refusal. */
 function tooLargeFailure(error: unknown): ManagedRunFailureAlert {
-  if (!(error instanceof WebRtcFrameLimitError))
-    return recordedTooLargeFailure(undefined);
+  if (!isSetTooLargeError(error)) return recordedTooLargeFailure(undefined);
   return {
     ...recordedTooLargeFailure(error.setOwner),
     message: sanitizeErrorForDisplay(error),

@@ -553,7 +553,7 @@ test("rejects before opening a connection when keyFilePath is whitespace-only", 
 });
 
 test("a first round too large for one message file is refused before any file is written", async () => {
-  // 301 values held once each, checked against a bound of 300 values' file,
+  // 301 values held once each, checked against a bound under 300 values' file,
   // stand in for one past the real bound: the check's arithmetic at that bound
   // is core's to pin, and what the dispatch decides is that the refusal comes
   // before the transport is built and exits 64.
@@ -596,7 +596,7 @@ test("a first round too large for one message file is refused before any file is
   expect(check).toHaveBeenCalledWith(prepared);
   expect(error).toBeInstanceOf(RoundSetLimitError);
   expect((error as Error).message).toMatch(
-    /at least 301 values to send, over the 300 one message file holds/,
+    /at least 301 values to send, over the \d+ one message file holds/,
   );
   expect(exitCodeForError(error)).toBe(64);
   expect(fs.readdirSync(dropDir)).toEqual([]);

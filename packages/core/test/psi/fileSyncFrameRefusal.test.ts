@@ -1,8 +1,22 @@
 import { expect, test } from "vitest";
 
-import { MESSAGE_HEADER_BYTES } from "../../src/connection/fileSyncFraming";
+import PSI from "@openmined/psi.js";
+
+import {
+  AEAD_ENVELOPE_OVERHEAD_BYTES,
+  EncryptedMessageConnection,
+} from "../../src/connection/encryptedMessageConnection";
+import {
+  MESSAGE_HEADER_BYTES,
+  MESSAGE_TYPE_BINARY,
+  serializeFileSyncMessage,
+} from "../../src/connection/fileSyncFraming";
 import { MAX_FRAME_SIZE_BYTES } from "../../src/connection/frameSize";
-import { PSI_ENCODED_ELEMENT_BYTES } from "../../src/connection/webrtcOutboundBound";
+import { createMessagePipe } from "../../src/connection/messageConnection";
+import {
+  PSI_ENCODED_ELEMENT_BYTES,
+  PSI_SET_MAX_FRAMING_BYTES,
+} from "../../src/connection/webrtcOutboundBound";
 import { RoundSetLimitError, UsageError } from "../../src/errors";
 import {
   assertFirstRoundFitsFileSyncFrame,
@@ -14,6 +28,7 @@ import {
   MAX_ROUND_DISTINCT_VALUES,
   roundDistinctValueLimitRefusal,
 } from "../../src/psi/link";
+import { serializeRequest, serializeSetup } from "../../src/psi/psiChunks";
 import { sanitizeErrorForDisplay } from "../../src/utils/sanitizeErrorForDisplay";
 import { DISPLAY_TRUNCATION_MARKER } from "../../src/utils/sanitizeForDisplay";
 import {
@@ -65,18 +80,52 @@ function preparedWith(
   );
 }
 
+// The most bytes a first-round message file of `values` values takes.
 const boundFor = (values: number) =>
-  MESSAGE_HEADER_BYTES + values * PSI_ENCODED_ELEMENT_BYTES;
+  MESSAGE_HEADER_BYTES +
+  AEAD_ENVELOPE_OVERHEAD_BYTES +
+  PSI_SET_MAX_FRAMING_BYTES +
+  values * PSI_ENCODED_ELEMENT_BYTES;
 
 test("the real bound holds fewer values than one round's deduplication", () => {
-  expect(fileSyncMaxRoundSetValues()).toBe(
-    Math.floor(
-      (MAX_FRAME_SIZE_BYTES - MESSAGE_HEADER_BYTES) / PSI_ENCODED_ELEMENT_BYTES,
-    ),
-  );
-  expect(fileSyncMaxRoundSetValues()).toBeLessThan(MAX_ROUND_DISTINCT_VALUES);
+  const ceiling = fileSyncMaxRoundSetValues();
+  expect(ceiling).toBe(15_339_166);
+  expect(boundFor(ceiling)).toBeLessThanOrEqual(MAX_FRAME_SIZE_BYTES);
+  expect(boundFor(ceiling + 1)).toBeGreaterThan(MAX_FRAME_SIZE_BYTES);
+  expect(ceiling).toBeLessThan(MAX_ROUND_DISTINCT_VALUES);
   expect(fileSyncMaxRoundSetValues(boundFor(300))).toBe(300);
   expect(fileSyncMaxRoundSetValues(boundFor(300) - 1)).toBe(299);
+});
+
+const psiLibrary = await PSI();
+
+/** The message file the encrypting connection writes for `payload`. */
+async function encryptedMessageFile(payload: Uint8Array): Promise<Buffer> {
+  const [local, peer] = createMessagePipe();
+  const sender = await EncryptedMessageConnection.create(
+    local,
+    new Uint8Array(32).fill(0x42),
+    "initiator",
+  );
+  await sender.send(payload);
+  const envelope = (await peer.receive()) as Uint8Array;
+  return serializeFileSyncMessage(MESSAGE_TYPE_BINARY, 1, envelope);
+}
+
+test("a first-round file at the ceiling fits the frame bound the check applies", async () => {
+  const values = 300;
+  const bound = boundFor(values);
+  expect(fileSyncMaxRoundSetValues(bound)).toBe(values);
+  const elements = Array.from({ length: values }, () =>
+    new Uint8Array(PSI_ENCODED_ELEMENT_BYTES - 2).fill(7),
+  );
+  for (const message of [
+    serializeSetup(psiLibrary, elements),
+    serializeRequest(psiLibrary, elements, true),
+  ]) {
+    const file = await encryptedMessageFile(message);
+    expect(file.length).toBeLessThanOrEqual(bound);
+  }
 });
 
 test("the check refuses one value over the bound and admits one under and at it", () => {
