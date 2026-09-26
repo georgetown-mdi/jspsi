@@ -1429,11 +1429,14 @@ test("applyEndpointSplitDirectories: grafts a split sftp endpoint onto the URL c
     inboundPath: "/exchange/inviter-in",
     outboundPath: "/exchange/inviter-out",
   };
-  const { connection, appliedSplitDirectories } = applyEndpointSplitDirectories(
+  const { connection, endpointDirectories } = applyEndpointSplitDirectories(
     urlConnection,
     endpoint,
   );
-  expect(appliedSplitDirectories).toBe(true);
+  expect(endpointDirectories).toEqual({
+    inboundPath: "/exchange/inviter-out",
+    outboundPath: "/exchange/inviter-in",
+  });
   if (connection.channel !== "sftp") throw new Error("expected sftp");
   // Host/port/credentials are the URL's, never the endpoint's.
   expect(connection.server.host).toBe("reach-host");
@@ -1457,11 +1460,14 @@ test("applyEndpointSplitDirectories: grafts a split filedrop endpoint onto a fil
     inboundPath: "/mnt/share/from-inviter",
     outboundPath: "/mnt/share/to-inviter",
   };
-  const { connection, appliedSplitDirectories } = applyEndpointSplitDirectories(
+  const { connection, endpointDirectories } = applyEndpointSplitDirectories(
     urlConnection,
     endpoint,
   );
-  expect(appliedSplitDirectories).toBe(true);
+  expect(endpointDirectories).toEqual({
+    inboundPath: "/mnt/share/to-inviter",
+    outboundPath: "/mnt/share/from-inviter",
+  });
   if (connection.channel !== "filedrop") throw new Error("expected filedrop");
   expect(connection.inboundPath).toBe("/mnt/share/to-inviter");
   expect(connection.outboundPath).toBe("/mnt/share/from-inviter");
@@ -1493,11 +1499,11 @@ test("applyEndpointSplitDirectories: a non-split endpoint is a no-op", () => {
     host: "inviter-host",
     path: "/inviter/drop",
   };
-  const { connection, appliedSplitDirectories } = applyEndpointSplitDirectories(
+  const { connection, endpointDirectories } = applyEndpointSplitDirectories(
     urlConnection,
     endpoint,
   );
-  expect(appliedSplitDirectories).toBe(false);
+  expect(endpointDirectories).toBeUndefined();
   expect(connection).toBe(urlConnection);
 });
 
@@ -1511,9 +1517,11 @@ test.each([
   "applyEndpointSplitDirectories: %s leaves the URL connection unchanged",
   (_label, endpoint) => {
     const urlConnection = connectionFromURL(new URL("sftp://host/drop"), {});
-    const { connection, appliedSplitDirectories } =
-      applyEndpointSplitDirectories(urlConnection, endpoint);
-    expect(appliedSplitDirectories).toBe(false);
+    const { connection, endpointDirectories } = applyEndpointSplitDirectories(
+      urlConnection,
+      endpoint,
+    );
+    expect(endpointDirectories).toBeUndefined();
     expect(connection).toBe(urlConnection);
   },
 );
@@ -1533,11 +1541,14 @@ test("applyEndpointSplitDirectories: a channel-mismatched endpoint places the ro
     inboundPath: "/mnt/inviter-in",
     outboundPath: "/mnt/inviter-out",
   };
-  const { connection, appliedSplitDirectories } = applyEndpointSplitDirectories(
+  const { connection, endpointDirectories } = applyEndpointSplitDirectories(
     urlConnection,
     endpoint,
   );
-  expect(appliedSplitDirectories).toBe(true);
+  expect(endpointDirectories).toEqual({
+    inboundPath: "/mnt/inviter-out",
+    outboundPath: "/mnt/inviter-in",
+  });
   expect(connection.channel).toBe("sftp");
   if (connection.channel !== "sftp") return;
   expect(connection.server.host).toBe("reach-host");

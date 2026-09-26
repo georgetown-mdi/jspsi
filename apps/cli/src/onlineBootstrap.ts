@@ -274,13 +274,16 @@ function splitDirectoriesOf(connection: ConnectionConfig): {
 
 /**
  * Result of {@link applyEndpointSplitDirectories}: the connection the online
- * accept will use, and whether an invitation endpoint's split pair supplied its
- * directory roles (so the caller can note the seeding before the prompt).
+ * accept will use, and the directory pair an invitation endpoint's split form
+ * supplied to it, so the caller can name both directories before consent.
  */
 export interface EndpointSplitMerge {
   connection: RunnableConnectionConfig;
-  /** True when a split endpoint seeded the inbound/outbound roles. */
-  appliedSplitDirectories: boolean;
+  /**
+   * The mirror-swapped pair placed on `connection`, from this party's side;
+   * absent when the endpoint supplied none.
+   */
+  endpointDirectories?: { inboundPath: string; outboundPath: string };
 }
 
 /**
@@ -297,7 +300,7 @@ export interface EndpointSplitMerge {
  * URL's. URL-derived `options` are preserved, with the retain trio merged on
  * top. Skipped when `--outbound-path` was passed (that explicit override wins).
  *
- * A no-op (`appliedSplitDirectories: false`) with no endpoint, a webrtc
+ * A no-op (no `endpointDirectories`) with no endpoint, a webrtc
  * endpoint, or a single shared `path` rather than a split pair.
  *
  * @internal exported for testing
@@ -310,7 +313,7 @@ export function applyEndpointSplitDirectories(
   // answers false for it too) so the endpoint stays narrowed for the delegation
   // below; the shape test itself is the predicate's alone.
   if (endpoint === undefined || !endpointRequiresRetainedFiles(endpoint))
-    return { connection: urlConnection, appliedSplitDirectories: false };
+    return { connection: urlConnection };
 
   // connectionFromEndpoint performs the one mirror swap; take only its swapped
   // directory pair (the inviter's host/placeholder credentials it also seeds are
@@ -318,6 +321,11 @@ export function applyEndpointSplitDirectories(
   const { inboundPath, outboundPath } = splitDirectoriesOf(
     connectionFromEndpoint(endpoint).connection,
   );
+  if (inboundPath === undefined || outboundPath === undefined)
+    throw new UsageError(
+      "the invitation's connection endpoint names only one of the inbound and " +
+        "outbound directories; ask your partner for a new invitation",
+    );
 
   const result = structuredClone(urlConnection);
   // Retain mode (with the lockless rendezvous + timestamped names it implies) is
@@ -350,7 +358,10 @@ export function applyEndpointSplitDirectories(
       validation.error.issues.map((i) => i.message).join("; "),
     );
 
-  return { connection: result, appliedSplitDirectories: true };
+  return {
+    connection: result,
+    endpointDirectories: { inboundPath, outboundPath },
+  };
 }
 
 // --- connection -> endpoint (producer) --------------------------------------

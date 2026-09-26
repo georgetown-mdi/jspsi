@@ -270,6 +270,66 @@ function logAcceptanceRunsExchange(
 }
 
 /**
+ * The inbound and outbound directories an online acceptance takes from the
+ * invitation's endpoint in place of the path its own URL names, from this
+ * party's side: inbound is where the partner's files are read from, outbound
+ * where this party's files are written.
+ */
+export interface EndpointExchangeDirectories {
+  inboundPath: string;
+  outboundPath: string;
+}
+
+/**
+ * The two directory lines, each a fixed first-party label and then the
+ * partner-supplied path escaped at this sink. Printed at the head of the
+ * surface and again beneath the repeated decision block, so the paths are
+ * on screen when the question is asked.
+ */
+function logEndpointDirectoryLines(
+  emit: ConsentSurfaceSink,
+  directories: EndpointExchangeDirectories,
+): void {
+  emit(
+    "  inbound directory, where you read your partner's files: " +
+      `${redactAndSanitizeForDisplay(directories.inboundPath)}`,
+  );
+  emit(
+    "  outbound directory, where you write your files: " +
+      `${redactAndSanitizeForDisplay(directories.outboundPath)}`,
+  );
+}
+
+/**
+ * States that this acceptance runs the exchange in directories the
+ * invitation names rather than the path the operator typed, names both,
+ * and says what confirming does with them: the run reads and writes
+ * exchange files there, and the configuration records them for later
+ * exchanges.
+ */
+function logEndpointDirectories(
+  emit: ConsentSurfaceSink,
+  directories: EndpointExchangeDirectories,
+  promptFollows: boolean,
+): void {
+  emit(
+    "This acceptance runs the exchange in the two directories this " +
+      "invitation names, in place of the path in your URL:",
+  );
+  logEndpointDirectoryLines(emit, directories);
+  emit(
+    promptFollows
+      ? "  Confirming reads and writes the exchange files in these directories " +
+          "and records them in your configuration for later exchanges. To use " +
+          "your own directories, decline and run again with --outbound-path."
+      : "  This run reads and writes the exchange files in these directories " +
+          "and records them in your configuration for later exchanges; " +
+          "--consent-to-terms recorded that consent in advance. To use your " +
+          "own directories, run again with --outbound-path.",
+  );
+}
+
+/**
  * The heading above the repeated decision block on the prompting path, where the
  * question this block is answered against comes next.
  */
@@ -452,12 +512,19 @@ function displayLinkageKey(
  * regular expression, never paraphrased as a vetted allow-list -- a
  * crafted class (a leading `^` negation, a shorthand or bracket breakout)
  * admits a different set than it displays as. Its caveat is emitted once,
- * for the whole list.
+ * for the whole list, ahead of the first class it qualifies, so no class
+ * is read before the note that it is unverified.
  */
 function displayLinkageFields(
   emit: ConsentSurfaceSink,
   summary: InvitationSummary,
 ): void {
+  if (summary.linkageFields.some((f) => f.allowedCharacters !== undefined)) {
+    emit(
+      `  ${marked("allowed-character patterns", "allowedCharacterPatterns")}:`,
+    );
+    emit(`    ${CONSENT_FACTS.allowedCharacterPatterns.note}`);
+  }
   emit(`  ${marked("personal data used", "personalDataCategories")}:`);
   for (const field of summary.linkageFields) {
     emit(`    - ${field.label}`);
@@ -469,12 +536,6 @@ function displayLinkageFields(
       `      ${marked("declared data standards", "declaredDataStandards")}:`,
     );
     logList(emit, "        ", standards);
-  }
-  if (summary.linkageFields.some((f) => f.allowedCharacters !== undefined)) {
-    emit(
-      `  ${marked("allowed-character patterns", "allowedCharacterPatterns")}:`,
-    );
-    emit(`    ${CONSENT_FACTS.allowedCharacterPatterns.note}`);
   }
 }
 
@@ -669,6 +730,10 @@ export function logDecisionFacts(
  * `runsExchangeThrough` is the coordination server a self-conducting
  * acceptance will dial, present on that path alone
  * ({@link logAcceptanceRunsExchange}).
+ *
+ * `endpointDirectories` is the directory pair an online acceptance takes
+ * from the invitation's endpoint, present only when it does
+ * ({@link logEndpointDirectories}).
  */
 export function displayInvitation(params: {
   token: Parameters<typeof summarizeInvitation>[0];
@@ -676,6 +741,7 @@ export function displayInvitation(params: {
   emit: ConsentSurfaceSink;
   promptFollows: boolean;
   runsExchangeThrough?: DialedBrokerHostAndPort;
+  endpointDirectories?: EndpointExchangeDirectories;
   surface?: ConsentSurfaceKind;
 }): void {
   const {
@@ -684,11 +750,14 @@ export function displayInvitation(params: {
     emit,
     promptFollows,
     runsExchangeThrough,
+    endpointDirectories,
     surface = "invitation",
   } = params;
   const summary = summarizeInvitation(token);
   if (runsExchangeThrough !== undefined)
     logAcceptanceRunsExchange(emit, runsExchangeThrough, promptFollows);
+  if (endpointDirectories !== undefined)
+    logEndpointDirectories(emit, endpointDirectories, promptFollows);
   emit(SURFACE_HEADINGS[surface].details);
   logDecisionFacts(emit, summary, ownOutboundSend);
   // The retain fact's shared caveat, once, directly under the block's own
@@ -970,4 +1039,6 @@ export function displayInvitation(params: {
       : REPEATED_FACTS_HEADING_UNATTENDED,
   );
   logDecisionFacts(emit, summary, ownOutboundSend);
+  if (endpointDirectories !== undefined)
+    logEndpointDirectoryLines(emit, endpointDirectories);
 }

@@ -265,6 +265,12 @@ type AcceptReady = {
       output?: string;
       token: InvitationToken;
       connection: RunnableConnectionConfig;
+      /**
+       * The inbound and outbound directories the invitation's endpoint put on
+       * `connection` in place of the URL's path, named on the consent surface
+       * because the run uses them and the configuration records them.
+       */
+      endpointDirectories?: { inboundPath: string; outboundPath: string };
       dataSpec: ResolvedDataSpec;
       prepared: PreparedExchange;
     }
@@ -458,18 +464,11 @@ export async function validateAccept(params: {
     // online counterpart to the offline path's connectionFromEndpoint. Host,
     // port, and credentials stay the URL's. A non-split (or absent) endpoint is a
     // no-op, leaving the URL connection unchanged.
-    const { connection: seededConnection, appliedSplitDirectories } =
+    const { connection: seededConnection, endpointDirectories } =
       options.outboundPath === undefined
         ? applyEndpointSplitDirectories(urlConnection, token.connectionEndpoint)
-        : { connection: urlConnection, appliedSplitDirectories: false };
+        : { connection: urlConnection, endpointDirectories: undefined };
     const connection = withWebRTCPeerRole(seededConnection, "acceptor");
-    if (appliedSplitDirectories)
-      log.info(
-        "seeding the split inbound/outbound directories (mirror-swapped) and " +
-          "retain mode from the invitation's endpoint; the connection URL " +
-          "supplies the host, port, and credentials. Pass --outbound-path to " +
-          "override.",
-      );
     // Only on this online path -- the offline path reports --polling-frequency
     // ignored (see below). connectionFromURL has already rejected a webrtc URL,
     // so `connection` is a file-sync channel here and the channel gate always
@@ -575,6 +574,7 @@ export async function validateAccept(params: {
       token,
       accepted,
       connection,
+      ...(endpointDirectories !== undefined ? { endpointDirectories } : {}),
       dataSpec,
       prepared,
       reuseExistingConfig,
@@ -1147,6 +1147,8 @@ export async function handler(argv: Arguments): Promise<void> {
       // acceptance that writes a configuration and stops dials nothing.
       const runsExchangeThrough =
         ready.mode === "endpointRun" ? ready.brokerAuthority : undefined;
+      const endpointDirectories =
+        ready.mode === "online" ? ready.endpointDirectories : undefined;
       // Rendered through a sink that knows whether the prompt below will run: when
       // it will, the terms reach the terminal it asks on even when the operator
       // routed diagnostics to a --log-file or above info, so consent is never asked
@@ -1163,6 +1165,7 @@ export async function handler(argv: Arguments): Promise<void> {
         emit: consentSurface,
         promptFollows: !consentToTerms,
         runsExchangeThrough,
+        endpointDirectories,
       });
       // With --consent-to-terms, skip the prompt and proceed on the recorded
       // advance consent. Log the bypass so an unattended run's own log shows the
@@ -1176,15 +1179,21 @@ export async function handler(argv: Arguments): Promise<void> {
         confirmed = true;
       } else {
         // The question names what answering yes does. Where this acceptance runs
-        // the exchange it also states the coordination server, escaped at this
-        // sink as it is at the display's: the terms run past a screen, so the
-        // locator stated above them has scrolled away by the time the question
-        // arrives, and this is the line that has not.
+        // the exchange through the invitation's coordination server it also
+        // states that server, escaped at this sink as it is at the display's:
+        // the terms run past a screen, so the locator stated above them has
+        // scrolled away by the time the question arrives, and this is the line
+        // that has not.
         confirmed = await promptConfirm(
           runsExchangeThrough !== undefined
             ? "Accept this invitation and run the exchange now, through " +
                 `${renderDialedBroker(runsExchangeThrough)}?`
-            : "Accept this invitation and write configuration?",
+            : ready.mode === "online"
+              ? endpointDirectories !== undefined
+                ? "Accept this invitation and run the exchange now, in the " +
+                  "directories named above?"
+                : "Accept this invitation and run the exchange now?"
+              : "Accept this invitation and write configuration?",
         );
       }
       if (!confirmed) {
