@@ -16,6 +16,7 @@ import {
   describeResolvedMatching,
   describeResolvedRunShape,
   authenticateConnection,
+  assertFirstRoundFitsFileSyncFrame,
   assertFirstRoundFitsWebRtcFrame,
   assertSharedSecretReadyForHandshake,
   ConnectionError,
@@ -1706,6 +1707,9 @@ async function prepareTransport(
     if (runRelayCredential !== undefined)
       log.info(relayCredentialNotice(connection, runRelayCredential));
   } else {
+    // A first round too large for one message file is refused here, before
+    // the transport is built and before any file is written for the partner.
+    assertFirstRoundFitsFileSyncFrame(prepared);
     const client =
       connection.channel === "filedrop"
         ? new LocalFSClient()
