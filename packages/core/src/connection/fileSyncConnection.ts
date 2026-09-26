@@ -28,6 +28,7 @@ import { cancellableDelay } from "./fileSyncConstants";
 import { ackMarkerName } from "./fileSyncNames";
 export { isAbortMarkerName, isExpectedAbortName } from "./fileSyncNames";
 import { FileSyncMessageLoop } from "./fileSyncMessageLoop";
+import { MAX_FRAME_SIZE_BYTES } from "./frameSize";
 import type { PresentedHostKey } from "./sftpConnect";
 import { AbortMarkerSubsystem } from "./abortMarker";
 import { SftpSession } from "./sftpSession";
@@ -600,6 +601,11 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
   /** Implements `Connection.inboundPollIntervalMs`. */
   inboundPollIntervalMs(): number {
     return this.options.pollingFrequency;
+  }
+
+  /** Implements `Connection.outboundFileSyncFrameBound`. */
+  outboundFileSyncFrameBound(): number {
+    return MAX_FRAME_SIZE_BYTES;
   }
 
   // The last message this party sent, owned by the message loop; close()'s

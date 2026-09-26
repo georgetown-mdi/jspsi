@@ -17,6 +17,7 @@ import {
   cancellableDelay,
 } from "../../src/connection/fileSyncConstants";
 import type { FileTransportClient } from "../../src/connection/fileSyncConnection";
+import { EncryptedMessageConnection } from "../../src/connection/encryptedMessageConnection";
 import type {
   SFTPConnectionConfig,
   FileDropConnectionConfig,
@@ -1321,6 +1322,20 @@ test("the bridged connection reports the configured poll interval", async () => 
     options: { pollIntervalMs: 60_000 },
   });
   expect(fromEventConnection(conn).inboundPollIntervalMs?.()).toBe(60_000);
+});
+
+test("the encrypted bridged connection states the message-file bound the partner's read gate applies", async () => {
+  const { client } = makeMockClient();
+  const conn = new FileSyncConnection(client, { verbose: -1 });
+  const bridged = fromEventConnection(conn);
+  const encrypted = await EncryptedMessageConnection.create(
+    bridged,
+    new Uint8Array(32).fill(0x42) as Uint8Array<ArrayBuffer>,
+    "initiator",
+  );
+  expect(bridged.outboundFileSyncFrameBound?.()).toBe(MAX_FRAME_SIZE_BYTES);
+  expect(encrypted.outboundFileSyncFrameBound()).toBe(MAX_FRAME_SIZE_BYTES);
+  expect(encrypted.outboundWebRtcFrameBound()).toBeUndefined();
 });
 
 test("open defers default timeToLive computation until connect resolves", async () => {

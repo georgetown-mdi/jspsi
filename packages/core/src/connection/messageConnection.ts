@@ -129,6 +129,14 @@ export interface MessageConnection {
    */
   outboundWebRtcFrameBound?(): number | undefined;
   /**
+   * Optional: the message-file bound the partner's file-sync read gate
+   * applies, or `undefined` for a transport with no such bound. A sender
+   * checks the file a frame it built would take against it before sending, so
+   * a set the partner would refuse on receipt is refused here, with nothing
+   * written. See docs/spec/FILE_SYNC.md ("Round set size limits").
+   */
+  outboundFileSyncFrameBound?(): number | undefined;
+  /**
    * Optional: the bytes this connection adds around each binary frame before
    * the transport under it packs the frame (an encryption envelope), or 0 when
    * absent. A sender checking a frame against
@@ -221,6 +229,12 @@ interface TransportHooks {
    * such bound omits it.
    */
   outboundWebRtcFrameBound?: () => number;
+  /**
+   * Optional: the partner's message-file bound (see
+   * {@link MessageConnection.outboundFileSyncFrameBound}); a transport with no
+   * such bound omits it.
+   */
+  outboundFileSyncFrameBound?: () => number;
 }
 
 type TransportConnect = (controls: TransportControls) => TransportHooks;
@@ -668,6 +682,10 @@ export class QueuedMessageConnection implements MessageConnection {
   outboundWebRtcFrameBound(): number | undefined {
     return this.hooks.outboundWebRtcFrameBound?.();
   }
+
+  outboundFileSyncFrameBound(): number | undefined {
+    return this.hooks.outboundFileSyncFrameBound?.();
+  }
 }
 
 /**
@@ -725,6 +743,7 @@ export function fromEventConnection(
         // method keeps its receiver when invoked through the hook.
         setInboundFrameCap: conn.setInboundFrameCap?.bind(conn),
         inboundPollIntervalMs: conn.inboundPollIntervalMs?.bind(conn),
+        outboundFileSyncFrameBound: conn.outboundFileSyncFrameBound?.bind(conn),
       };
     },
     {
