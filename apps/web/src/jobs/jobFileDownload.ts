@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import fsp from "node:fs/promises";
 
-import { JOB_RESPONSE_HEADERS } from "./gate";
+import { JOB_RESPONSE_HEADERS, jobEmptyResponse } from "./gate";
 
 /** What a job artifact is served as: its media type and download name. */
 export interface JobFileDownload {
@@ -16,20 +16,27 @@ export interface JobFileDownload {
  * read whole: nosniff, no-store, and the given type and download name.
  *
  * The path must be one the caller composed inside the job's workdir, never one
- * derived from client input. Rejects, before any response exists, when the file
- * cannot be opened or is not a regular file; the caller decides what that is.
+ * derived from client input. A file that cannot be opened or is not a regular
+ * file is the empty 404, since the workdir can be removed after the caller's own
+ * existence check.
  */
 export async function jobFileDownloadResponse(
   filePath: string,
   download: JobFileDownload,
 ): Promise<Response> {
-  const handle = await fsp.open(filePath, "r");
+  let handle: fsp.FileHandle;
   try {
-    if (!(await handle.stat()).isFile())
-      throw new Error("the job file is not a regular file");
-  } catch (error) {
+    handle = await fsp.open(filePath, "r");
+  } catch {
+    return jobEmptyResponse(404);
+  }
+  const isFile = await handle.stat().then(
+    (stats) => stats.isFile(),
+    () => false,
+  );
+  if (!isFile) {
     await handle.close();
-    throw error;
+    return jobEmptyResponse(404);
   }
   const body = Readable.toWeb(
     handle.createReadStream(),

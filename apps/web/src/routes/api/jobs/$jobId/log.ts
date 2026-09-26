@@ -43,14 +43,10 @@ export const Route = createFileRoute("/api/jobs/$jobId/log")({
         if (view.logPath === null) return jobEmptyResponse(404);
         if (!jobFileExists(view.logPath)) return jobEmptyResponse(404);
 
-        try {
-          return await jobFileDownloadResponse(view.logPath, {
-            contentType: "text/plain; charset=utf-8",
-            fileName: `alcove-run-${view.id}.log`,
-          });
-        } catch {
-          return jobEmptyResponse(404);
-        }
+        return jobFileDownloadResponse(view.logPath, {
+          contentType: "text/plain; charset=utf-8",
+          fileName: `alcove-run-${view.id}.log`,
+        });
       },
     },
   },

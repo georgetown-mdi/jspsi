@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -20,6 +21,7 @@ import { Route as EventsRoute } from "../../../src/routes/api/jobs/$jobId/events
 import { Route as JobRoute } from "../../../src/routes/api/jobs/$jobId/index";
 import { Route as KeysRoute } from "../../../src/routes/api/jobs/$jobId/keys";
 import { Route as LogRoute } from "../../../src/routes/api/jobs/$jobId/log";
+import { Route as ReceiptRoute } from "../../../src/routes/api/jobs/$jobId/receipt";
 import { Route as RecordRoute } from "../../../src/routes/api/jobs/$jobId/record";
 import { Route as RendezvousRoute } from "../../../src/routes/api/jobs/rendezvous";
 import { Route as ResultRoute } from "../../../src/routes/api/jobs/$jobId/result";
@@ -971,6 +973,55 @@ describe("the result, record and keys downloads stream a file larger than one re
         "x-content-type-options": "nosniff",
       });
       await response.body!.cancel();
+    }
+  });
+});
+
+describe("a download whose file is removed after the route's existence check is 404", () => {
+  test("result, record, keys and receipt each answer the empty 404", async () => {
+    const id = await createSucceededJob(
+      {
+        STUB_OUTPUT_FILE: "id\n1\n",
+        STUB_RECORD_JSON: recordJson("2026-07-08T14:32:00.000Z"),
+      },
+      validIntent({
+        signing: {
+          mode: "certificate",
+          partnerFingerprint: `${"C".repeat(42)}A`,
+        },
+      }),
+    );
+    const view = (
+      globalThis as { jobManagerInstance?: JobManagerType }
+    ).jobManagerInstance!.getJobView(id)!;
+    fs.writeFileSync(view.receiptPath!, JSON.stringify({ version: 1 }));
+    const cases = [
+      { route: ResultRoute, name: "result", filePath: view.outputPath },
+      { route: RecordRoute, name: "record", filePath: view.recordPath },
+      { route: KeysRoute, name: "keys", filePath: view.keysPath },
+      { route: ReceiptRoute, name: "receipt", filePath: view.receiptPath! },
+    ];
+    const open = fsp.open.bind(fsp);
+    for (const { route, name, filePath } of cases) {
+      // Record and keys are available only as a pair, so each case removes its
+      // own file and puts it back for the next.
+      const contents = fs.readFileSync(filePath);
+      const removal = vi
+        .spyOn(fsp, "open")
+        .mockImplementationOnce(async (...args) => {
+          fs.rmSync(filePath);
+          return open(...args);
+        });
+      const response = (await handlersOf(route).GET({
+        request: jobRequest(`http://localhost/api/jobs/${id}/${name}`),
+        params: { jobId: id },
+      })) as Response;
+      expect(removal, name).toHaveBeenCalledOnce();
+      expect(response.status, name).toBe(404);
+      expect(await response.text(), name).toBe("");
+      expect(response.headers.get("cache-control"), name).toBe("no-store");
+      removal.mockRestore();
+      fs.writeFileSync(filePath, contents);
     }
   });
 });
