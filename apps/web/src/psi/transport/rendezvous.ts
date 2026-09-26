@@ -23,6 +23,7 @@ import {
   resolvePeerDebugLevel,
 } from "./peerLogging";
 import { watchIceGathering, withIceServerFailure } from "./iceGathering";
+import { boundPeerSignaling } from "./signalingBounds";
 
 import type { DataConnection, PeerOptions } from "peerjs";
 import type { WebRTCEndpoint } from "@alcove/core";
@@ -36,7 +37,15 @@ const config = await configManager.load();
  * register/dial/destroy paths are unit-testable without a real broker. */
 type PeerFactory = (id: string, options: PeerOptions) => Peer;
 
-const defaultPeerFactory: PeerFactory = (id, options) => new Peer(id, options);
+const defaultPeerFactory: PeerFactory = (id, options) => {
+  const peer = new Peer(id, options);
+  try {
+    return boundPeerSignaling(peer);
+  } catch (err) {
+    peer.destroy();
+    throw err;
+  }
+};
 
 /**
  * The WebSocket heartbeat cadence the PeerJS client sends, pinned here rather
