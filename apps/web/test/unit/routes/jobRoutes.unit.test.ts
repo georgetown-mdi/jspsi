@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -20,6 +21,7 @@ import { Route as EventsRoute } from "../../../src/routes/api/jobs/$jobId/events
 import { Route as JobRoute } from "../../../src/routes/api/jobs/$jobId/index";
 import { Route as KeysRoute } from "../../../src/routes/api/jobs/$jobId/keys";
 import { Route as LogRoute } from "../../../src/routes/api/jobs/$jobId/log";
+import { Route as ReceiptRoute } from "../../../src/routes/api/jobs/$jobId/receipt";
 import { Route as RecordRoute } from "../../../src/routes/api/jobs/$jobId/record";
 import { Route as RendezvousRoute } from "../../../src/routes/api/jobs/rendezvous";
 import { Route as ResultRoute } from "../../../src/routes/api/jobs/$jobId/result";
@@ -31,6 +33,8 @@ import {
   STUB_CLI_PATH,
   TEST_HOST_KEY_FINGERPRINT,
   composedServer,
+  multiChunkText,
+  readBodyChunks,
   tempDataRoot,
   validInputFileIntent,
   validIntent,
@@ -777,12 +781,7 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
       { STUB_OUTPUT_FILE: "id\n1\n" },
       { ...validIntent(), diagnosticRun: true },
     );
-    const lines = Array.from(
-      { length: 20_000 },
-      (_, index) => `[2026-08-22] [DEBUG] line ${index} of the run\n`,
-    );
-    const log = lines.join("");
-    expect(log.length).toBeGreaterThan(256 * 1024);
+    const log = multiChunkText("[2026-08-22] [DEBUG]");
     seedLog(id, log);
 
     const response = (await handlersOf(LogRoute).GET({
@@ -790,15 +789,30 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
       params: { jobId: id },
     })) as Response;
     expect(response.status).toBe(200);
-    const reader = response.body!.getReader();
-    const chunks: Array<Uint8Array> = [];
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
+    const chunks = await readBodyChunks(response);
     expect(chunks.length).toBeGreaterThan(1);
     expect(Buffer.concat(chunks).toString("utf8")).toBe(log);
+  });
+
+  test("the log download sends exactly its type, file name, nosniff and no-store", async () => {
+    const id = await createSucceededJob(
+      { STUB_OUTPUT_FILE: "id\n1\n" },
+      { ...validIntent(), diagnosticRun: true },
+    );
+    seedLog(id, "[2026-08-22] [DEBUG] rendezvous opened\n");
+
+    const response = (await handlersOf(LogRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/log`),
+      params: { jobId: id },
+    })) as Response;
+    expect(response.status).toBe(200);
+    expect(Object.fromEntries(response.headers.entries())).toEqual({
+      "cache-control": "no-store",
+      "content-disposition": `attachment; filename="alcove-run-${id}.log"`,
+      "content-type": "text/plain; charset=utf-8",
+      "x-content-type-options": "nosniff",
+    });
+    await response.body!.cancel();
   });
 
   /** The status body's two log fields, as a client watching for the log reads
@@ -881,6 +895,216 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
       params: { jobId },
     })) as Response;
     expect(response.status).toBe(404);
+  });
+});
+
+describe("the result, record and keys downloads stream a file larger than one read", () => {
+  /** Overwrite the file at `filePath` once the job has settled, since a body
+   * this size is past what one environment variable can pass to the stub. */
+  function replaceWith(filePath: string, body: string): string {
+    fs.writeFileSync(filePath, body);
+    return body;
+  }
+
+  async function download(
+    route: typeof ResultRoute | typeof RecordRoute | typeof KeysRoute,
+    id: string,
+    name: string,
+  ): Promise<Response> {
+    return (await handlersOf(route).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/${name}`),
+      params: { jobId: id },
+    })) as Response;
+  }
+
+  test("each route serves the whole file across several chunks, in order", async () => {
+    const id = await createSucceededJob({
+      STUB_OUTPUT_FILE: "id\n1\n",
+      STUB_RECORD_JSON: recordJson("2026-07-08T14:32:00.000Z"),
+    });
+    const view = (
+      globalThis as { jobManagerInstance?: JobManagerType }
+    ).jobManagerInstance!.getJobView(id)!;
+    const cases = [
+      {
+        route: ResultRoute,
+        name: "result",
+        body: replaceWith(view.outputPath, `id\n${multiChunkText("row")}`),
+      },
+      {
+        route: RecordRoute,
+        name: "record",
+        body: replaceWith(
+          view.recordPath,
+          JSON.stringify({
+            ...JSON.parse(recordJson("2026-07-08T14:32:00.000Z")),
+            summary: multiChunkText("record"),
+          }),
+        ),
+      },
+      {
+        route: KeysRoute,
+        name: "keys",
+        body: replaceWith(
+          view.keysPath,
+          JSON.stringify({ salts: { note: multiChunkText("keys") } }),
+        ),
+      },
+    ];
+    for (const { route, name, body } of cases) {
+      const response = await download(route, id, name);
+      expect(response.status, name).toBe(200);
+      const chunks = await readBodyChunks(response);
+      expect(chunks.length, name).toBeGreaterThan(1);
+      expect(Buffer.concat(chunks).toString("utf8"), name).toBe(body);
+    }
+  });
+
+  test("the headers are unchanged by streaming", async () => {
+    const id = await createSucceededJob({
+      STUB_OUTPUT_FILE: "id\n1\n",
+      STUB_RECORD_JSON: recordJson("2026-07-08T14:32:00.000Z"),
+    });
+    const expected = {
+      result: {
+        route: ResultRoute,
+        contentType: "text/csv; charset=utf-8",
+        disposition: `attachment; filename="result-${id}.csv"`,
+      },
+      record: {
+        route: RecordRoute,
+        contentType: "application/json; charset=utf-8",
+        disposition: 'attachment; filename="alcove-record.json"',
+      },
+      keys: {
+        route: KeysRoute,
+        contentType: "application/json; charset=utf-8",
+        disposition: 'attachment; filename="alcove-record.keys.json"',
+      },
+    };
+    for (const [name, { route, contentType, disposition }] of Object.entries(
+      expected,
+    )) {
+      const response = await download(route, id, name);
+      expect(response.status, name).toBe(200);
+      expect(Object.fromEntries(response.headers.entries()), name).toEqual({
+        "cache-control": "no-store",
+        "content-disposition": disposition,
+        "content-type": contentType,
+        "x-content-type-options": "nosniff",
+      });
+      await response.body!.cancel();
+    }
+  });
+});
+
+describe("a download whose file is removed after the route's existence check is 404", () => {
+  test("result, record, keys and receipt each answer the empty 404", async () => {
+    const id = await createSucceededJob(
+      {
+        STUB_OUTPUT_FILE: "id\n1\n",
+        STUB_RECORD_JSON: recordJson("2026-07-08T14:32:00.000Z"),
+      },
+      validIntent({
+        signing: {
+          mode: "certificate",
+          partnerFingerprint: `${"C".repeat(42)}A`,
+        },
+      }),
+    );
+    const view = (
+      globalThis as { jobManagerInstance?: JobManagerType }
+    ).jobManagerInstance!.getJobView(id)!;
+    fs.writeFileSync(view.receiptPath!, JSON.stringify({ version: 1 }));
+    const cases = [
+      { route: ResultRoute, name: "result", filePath: view.outputPath },
+      { route: RecordRoute, name: "record", filePath: view.recordPath },
+      { route: KeysRoute, name: "keys", filePath: view.keysPath },
+      { route: ReceiptRoute, name: "receipt", filePath: view.receiptPath! },
+    ];
+    const open = fsp.open.bind(fsp);
+    for (const { route, name, filePath } of cases) {
+      // Record and keys are available only as a pair, so each case removes its
+      // own file and puts it back for the next.
+      const contents = fs.readFileSync(filePath);
+      const removal = vi
+        .spyOn(fsp, "open")
+        .mockImplementationOnce(async (...args) => {
+          fs.rmSync(filePath);
+          return open(...args);
+        });
+      const response = (await handlersOf(route).GET({
+        request: jobRequest(`http://localhost/api/jobs/${id}/${name}`),
+        params: { jobId: id },
+      })) as Response;
+      expect(removal, name).toHaveBeenCalledOnce();
+      expect(response.status, name).toBe(404);
+      expect(await response.text(), name).toBe("");
+      expect(response.headers.get("cache-control"), name).toBe("no-store");
+      removal.mockRestore();
+      fs.writeFileSync(filePath, contents);
+    }
+  });
+});
+
+describe("a download closes the file it streams", () => {
+  /** Spy on the next `fsp.open`, wrapping the real handle's `close` so the
+   * test sees every call while the file still closes. */
+  function spyOnNextClose(): { close: () => ReturnType<typeof vi.fn> } {
+    const open = fsp.open.bind(fsp);
+    let close: ReturnType<typeof vi.fn> | undefined;
+    vi.spyOn(fsp, "open").mockImplementationOnce(async (...args) => {
+      const handle = await open(...args);
+      const realClose = handle.close.bind(handle);
+      close = vi.fn(realClose);
+      handle.close = close as typeof handle.close;
+      return handle;
+    });
+    return {
+      close: () => {
+        if (close === undefined) throw new Error("fsp.open was not called");
+        return close;
+      },
+    };
+  }
+
+  async function downloadLog(): Promise<{ id: string; response: Response }> {
+    const id = await createSucceededJob(
+      { STUB_OUTPUT_FILE: "id\n1\n" },
+      { ...validIntent(), diagnosticRun: true },
+    );
+    fs.writeFileSync(
+      (
+        globalThis as { jobManagerInstance?: JobManagerType }
+      ).jobManagerInstance!.getJobView(id)!.logPath!,
+      multiChunkText("[2026-08-22] [DEBUG]"),
+    );
+    const response = (await handlersOf(LogRoute).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/log`),
+      params: { jobId: id },
+    })) as Response;
+    expect(response.status).toBe(200);
+    return { id, response };
+  }
+
+  test("a download cancelled mid-stream closes its file handle", async () => {
+    const spy = spyOnNextClose();
+    const { response } = await downloadLog();
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    await reader.cancel();
+    await vi.waitFor(() => expect(spy.close()).toHaveBeenCalledOnce());
+  });
+
+  test("a download read to the end closes its file handle once", async () => {
+    const spy = spyOnNextClose();
+    const { response } = await downloadLog();
+    const chunks = await readBodyChunks(response);
+    expect(chunks.length).toBeGreaterThan(1);
+    await vi.waitFor(() => expect(spy.close()).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(spy.close()).toHaveBeenCalledOnce();
   });
 });
 

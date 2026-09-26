@@ -27,6 +27,8 @@ import { Route as ReceiptRoute } from "../../../src/routes/api/jobs/$jobId/recei
 
 import {
   STUB_CLI_PATH,
+  multiChunkText,
+  readBodyChunks,
   tempDataRoot,
   validIntent,
   validZeroSetupIntent,
@@ -608,6 +610,39 @@ describe("GET /api/jobs/:jobId/receipt serves only a workdir-contained receipt",
       version: 1,
       summary: "test",
     });
+  });
+
+  test("a receipt larger than one read is streamed across several chunks and arrives intact", async () => {
+    const { manager, id } = await createSettledJob();
+    const receipt = JSON.stringify({
+      version: 1,
+      summary: multiChunkText("receipt"),
+    });
+    seedReceipt(manager, id, receipt);
+
+    const response = await getReceipt(id);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe(
+      'attachment; filename="alcove-receipt.json"',
+    );
+    const chunks = await readBodyChunks(response);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(Buffer.concat(chunks).toString("utf8")).toBe(receipt);
+  });
+
+  test("the receipt download sends exactly its type, file name, nosniff and no-store", async () => {
+    const { manager, id } = await createSettledJob();
+    seedReceipt(manager, id, RECEIPT_JSON);
+
+    const response = await getReceipt(id);
+    expect(response.status).toBe(200);
+    expect(Object.fromEntries(response.headers.entries())).toEqual({
+      "cache-control": "no-store",
+      "content-disposition": 'attachment; filename="alcove-receipt.json"',
+      "content-type": "application/json; charset=utf-8",
+      "x-content-type-options": "nosniff",
+    });
+    await response.body!.cancel();
   });
 
   test("a run that did NOT succeed still serves its receipt", async () => {
