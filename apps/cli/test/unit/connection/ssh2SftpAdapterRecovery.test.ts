@@ -311,6 +311,48 @@ describe("session recovery", () => {
     }
   });
 
+  test("below the cap, a fan torn by one drop runs one re-dial round", async () => {
+    // With units left in the budget, the siblings behind a failed round are not
+    // refused by the budget, so this holds the other half of "one lost session
+    // buys one round": each fails with the loss it had and dials nothing.
+    vi.useFakeTimers();
+    const { client, connect, state } = undialableAfterFirst();
+    const adapter = new SSH2SFTPClientAdapter();
+    captureAdapterLog(adapter);
+    installClient(adapter, client);
+
+    try {
+      await adapter.connect({ host: "h", maxReconnectAttempts: 3 });
+      state.live = false;
+
+      const arms = Promise.all(
+        ["a", "b", "c", "d"].map((name) =>
+          adapter.list(`/remote/${name}`).catch((e: unknown) => e),
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(30_000);
+      const outcomes = await arms;
+
+      expect(outcomes.every((o) => o instanceof Error)).toBe(true);
+      expect(outcomes.some((o) => o instanceof UsageError)).toBe(false);
+      const refusedDial = outcomes.filter((o) =>
+        (o as Error).message.includes("connection refused"),
+      );
+      expect(refusedDial).toHaveLength(1);
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+      // The initial dial plus the one round's first attempt and three re-attempts.
+      expect(connect).toHaveBeenCalledTimes(5);
+
+      const next = adapter.list("/remote/e").catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await next).toBeInstanceOf(Error);
+      expect(connect).toHaveBeenCalledTimes(5);
+      expect(adapter.midExchangeReconnectCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("fails immediately on a host-key mismatch during the recovery re-dial", async () => {
     // A host-key mismatch on the re-dial is terminal for free via connect()'s
     // existing "Host denied" retry predicate: it must not spend the reconnect

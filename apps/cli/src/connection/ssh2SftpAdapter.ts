@@ -233,7 +233,11 @@ type BoundedTeardownOutcome =
 // still owes the ssh2 Client a lifecycle event -- the one window this adapter
 // must never dial into (see SSH2SFTPClientAdapter.retireTransportForRedial).
 type RecoveryRedialOutcome =
-  "sessionLive" | "noSession" | "deadSessionHeld" | "unretiredTransport";
+  | "sessionLive"
+  | "noSession"
+  | "deadSessionHeld"
+  | "unretiredTransport"
+  | "recoveryRoundSpent";
 
 // Whether the transport the last dial established can be left behind for the
 // recovery re-dial to dial over. `retired` is the only state a dial may follow;
@@ -446,6 +450,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   private readonly ledger = new SftpAdapterLedger({
     warn: (message: string) => this.log.warn(message),
   });
+  // The generation whose partner-side loss a recovery re-dial last charged. One
+  // lost session buys one re-dial round, so a sibling arm torn by the same drop,
+  // reaching the re-dial after that round failed, is refused rather than running
+  // a round of its own.
+  private recoveryRoundGeneration: number | undefined;
   // The per-operation liveness bound (ms) every server-driven op is held to. See
   // the constructor's stallDeadlineMs doc for the test-override and
   // not-operator-configurable rationale.
@@ -1166,11 +1175,16 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       }
       // The re-dial could not retire the transport it had to dial past -- either a
       // session still held over an ended one, or one still owing its 'close' (it
-      // warned, naming what broke). Nothing was dialed and there is nothing to
-      // re-issue onto, so the operation fails with the loss it already had, which
-      // names the drop and its remedies rather than a dial this adapter refused to
-      // make.
-      if (redial === "deadSessionHeld" || redial === "unretiredTransport")
+      // warned, naming what broke) -- or another arm already ran this loss's one
+      // re-dial round without re-establishing it. Nothing was dialed and there is
+      // nothing to re-issue onto, so the operation fails with the loss it already
+      // had, which names the drop and its remedies rather than a dial this adapter
+      // refused to make.
+      if (
+        redial === "deadSessionHeld" ||
+        redial === "unretiredTransport" ||
+        redial === "recoveryRoundSpent"
+      )
         throw error;
       // A re-dial that DECLINED -- it gave up its wait for the transition ahead of
       // it -- established nothing; the re-issue below still runs and rejects with
@@ -1322,7 +1336,10 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         // partner, save during a teardown whose re-dial (the abort-marker write or
         // the terminal-frame drain) is teardown mechanics rather than a survived
         // drop and is exempt from the counters, the cap and the warning.
+        const lostGeneration = this.ledger.liveGeneration;
         const charged = this.chargeRecoveredSessionLoss();
+        if (charged) this.recoveryRoundGeneration = lostGeneration;
+        else if (this.recoveryRoundAlreadyRan()) return "recoveryRoundSpent";
         const dialed = await this.connectRecoveredSession(held, internals);
         // Reported to the operator only once the re-dial has actually landed, and
         // only by the arm that charged the loss: a fan of arms over one drop would
@@ -1358,6 +1375,19 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
         this.operativeMaxReconnectAttempts(),
       );
     return charged && cause === "partner";
+  }
+
+  // Whether the session this arm lost is one whose re-dial round another arm
+  // already ran and did not re-establish: no dial has landed since, and the last
+  // generation established is the one that round was charged for. A teardown's
+  // re-dial is exempt, as it is from the budget.
+  private recoveryRoundAlreadyRan(): boolean {
+    return (
+      !this.session.isTearingDown &&
+      this.ledger.liveGeneration === undefined &&
+      this.recoveryRoundGeneration !== undefined &&
+      this.recoveryRoundGeneration === this.ledger.accounting.generations
+    );
   }
 
   // The dial half of the re-dial, once its loss has been charged: retire the
