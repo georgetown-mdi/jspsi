@@ -1393,6 +1393,7 @@ describe("console inviter re-attaches on a busy create", () => {
     keyFileBesideConfiguration: false,
     credentialPasted: false,
     usedSigningIdentity: false,
+    pathsAsRead: { credential: false, sharedDirectory: false, signing: false },
     template: {
       kind: "config",
       argv: ["alcove", "exchange", "input.csv", "results.csv"],
@@ -1766,6 +1767,7 @@ describe("console inviter recurring hand-off availability", () => {
     keyFileBesideConfiguration: false,
     credentialPasted: false,
     usedSigningIdentity: false,
+    pathsAsRead: { credential: false, sharedDirectory: false, signing: false },
     template: {
       kind: "config",
       argv: ["alcove", "exchange", "input.csv", "results.csv"],

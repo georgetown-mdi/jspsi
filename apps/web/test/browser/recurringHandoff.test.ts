@@ -26,6 +26,7 @@ const COMMAND_HANDOFF = {
   keyFileBesideConfiguration: false,
   credentialPasted: false,
   usedSigningIdentity: false,
+  pathsAsRead: { credential: false, sharedDirectory: false, signing: false },
   template: {
     kind: "command",
     argv: [
@@ -49,6 +50,7 @@ const SPACED_COMMAND_HANDOFF = {
   keyFileBesideConfiguration: false,
   credentialPasted: false,
   usedSigningIdentity: false,
+  pathsAsRead: { credential: false, sharedDirectory: false, signing: false },
   template: {
     kind: "command",
     argv: [
@@ -70,6 +72,7 @@ const CONFIG_HANDOFF = {
   keyFileBesideConfiguration: false,
   credentialPasted: false,
   usedSigningIdentity: false,
+  pathsAsRead: { credential: false, sharedDirectory: false, signing: false },
   template: {
     kind: "config",
     argv: ["alcove", "exchange", "input.csv", "results.csv"],

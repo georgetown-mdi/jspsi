@@ -4,8 +4,8 @@ import { Anchor } from "@mantine/core";
 
 import {
   fetchRecurringHandoff,
+  handoffCaveats,
   shellJoinCommand,
-  unsetSigningSettingsCaveat,
   windowsJoinCommand,
 } from "@psi/managed/recurringHandoff";
 
@@ -248,41 +248,15 @@ function CommandSteps({ command }: { command: string }) {
   );
 }
 
-/** The all-modes caveats, tailored to the channel, to a pasted credential, and
- * to a signing block missing a setting Alcove requires. */
+/** The all-modes caveats ({@link handoffCaveats}). */
 function Caveats({ handoff }: { handoff: JobHandoff }) {
   return (
     <>
       <h3 className={styles.handoffHeading}>Before you schedule it</h3>
       <ul className={styles.small}>
-        {handoff.signingSettingsToSet !== undefined && (
-          <li>{unsetSigningSettingsCaveat(handoff.signingSettingsToSet)}</li>
-        )}
-        {handoff.channel === "sftp" ? (
-          <li>
-            The connection details and host-key fingerprint are filled in, but
-            the credential path is a placeholder -- set it to the credential
-            file on the machine that runs the schedule.
-          </li>
-        ) : (
-          <li>
-            The shared-directory path is a placeholder -- set it to the synced
-            shared directory on the machine that runs the schedule.
-          </li>
-        )}
-        {handoff.credentialPasted && (
-          <li>
-            The SFTP credential you pasted into the console is not saved as a
-            file. Save it to a file on the scheduling machine and point the
-            credential path at that file.
-          </li>
-        )}
-        {handoff.channel === "sftp" && (
-          <li>
-            The host key is already pinned, so scheduled runs connect without a
-            prompt.
-          </li>
-        )}
+        {handoffCaveats(handoff).map((caveat) => (
+          <li key={caveat}>{caveat}</li>
+        ))}
       </ul>
     </>
   );

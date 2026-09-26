@@ -1121,6 +1121,7 @@ describe("console direct re-attaches on a busy create", () => {
     keyFileBesideConfiguration: false,
     credentialPasted: false,
     usedSigningIdentity: false,
+    pathsAsRead: { credential: false, sharedDirectory: false, signing: false },
     template: {
       kind: "command",
       argv: ["alcove", "exchange", "clients.csv", "results.csv"],

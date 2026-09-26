@@ -17,6 +17,7 @@ import {
   buildJobHandoff,
 } from "@jobs/handoff";
 import {
+  handoffCaveats,
   parseHandoff,
   shellJoinCommand,
   unsetSigningSettingsCaveat,
@@ -338,6 +339,11 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
     );
     expect(handoff.mode).toBe("zeroSetup");
     expect(handoff.usedKeyFile).toBe(false);
+    expect(handoff.pathsAsRead).toEqual({
+      credential: false,
+      sharedDirectory: false,
+      signing: false,
+    });
     expect(handoff.template.kind).toBe("command");
     const argv =
       handoff.template.kind === "command" ? handoff.template.argv : [];
@@ -442,6 +448,14 @@ describe("buildJobHandoff composes a portable, secret-free template", () => {
   });
 });
 
+/** The paths-as-read record of a hand-off that states every path as a
+ * placeholder. */
+const NO_PATHS_AS_READ = {
+  credential: false,
+  sharedDirectory: false,
+  signing: false,
+};
+
 describe("parseHandoff and shellJoinCommand (browser reader)", () => {
   test("a well-formed config hand-off round-trips", () => {
     const parsed = parseHandoff({
@@ -451,6 +465,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
       keyFileBesideConfiguration: false,
       credentialPasted: false,
       usedSigningIdentity: false,
+      pathsAsRead: NO_PATHS_AS_READ,
       template: {
         kind: "config",
         yaml: "connection:\n  channel: sftp\n",
@@ -528,6 +543,7 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
       keyFileBesideConfiguration: true,
       credentialPasted: false,
       usedSigningIdentity: false,
+      pathsAsRead: NO_PATHS_AS_READ,
       template: {
         kind: "config",
         yaml: "connection:\n  channel: filedrop\n",
@@ -552,6 +568,43 @@ describe("parseHandoff and shellJoinCommand (browser reader)", () => {
     ).toBeNull();
     expect(
       parseHandoff({ ...body, signingSettingsToSet: "linkage_terms.identity" }),
+    ).toBeNull();
+  });
+
+  test("the paths held as read round-trip, and anything else is a malformed body", () => {
+    const body = {
+      mode: "exchange",
+      channel: "sftp",
+      usedKeyFile: true,
+      keyFileBesideConfiguration: false,
+      credentialPasted: false,
+      usedSigningIdentity: false,
+      template: {
+        kind: "config",
+        yaml: "connection:\n  channel: sftp\n",
+        argv: ["alcove", "exchange", "input.csv", "results.csv"],
+      },
+    };
+    const asRead = { credential: true, sharedDirectory: false, signing: true };
+    expect(parseHandoff({ ...body, pathsAsRead: asRead })?.pathsAsRead).toEqual(
+      asRead,
+    );
+    // A body missing it would have the panel call the operator's own paths
+    // placeholders, or the reverse.
+    expect(parseHandoff(body)).toBeNull();
+    expect(parseHandoff({ ...body, pathsAsRead: true })).toBeNull();
+    expect(parseHandoff({ ...body, pathsAsRead: [] })).toBeNull();
+    expect(
+      parseHandoff({
+        ...body,
+        pathsAsRead: { credential: true, sharedDirectory: false },
+      }),
+    ).toBeNull();
+    expect(
+      parseHandoff({
+        ...body,
+        pathsAsRead: { ...asRead, signing: "yes" },
+      }),
     ).toBeNull();
   });
 
@@ -761,5 +814,114 @@ describe("GET /api/jobs/:jobId/handoff", () => {
     const argv =
       parsed?.template.kind === "command" ? parsed.template.argv : [];
     expect(argv).toContain(HANDOFF_SHARED_DIRECTORY_URL_PLACEHOLDER);
+  });
+});
+
+describe("handoffCaveats (the panel's before-you-schedule list)", () => {
+  /** A hand-off on `channel` whose paths are held as read per `pathsAsRead`. */
+  function handoffWith(
+    channel: "sftp" | "filedrop",
+    pathsAsRead: Partial<typeof NO_PATHS_AS_READ>,
+    credentialPasted = false,
+  ): Parameters<typeof handoffCaveats>[0] {
+    return {
+      mode: "exchange",
+      channel,
+      usedKeyFile: true,
+      keyFileBesideConfiguration: true,
+      credentialPasted,
+      usedSigningIdentity: false,
+      pathsAsRead: { ...NO_PATHS_AS_READ, ...pathsAsRead },
+      template: {
+        kind: "config",
+        yaml: "connection:\n",
+        argv: ["alcove", "exchange", "input.csv", "results.csv"],
+      },
+    };
+  }
+
+  test("a placeholder credential path is one to set", () => {
+    const caveats = handoffCaveats(handoffWith("sftp", {}));
+    expect(caveats).toContain(
+      "The connection details and host-key fingerprint are filled in, but " +
+        "the credential path is a placeholder -- set it to the credential " +
+        "file on the machine that runs the schedule.",
+    );
+    expect(caveats.join(" ")).not.toContain("configuration you opened");
+  });
+
+  test("a credential path held as read is the file's own to check", () => {
+    const caveats = handoffCaveats(handoffWith("sftp", { credential: true }));
+    expect(caveats).toContain(
+      "The connection details and host-key fingerprint are filled in, and " +
+        "the credential path is the one in the configuration you opened -- " +
+        "check that the file is at that path on the machine that runs the " +
+        "schedule.",
+    );
+    expect(caveats.join(" ")).not.toContain("placeholder");
+  });
+
+  test("a placeholder shared directory is one to set", () => {
+    expect(handoffCaveats(handoffWith("filedrop", {}))).toEqual([
+      "The shared-directory path is a placeholder -- set it to the synced " +
+        "shared directory on the machine that runs the schedule.",
+    ]);
+  });
+
+  test("a shared directory held as read is the file's own to check", () => {
+    expect(
+      handoffCaveats(handoffWith("filedrop", { sharedDirectory: true })),
+    ).toEqual([
+      "The shared-directory path is the one in the configuration you opened " +
+        "-- check that the synced shared directory is at that path on the " +
+        "machine that runs the schedule.",
+    ]);
+  });
+
+  test("signing paths held as read are named to check, and none otherwise", () => {
+    expect(
+      handoffCaveats(handoffWith("filedrop", { signing: true })),
+    ).toContain(
+      "The signing paths are the ones in the configuration you opened -- " +
+        "check that signing.identity_file and signing.receipt_output, where " +
+        "set, name the right locations on the machine that runs the schedule.",
+    );
+    expect(handoffCaveats(handoffWith("filedrop", {})).join(" ")).not.toContain(
+      "signing",
+    );
+  });
+
+  test("a pasted credential is saved to a file the credential path points at", () => {
+    expect(handoffCaveats(handoffWith("sftp", {}, true))).toContain(
+      "The SFTP credential you pasted into the console is not saved as a " +
+        "file. Save it to a file on the scheduling machine and point the " +
+        "credential path at that file.",
+    );
+  });
+
+  test("a pasted credential beside a path held as read is saved at that path", () => {
+    const caveats = handoffCaveats(
+      handoffWith("sftp", { credential: true }, true),
+    );
+    expect(caveats).toContain(
+      "The SFTP credential you pasted into the console is not saved as a " +
+        "file. Save it on the scheduling machine at the credential path the " +
+        "configuration names.",
+    );
+    expect(caveats.join(" ")).not.toContain("point the credential path");
+  });
+
+  test("the list leads with a missing signing setting and ends on the pin", () => {
+    const caveats = handoffCaveats({
+      ...handoffWith("sftp", {}),
+      signingSettingsToSet: ["signing.identity_file"],
+    });
+    expect(caveats[0]).toBe(
+      unsetSigningSettingsCaveat(["signing.identity_file"]),
+    );
+    expect(caveats.at(-1)).toBe(
+      "The host key is already pinned, so scheduled runs connect without a " +
+        "prompt.",
+    );
   });
 });
