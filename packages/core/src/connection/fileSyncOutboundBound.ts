@@ -15,8 +15,8 @@ import {
 
 /**
  * The most values one PSI set in an SFTP or synced-folder message file can
- * hold under a frame bound of `maxFrameBytes`, so that the file stays within
- * the bound whichever first-round message holds the set.
+ * hold under a frame bound of `maxFrameBytes`, whichever round's message
+ * holds the set.
  */
 export function fileSyncMaxRoundSetValues(
   maxFrameBytes: number = MAX_FRAME_SIZE_BYTES,
