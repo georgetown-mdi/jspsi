@@ -6,6 +6,7 @@ import { causeChainSome } from "../errors.js";
 import { partnerPinIsPresent } from "../config/signing.js";
 import { MAX_TEXT_LENGTH } from "../config/linkageTermsSchema.js";
 import { canonicalBytes } from "../utils/canonical.js";
+import { loneSurrogateIndex } from "../utils/wellFormedString.js";
 import {
   bytesEqual,
   fromBase64Url,
@@ -191,7 +192,9 @@ const boundedBase64UrlSchema = z
  * parse, before any fingerprint or signature work, rather than forcing
  * proportional allocation. The bounds mirror the on-disk record format's caps
  * (identity -> {@link MAX_TEXT_LENGTH}, every base64url field ->
- * {@link MAX_WIRE_BASE64URL_LENGTH}); this is the wire safety check the shared
+ * {@link MAX_WIRE_BASE64URL_LENGTH}). The identity must also be well-formed
+ * UTF-16, since the pin match and self-signature check canonically encode
+ * it; this is the wire safety check the shared
  * {@link SigningCertificateSchema} (used for operator-trusted on-disk
  * identities) leaves unbounded. Shape only -- it does NOT self-verify;
  * {@link verifyCertificateSelfSignature} and
@@ -203,7 +206,13 @@ export const boundedWireCertificateSchema: z.ZodType<SigningCertificate> =
   z.object({
     version: z.literal(SIGNING_CERTIFICATE_VERSION),
     algorithm: SigningAlgorithmSchema,
-    identity: z.string().min(1).check(maxCodeUnits(MAX_TEXT_LENGTH)),
+    identity: z
+      .string()
+      .min(1)
+      .check(maxCodeUnits(MAX_TEXT_LENGTH))
+      .refine((value) => loneSurrogateIndex(value) < 0, {
+        message: "must not contain an unpaired UTF-16 surrogate",
+      }),
     publicKey: z.object({
       kty: z.literal("EC"),
       crv: z.literal("P-256"),

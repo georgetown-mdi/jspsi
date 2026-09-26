@@ -414,62 +414,70 @@ describe("a certificate the wire format does not admit is refused at parse", () 
   // The field is parsed through the bounded wire certificate schema before any
   // fingerprint or signature work touches it, so an over-bound value is
   // rejected at the parse rather than driving allocation proportional to it.
-  const overBound = {
-    version: "alcove-signing-cert/v3",
-    algorithm: "ecdsa-p256-sha256",
-    identity: "x".repeat(MAX_TEXT_LENGTH + 1),
-    publicKey: identityB.certificate.publicKey,
-    signature: identityB.certificate.signature,
-  };
+  // Both seats hold a pin, so a value that parsed would reach the pin match.
+  const cases = [
+    ["an over-bound identity", "x".repeat(MAX_TEXT_LENGTH + 1)],
+    ["an identity with an unpaired surrogate", "Responder Co\ud800"],
+  ] as const;
 
-  for (const refusingRole of ["initiator", "responder"] as const) {
-    test(`the refusing ${refusingRole} discloses nothing and aborts`, async () => {
-      const partnerRole: HandshakeRole =
-        refusingRole === "initiator" ? "responder" : "initiator";
-      const [rawRefusing, rawPartner] = createMessagePipe();
-      const refusing = seat(refusingRole);
-      const partnerSeat = seat(partnerRole);
-      const refusingSide = recording(rawRefusing);
-      const partner = runExchange(
-        withTermsCertificate(rawPartner, overBound),
-        partnerRole,
-        prepared(partnerSeat.name, partnerSeat.rows),
-        {
-          psiLibrary,
-          signingIdentity: partnerSeat.identity,
-          partnerFingerprint: partnerSeat.partnerFingerprint,
-          sessionKey,
-        },
-      ).catch((reason: unknown) => reason);
-      const raised = await runExchange(
-        refusingSide.conn,
-        refusingRole,
-        prepared(refusing.name, refusing.rows),
-        {
-          psiLibrary,
-          signingIdentity: refusing.identity,
-          partnerFingerprint: refusing.partnerFingerprint,
-          sessionKey,
-        },
-      ).then(
-        () => {
-          throw new Error("expected the over-bound certificate to be refused");
-        },
-        (reason: unknown) => reason,
-      );
+  for (const [label, identity] of cases)
+    for (const refusingRole of ["initiator", "responder"] as const) {
+      const overBound = {
+        version: "alcove-signing-cert/v3",
+        algorithm: "ecdsa-p256-sha256",
+        identity,
+        publicKey: identityB.certificate.publicKey,
+        signature: identityB.certificate.signature,
+      };
+      test(`the refusing ${refusingRole} discloses nothing and aborts on ${label}`, async () => {
+        const partnerRole: HandshakeRole =
+          refusingRole === "initiator" ? "responder" : "initiator";
+        const [rawRefusing, rawPartner] = createMessagePipe();
+        const refusing = seat(refusingRole);
+        const partnerSeat = seat(partnerRole);
+        const refusingSide = recording(rawRefusing);
+        const partner = runExchange(
+          withTermsCertificate(rawPartner, overBound),
+          partnerRole,
+          prepared(partnerSeat.name, partnerSeat.rows),
+          {
+            psiLibrary,
+            signingIdentity: partnerSeat.identity,
+            partnerFingerprint: partnerSeat.partnerFingerprint,
+            sessionKey,
+          },
+        ).catch((reason: unknown) => reason);
+        const raised = await runExchange(
+          refusingSide.conn,
+          refusingRole,
+          prepared(refusing.name, refusing.rows),
+          {
+            psiLibrary,
+            signingIdentity: refusing.identity,
+            partnerFingerprint: refusing.partnerFingerprint,
+            sessionKey,
+          },
+        ).then(
+          () => {
+            throw new Error(
+              "expected the over-bound certificate to be refused",
+            );
+          },
+          (reason: unknown) => reason,
+        );
 
-      expect(raised).toBeInstanceOf(ReceiptVerificationError);
-      expect((raised as Error).message).toMatch(/this build cannot read/);
-      expect(disclosingFrames(refusingSide.sent)).toEqual([]);
-      expect(abortReasons(refusingSide.sent)).toEqual([
-        expect.stringMatching(/the wire format does not admit/),
-      ]);
+        expect(raised).toBeInstanceOf(ReceiptVerificationError);
+        expect((raised as Error).message).toMatch(/this build cannot read/);
+        expect(disclosingFrames(refusingSide.sent)).toEqual([]);
+        expect(abortReasons(refusingSide.sent)).toEqual([
+          expect.stringMatching(/the wire format does not admit/),
+        ]);
 
-      await rawRefusing.close();
-      await rawPartner.close();
-      await partner;
-    });
-  }
+        await rawRefusing.close();
+        await rawPartner.close();
+        await partner;
+      });
+    }
 });
 
 describe("a partner presenting no certificate is refused on either seat", () => {
