@@ -32,6 +32,7 @@ import { canonicalPartnerBoundTerms } from "@console/loadedConfig";
 
 import { EMPTY_SAVE_FIELDS } from "./saveExchangeModel";
 import { MANAGE_OFFER_IDLE } from "./manageOfferModel";
+import { restorableSection } from "./stepRestore";
 
 import type { AcceptKitExchange } from "./acceptKit";
 import type { ManageOfferState } from "./manageOfferModel";
@@ -462,6 +463,22 @@ const NO_FILE = {
   editor: undefined,
   demoActive: false,
 } as const;
+
+/** The section a browser Back or Forward naming `requested` settles on, read
+ * from the backing state `state` holds ({@link restorableSection}).
+ * `isCliTransport` is the screen's effective transport, which it derives from
+ * more than this state. */
+export function sectionToRestore(
+  state: InviterScreenState,
+  requested: Section,
+  isCliTransport: boolean,
+): Section {
+  return restorableSection(requested, {
+    hasFile: state.acquired !== undefined && state.editor !== undefined,
+    hasInvitation: state.invitation !== undefined,
+    isCliTransport,
+  });
+}
 
 /** Apply one action to the inviter console's state. */
 export function inviterScreenReducer(

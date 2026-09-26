@@ -151,6 +151,7 @@ import {
   INVITER_SPINE_ORDER,
   inviterScreenReducer,
   isInviterSpineStep,
+  sectionToRestore,
   unmatchableFileAlert,
 } from "./inviterScreenModel";
 import { acceptKitFileName, buildAcceptKit } from "./acceptKit";
@@ -184,7 +185,6 @@ import { ReviewCreateSection } from "./ReviewCreateSection";
 import { SaveExchangeSection } from "./SaveExchangeSection";
 import { TopBar } from "./TopBar";
 import { YourFileSection } from "./YourFileSection";
-import { restorableSection } from "./stepRestore";
 import { timelineSteps } from "./exchangeRun";
 import { useInviterExchange } from "./useInviterExchange";
 import { useStepHistory } from "./useStepHistory";
@@ -787,14 +787,16 @@ export function InviterScreen() {
   // without pushing a new history entry (the browser already moved the cursor).
   // The console stays mounted throughout, so the loaded file, the derived terms,
   // and every in-progress edit survive the transition untouched. A section whose
-  // backing state is gone (a `share` entry left behind by a start-over) clamps
-  // to a step that can still render; the settled section is returned so the hook
+  // backing state is gone (a `share` entry left behind by a start-over, a
+  // `review` entry after a delimiter change dropped the file) clamps to a step
+  // that can still render; the settled section is returned so the hook
   // rewrites the dead entry.
   function restoreSection(next: Section): Section {
-    const settled = restorableSection(next, {
-      hasInvitation: invitation !== undefined,
-      isCliTransport: isCliTransport(transport),
-    });
+    const settled = sectionToRestore(
+      screenState,
+      next,
+      isCliTransport(transport),
+    );
     dispatch({ type: "section-shown", section: settled });
     return settled;
   }

@@ -8,6 +8,7 @@ describe("restorableSection", () => {
   test("clamps share to review when the invitation is gone", () => {
     expect(
       restorableSection("share", {
+        hasFile: true,
         hasInvitation: false,
         isCliTransport: false,
       }),
@@ -17,6 +18,7 @@ describe("restorableSection", () => {
   test("keeps share when the invitation is still present", () => {
     expect(
       restorableSection("share", {
+        hasFile: true,
         hasInvitation: true,
         isCliTransport: false,
       }),
@@ -28,6 +30,7 @@ describe("restorableSection", () => {
   test("clamps save to review when the transport is not a CLI transport", () => {
     expect(
       restorableSection("save", {
+        hasFile: true,
         hasInvitation: false,
         isCliTransport: false,
       }),
@@ -36,7 +39,11 @@ describe("restorableSection", () => {
 
   test("keeps save under a CLI transport", () => {
     expect(
-      restorableSection("save", { hasInvitation: false, isCliTransport: true }),
+      restorableSection("save", {
+        hasFile: true,
+        hasInvitation: false,
+        isCliTransport: true,
+      }),
     ).toBe("save");
   });
 
@@ -44,10 +51,43 @@ describe("restorableSection", () => {
     for (const step of ["file", "columns", "review", "cleaning"] as const)
       expect(
         restorableSection(step, {
+          hasFile: true,
           hasInvitation: false,
           isCliTransport: false,
         }),
       ).toBe(step);
+  });
+
+  // A delimiter change under the columns drops the file and the draft, so every
+  // entry past the file step would render an empty work column.
+  test("clamps every section past file to file when no file is held", () => {
+    const sections = [
+      "columns",
+      "review",
+      "cleaning",
+      "keys",
+      "agreement",
+      "share",
+      "save",
+    ] as const;
+    for (const step of sections)
+      expect(
+        restorableSection(step, {
+          hasFile: false,
+          hasInvitation: true,
+          isCliTransport: true,
+        }),
+      ).toBe("file");
+  });
+
+  test("keeps file when no file is held", () => {
+    expect(
+      restorableSection("file", {
+        hasFile: false,
+        hasInvitation: false,
+        isCliTransport: false,
+      }),
+    ).toBe("file");
   });
 });
 
