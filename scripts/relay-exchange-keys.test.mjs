@@ -898,12 +898,29 @@ describe.skipIf(runningAsRoot)("import-legacy-mapping.sh", () => {
     expect(host.rows()).toEqual([listed(KEY_LISTED), listed(KEY_A)].sort());
   });
 
+  it("deletes the lock with a set-aside mapping the table accounts for", () => {
+    const host = fixtureHost();
+    host.register("old-1", KEY_A);
+    const setAside = legacyFile(
+      host,
+      "exchange-keys.imported",
+      `old-1 ${KEY_A}\n`,
+    );
+    const lock = legacyFile(host, "exchange-keys.lock", "");
+    const result = host.importLegacy(join(host.root, "exchange-keys"));
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(setAside)).toBe(false);
+    expect(existsSync(lock)).toBe(false);
+  });
+
   it("keeps a set-aside mapping naming a key the table lists unmapped", () => {
     const host = fixtureHost();
     const text = `old-9 ${KEY_LISTED}\n`;
     const setAside = legacyFile(host, "exchange-keys.imported", text);
+    const lock = legacyFile(host, "exchange-keys.lock", "");
     const result = host.importLegacy(join(host.root, "exchange-keys"));
     expect(result.status).toBe(4);
+    expect(existsSync(lock)).toBe(true);
     expect(result.stderr).toContain("(exchange id(s): old-9)");
     expect(readFileSync(setAside, "utf8")).toBe(text);
     expect(host.mapping()).toEqual([]);
@@ -984,42 +1001,34 @@ describe.skipIf(runningAsRoot)("import-legacy-mapping.sh", () => {
 
 describe("relay_table.py", () => {
   // The relay README states the module runs no container and so never puts a
-  // key on a command line. Python's own parser lists every import statement
-  // in the module, at any depth, and the set must be exactly the modules it
-  // uses today; of those only os can start a process, so the names read off
-  // os must be exactly the ones it uses today, and os must never be used
-  // other than by reading a name off it. The dynamic-import idioms (getattr
-  // on os, __import__, importlib) must not appear at all. Code built from a
-  // string and run through eval or exec is outside this check.
+  // key on a command line. This pins the module's static import surface:
+  // Python's own parser lists every import statement, at any depth, and the
+  // set must be exactly the modules it uses today; os, the one of them that
+  // can start a process, must be imported only as `import os`, with no alias
+  // and no `from os import`. The source must not hold getattr on os,
+  // __import__, or importlib. A process-starting name read off os by
+  // attribute, or code built from a string and run through eval or exec, is
+  // outside this check.
   it("imports only modules that start no process", () => {
     const path = join(relay, "relay_table.py");
     const imported = python(
       `import ast, json, sys
 tree = ast.parse(open(sys.argv[1], encoding="utf-8").read())
-modules, os_names, os_bare = set(), set(), 0
+modules, os_aliases, from_os = set(), [], []
 for node in ast.walk(tree):
     if isinstance(node, ast.Import):
-        modules.update(alias.name for alias in node.names)
+        for alias in node.names:
+            modules.add(alias.name)
+            if alias.name == "os" and alias.asname is not None:
+                os_aliases.append(alias.asname)
     elif isinstance(node, ast.ImportFrom):
-        modules.add("." * node.level + (node.module or ""))
-    elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "os":
-        os_names.add(node.attr)
-        os_bare -= 1
-    if isinstance(node, ast.Name) and node.id == "os":
-        os_bare += 1
-print(json.dumps({"modules": sorted(modules), "os": sorted(os_names), "osBare": os_bare}))`,
+        module = "." * node.level + (node.module or "")
+        modules.add(module)
+        if module == "os" or module.startswith("os."):
+            from_os.extend(alias.name for alias in node.names)
+print(json.dumps({"modules": sorted(modules), "osAliases": os_aliases, "fromOs": from_os}))`,
       [path],
     );
-    expect(imported.osBare).toBe(0);
-    expect(imported.os).toEqual([
-      "environ",
-      "geteuid",
-      "path",
-      "setgid",
-      "setgroups",
-      "setuid",
-      "stat",
-    ]);
     expect(imported.modules).toEqual([
       "datetime",
       "os",
@@ -1029,6 +1038,8 @@ print(json.dumps({"modules": sorted(modules), "os": sorted(os_names), "osBare": 
       "time",
       "urllib.parse",
     ]);
+    expect(imported.osAliases).toEqual([]);
+    expect(imported.fromOs).toEqual([]);
     const source = readFileSync(path, "utf8");
     expect(source).not.toMatch(/\bgetattr\s*\(\s*os\b/);
     expect(source).not.toMatch(/__import__|\bimportlib\b/);

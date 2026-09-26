@@ -80,5 +80,6 @@ if [ -f "$SET_ASIDE" ]; then
     exit 1
   fi
   printf 'deleted %s\n' "$SET_ASIDE"
+  rm -f "$(dirname "$SET_ASIDE")/exchange-keys.lock"
 fi
 exit 0

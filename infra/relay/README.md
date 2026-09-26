@@ -250,7 +250,8 @@ revoke-exchange.sh <exchange-id>
   once only: every later run checks `exchange-keys.imported` the same way,
   never imports it again, and deletes it once the table accounts for it, so
   an exchange revoked or swept since stays revoked, and a row removed from
-  the file is not carried in.
+  the file is not carried in. Deleting either file deletes
+  `exchange-keys.lock` beside it too; a kept or moved file keeps the lock.
 - **How they reach the table.** `relay_table.py`, on the host's own `python3`
   and its `sqlite3` module, opens `/var/lib/alcove-relay/turndb` as the relay
   image's account -- a script run as root drops to the account that owns the
@@ -387,9 +388,10 @@ run` command line reached the journal on every run, and a credential on
 `turnutils_uclient`'s did the same. Nothing here puts a key on a container's
 command line -- `relay_table.py` runs no container:
 `scripts/relay-exchange-keys.test.mjs` checks that its import statements name
-exactly the modules it uses today, that it reads only the names it uses today
-off `os`, and that it holds no dynamic import, though not code a string builds
-and `eval` runs -- and `verify.sh` passes
+exactly the modules it uses today, that it imports `os` only by that name and
+takes no name from it with `from os import`, and that it holds no `getattr` on
+`os`, `__import__`, or `importlib`, though not a name reached some other way
+off `os` or code a string builds and `eval` runs -- and `verify.sh` passes
 podman's global `--events-backend=none` to every `turnutils_uclient` run. A run
 by hand whose command line or output carries a key or a credential takes the
 same flags, `podman --events-backend=none run --log-driver=none ...`, which
