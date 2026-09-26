@@ -30,6 +30,7 @@ import {
 } from "@psi/managed/managedExchangeRecord";
 import {
   ManagedExchangeCustodyUnreadableError,
+  ManagedExchangeNotRunnableError,
   ManagedExchangeSpentError,
 } from "@psi/managed/managedExchangeRun";
 import {
@@ -456,6 +457,44 @@ describe("classifyManagedRunFailure: pre-connection benign states from the error
     expect(failure.message).toMatch(/could not read/i);
     expect(failure.message).toMatch(/nothing left this device/i);
     expect(failure.message).not.toMatch(/temporary connection problem/);
+  });
+
+  test("a run whose stored record is configuration-only names the record, not the note", () => {
+    const failure = classifyAgainstOneRecord(
+      new ManagedExchangeNotRunnableError(
+        "abc",
+        new Error("holds a configuration only"),
+      ),
+      record(),
+      undefined,
+      NOW,
+      false,
+    );
+    expect(failure.kind).toBe("custody-unreadable");
+    expect(managedRunRetryable(failure)).toBe(false);
+    expect(failure.message).toMatch(
+      /stored copy is no longer one this page can run/,
+    );
+    expect(failure.message).toMatch(/holds only a configuration/);
+    expect(failure.message).toMatch(
+      /reload the list and open the exchange again/i,
+    );
+    expect(failure.message).toMatch(/nothing left this device/i);
+    expect(failure.message).not.toMatch(/note it keeps/);
+  });
+
+  test("a stamped unreadable-custody record read back later covers both causes", () => {
+    const failure = managedRunFailureFromRecord(
+      record({ lastRun: failed("custody-unreadable") }),
+      undefined,
+      NOW,
+    );
+    expect(failure?.kind).toBe("custody-unreadable");
+    if (failure === undefined || failure.kind === "handed-off")
+      throw new Error("expected an alert");
+    expect(failure.message).toMatch(/stored copy/);
+    expect(failure.message).toMatch(/note it keeps/);
+    expect(failure.message).toMatch(/nothing left this device/i);
   });
 
   test("a linkage shortfall delivered past the data-exchange boundary takes the transport copy", () => {

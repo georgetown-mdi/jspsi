@@ -59,9 +59,10 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
  *   a completed handshake (recovery: the next window's automatic retry, or running the
  *   exchange again once the partner is ready).
  * - `"custody-unreadable"` -- the last run could not read the local entry recording
- *   whether this device's copy was handed off, and refused before reading the input
- *   or connecting (recovery: none here; nothing rotated and nothing desynced, and
- *   every later run refuses the same way while that entry cannot be read).
+ *   whether this device's copy was handed off, or found the stored record itself
+ *   gone, invalid, or holding a configuration only, and refused before reading the
+ *   input or connecting (recovery: none here; nothing rotated and nothing desynced,
+ *   and every later run refuses the same way while that reading stands).
  * - `"storage"` -- a rotation the last run could not persist (recovery: re-invite; a
  *   one-sided persist failure may have desynced the two parties).
  * - `"partial-rotation"` -- a key exchange began and did not save its rotated

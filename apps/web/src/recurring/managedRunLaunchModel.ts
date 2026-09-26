@@ -28,6 +28,7 @@ import {
 } from "@psi/managed/managedFailureCopy";
 import {
   ManagedExchangeExpiredError,
+  ManagedExchangeNotRunnableError,
   ManagedInputError,
   benignRerunOutcome,
 } from "@psi/managed/managedRun";
@@ -205,6 +206,40 @@ const CUSTODY_UNREADABLE_FAILURE: ManagedRunFailureAlert = {
     "this device, nothing here changed, and your partner was not contacted. A " +
     "run does not go ahead without that note, so running this exchange again " +
     "stops the same way until this browser can read it.",
+  recovery: "none",
+};
+
+/** The unreadable-custody state as a live launch reads it off a
+ * {@link ManagedExchangeNotRunnableError}: the stored record the run read
+ * inside the lock was gone, invalid, or held a configuration only, so the
+ * copy names the record rather than the hand-off note. Same kind, recovery and
+ * placement as {@link CUSTODY_UNREADABLE_FAILURE}. */
+const NOT_RUNNABLE_FAILURE: ManagedRunFailureAlert = {
+  kind: "custody-unreadable",
+  title: "This exchange's stored copy can no longer be run",
+  message:
+    "This exchange's stored copy is no longer one this page can run: it was " +
+    "deleted, replaced, or holds only a configuration. The run stopped before " +
+    "reading your file and before connecting. Nothing left this device, and " +
+    "your partner was not contacted. Reload the list and open the exchange " +
+    "again.",
+  recovery: "none",
+};
+
+/** The unreadable-custody state read back from a record's stamp at a later
+ * visit, which does not say whether the run met an unreadable hand-off note or
+ * a stored copy it could not run, so the copy covers both. */
+const RECORDED_CUSTODY_UNREADABLE_FAILURE: ManagedRunFailureAlert = {
+  kind: "custody-unreadable",
+  title: "Part of this exchange's stored copy could not be read",
+  message:
+    "The last run stopped before reading your file and before connecting, " +
+    "because this browser could not read either this exchange's stored copy " +
+    "or the note it keeps beside it recording whether the copy was handed " +
+    "off. Nothing left this device, nothing here changed, and your partner " +
+    "was not contacted. Reload the list and open the exchange again; if a " +
+    "run stops the same way, running it again will not help until this " +
+    "browser can read both.",
   recovery: "none",
 };
 
@@ -510,7 +545,7 @@ export function managedRunTierFailure(
     case "handed-off":
       return HANDED_OFF_FAILURE;
     case "custody-unreadable":
-      return CUSTODY_UNREADABLE_FAILURE;
+      return RECORDED_CUSTODY_UNREADABLE_FAILURE;
     case "storage":
       return STORAGE_FAILURE;
     case "partial-rotation":
@@ -808,7 +843,10 @@ function classifyLaunchState(
     return expiredFailure(error.expires);
   if (benign === "already-running") return ALREADY_RUNNING_FAILURE;
   if (benign === "handed-off") return HANDED_OFF_FAILURE;
-  if (benign === "custody-unreadable") return CUSTODY_UNREADABLE_FAILURE;
+  if (benign === "custody-unreadable")
+    return error instanceof ManagedExchangeNotRunnableError
+      ? NOT_RUNNABLE_FAILURE
+      : CUSTODY_UNREADABLE_FAILURE;
   if (benign === "input") return INPUT_FAILURE;
   if (benign === "terms-shortfall") return shortfallFailure(error);
   if (benign === "missed") return missedFailure(records.atLaunch, local, now);
