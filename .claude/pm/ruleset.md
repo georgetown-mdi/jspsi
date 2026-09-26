@@ -240,6 +240,10 @@ from the stored body, not from memory; preserve sections you were not asked to
 change. Setting a field (e.g. `--status "In Progress"`) is done only when
 explicitly asked.
 
+Recording a ruling on an item replaces its pending-decision line -- e.g. "do
+not start until the owner rules" -- with "Ruled <date>; see Ruling." and moves
+the item out of Decision status into whatever status the ruling calls for.
+
 All project-item reads and edits go through the scripts under `.claude/scripts/`;
 only `gh project item-create` is called directly. If `gh` is not installed or not
 authenticated, stop and say so (`brew install gh && gh auth login`) rather than

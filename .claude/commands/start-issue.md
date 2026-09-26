@@ -39,6 +39,10 @@ messages -- durable text is written for readers who cannot see the board. A
 guarantee the acceptance criteria demand is discharged in a test or a check,
 not narrated in a comment.
 
+An item whose body carries both a pending-decision line and a Ruling section
+is raised to the owner in one line before work starts, rather than read as
+settled or unsettled on your own call.
+
 ## Step 2 -- Choose a branch name
 
 Slugify the issue title to lowercase letters, digits, and hyphens (so it is a
