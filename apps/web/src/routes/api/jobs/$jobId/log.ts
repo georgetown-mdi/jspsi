@@ -1,10 +1,8 @@
-import { Readable } from "node:stream";
-import fsp from "node:fs/promises";
-
 import { createFileRoute } from "@tanstack/react-router";
 
-import { JOB_RESPONSE_HEADERS, jobEmptyResponse } from "@jobs/gate";
 import { gateJobRoute, validateJobIdParam } from "@jobs/routeSupport";
+import { jobEmptyResponse } from "@jobs/gate";
+import { jobFileDownloadResponse } from "@jobs/jobFileDownload";
 import { jobFileExists } from "@jobs/workdir";
 
 /**
@@ -45,24 +43,14 @@ export const Route = createFileRoute("/api/jobs/$jobId/log")({
         if (view.logPath === null) return jobEmptyResponse(404);
         if (!jobFileExists(view.logPath)) return jobEmptyResponse(404);
 
-        let log: fsp.FileHandle;
         try {
-          log = await fsp.open(view.logPath, "r");
+          return await jobFileDownloadResponse(view.logPath, {
+            contentType: "text/plain; charset=utf-8",
+            fileName: `alcove-run-${view.id}.log`,
+          });
         } catch {
           return jobEmptyResponse(404);
         }
-        const body = Readable.toWeb(
-          log.createReadStream(),
-        ) as ReadableStream<Uint8Array>;
-        return new Response(body, {
-          status: 200,
-          headers: {
-            "Content-Type": "text/plain; charset=utf-8",
-            "Content-Disposition": `attachment; filename="alcove-run-${view.id}.log"`,
-            "X-Content-Type-Options": "nosniff",
-            ...JOB_RESPONSE_HEADERS,
-          },
-        });
       },
     },
   },

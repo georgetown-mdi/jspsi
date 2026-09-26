@@ -1,9 +1,8 @@
-import fsp from "node:fs/promises";
-
 import { createFileRoute } from "@tanstack/react-router";
 
-import { JOB_RESPONSE_HEADERS, jobEmptyResponse } from "@jobs/gate";
 import { gateJobRoute, validateJobIdParam } from "@jobs/routeSupport";
+import { jobEmptyResponse } from "@jobs/gate";
+import { jobFileDownloadResponse } from "@jobs/jobFileDownload";
 import { resultFileExists } from "@jobs/workdir";
 
 /**
@@ -30,15 +29,9 @@ export const Route = createFileRoute("/api/jobs/$jobId/result")({
         if (view.status !== "succeeded") return jobEmptyResponse(404);
         if (!resultFileExists(view.outputPath)) return jobEmptyResponse(404);
 
-        const body = await fsp.readFile(view.outputPath);
-        return new Response(body, {
-          status: 200,
-          headers: {
-            "Content-Type": "text/csv; charset=utf-8",
-            "Content-Disposition": `attachment; filename="result-${view.id}.csv"`,
-            "X-Content-Type-Options": "nosniff",
-            ...JOB_RESPONSE_HEADERS,
-          },
+        return jobFileDownloadResponse(view.outputPath, {
+          contentType: "text/csv; charset=utf-8",
+          fileName: `result-${view.id}.csv`,
         });
       },
     },

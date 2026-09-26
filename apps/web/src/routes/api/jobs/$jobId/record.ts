@@ -1,9 +1,8 @@
-import fsp from "node:fs/promises";
-
 import { createFileRoute } from "@tanstack/react-router";
 
-import { JOB_RESPONSE_HEADERS, jobEmptyResponse } from "@jobs/gate";
 import { gateJobRoute, validateJobIdParam } from "@jobs/routeSupport";
+import { jobEmptyResponse } from "@jobs/gate";
+import { jobFileDownloadResponse } from "@jobs/jobFileDownload";
 
 /**
  * `GET /api/jobs/:jobId/record` -- serve the job's self-attested exchange record.
@@ -37,15 +36,9 @@ export const Route = createFileRoute("/api/jobs/$jobId/record")({
         if (view === null) return jobEmptyResponse(404);
         if (!view.recordAvailable) return jobEmptyResponse(404);
 
-        const body = await fsp.readFile(view.recordPath);
-        return new Response(body, {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            "Content-Disposition": 'attachment; filename="alcove-record.json"',
-            "X-Content-Type-Options": "nosniff",
-            ...JOB_RESPONSE_HEADERS,
-          },
+        return jobFileDownloadResponse(view.recordPath, {
+          contentType: "application/json; charset=utf-8",
+          fileName: "alcove-record.json",
         });
       },
     },

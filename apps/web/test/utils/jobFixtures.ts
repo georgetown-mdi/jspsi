@@ -156,6 +156,33 @@ export function tempDataRoot(label: string): string {
 }
 
 /**
+ * Text well past one file-stream read (64 KiB), made of distinct numbered lines
+ * so a dropped, repeated, or reordered chunk changes it.
+ */
+export function multiChunkText(linePrefix: string): string {
+  const text = Array.from(
+    { length: 20_000 },
+    (_, index) => `${linePrefix} line ${index} of the file\n`,
+  ).join("");
+  if (text.length <= 256 * 1024)
+    throw new Error("multiChunkText is not larger than several reads");
+  return text;
+}
+
+/** Read a response body chunk by chunk, as a download client receives it. */
+export async function readBodyChunks(
+  response: Response,
+): Promise<Array<Uint8Array>> {
+  const reader = response.body!.getReader();
+  const chunks: Array<Uint8Array> = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return chunks;
+    chunks.push(value);
+  }
+}
+
+/**
  * The composed alcove.yaml's `connection.server` block, read as data.
  *
  * Parsed rather than string-matched because the emitter folds a long scalar

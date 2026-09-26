@@ -31,6 +31,8 @@ import {
   STUB_CLI_PATH,
   TEST_HOST_KEY_FINGERPRINT,
   composedServer,
+  multiChunkText,
+  readBodyChunks,
   tempDataRoot,
   validInputFileIntent,
   validIntent,
@@ -777,12 +779,7 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
       { STUB_OUTPUT_FILE: "id\n1\n" },
       { ...validIntent(), diagnosticRun: true },
     );
-    const lines = Array.from(
-      { length: 20_000 },
-      (_, index) => `[2026-08-22] [DEBUG] line ${index} of the run\n`,
-    );
-    const log = lines.join("");
-    expect(log.length).toBeGreaterThan(256 * 1024);
+    const log = multiChunkText("[2026-08-22] [DEBUG]");
     seedLog(id, log);
 
     const response = (await handlersOf(LogRoute).GET({
@@ -790,13 +787,7 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
       params: { jobId: id },
     })) as Response;
     expect(response.status).toBe(200);
-    const reader = response.body!.getReader();
-    const chunks: Array<Uint8Array> = [];
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
+    const chunks = await readBodyChunks(response);
     expect(chunks.length).toBeGreaterThan(1);
     expect(Buffer.concat(chunks).toString("utf8")).toBe(log);
   });
@@ -881,6 +872,106 @@ describe("the diagnostic log route serves only a workdir-contained log", () => {
       params: { jobId },
     })) as Response;
     expect(response.status).toBe(404);
+  });
+});
+
+describe("the result, record and keys downloads stream a file larger than one read", () => {
+  /** Overwrite the file at `filePath` once the job has settled, since a body
+   * this size is past what one environment variable can pass to the stub. */
+  function replaceWith(filePath: string, body: string): string {
+    fs.writeFileSync(filePath, body);
+    return body;
+  }
+
+  async function download(
+    route: typeof ResultRoute | typeof RecordRoute | typeof KeysRoute,
+    id: string,
+    name: string,
+  ): Promise<Response> {
+    return (await handlersOf(route).GET({
+      request: jobRequest(`http://localhost/api/jobs/${id}/${name}`),
+      params: { jobId: id },
+    })) as Response;
+  }
+
+  test("each route serves the whole file across several chunks, in order", async () => {
+    const id = await createSucceededJob({
+      STUB_OUTPUT_FILE: "id\n1\n",
+      STUB_RECORD_JSON: recordJson("2026-07-08T14:32:00.000Z"),
+    });
+    const view = (
+      globalThis as { jobManagerInstance?: JobManagerType }
+    ).jobManagerInstance!.getJobView(id)!;
+    const cases = [
+      {
+        route: ResultRoute,
+        name: "result",
+        body: replaceWith(view.outputPath, `id\n${multiChunkText("row")}`),
+      },
+      {
+        route: RecordRoute,
+        name: "record",
+        body: replaceWith(
+          view.recordPath,
+          JSON.stringify({
+            ...JSON.parse(recordJson("2026-07-08T14:32:00.000Z")),
+            summary: multiChunkText("record"),
+          }),
+        ),
+      },
+      {
+        route: KeysRoute,
+        name: "keys",
+        body: replaceWith(
+          view.keysPath,
+          JSON.stringify({ salts: { note: multiChunkText("keys") } }),
+        ),
+      },
+    ];
+    for (const { route, name, body } of cases) {
+      const response = await download(route, id, name);
+      expect(response.status, name).toBe(200);
+      const chunks = await readBodyChunks(response);
+      expect(chunks.length, name).toBeGreaterThan(1);
+      expect(Buffer.concat(chunks).toString("utf8"), name).toBe(body);
+    }
+  });
+
+  test("the headers are unchanged by streaming", async () => {
+    const id = await createSucceededJob({
+      STUB_OUTPUT_FILE: "id\n1\n",
+      STUB_RECORD_JSON: recordJson("2026-07-08T14:32:00.000Z"),
+    });
+    const expected = {
+      result: {
+        route: ResultRoute,
+        contentType: "text/csv; charset=utf-8",
+        disposition: `attachment; filename="result-${id}.csv"`,
+      },
+      record: {
+        route: RecordRoute,
+        contentType: "application/json; charset=utf-8",
+        disposition: 'attachment; filename="alcove-record.json"',
+      },
+      keys: {
+        route: KeysRoute,
+        contentType: "application/json; charset=utf-8",
+        disposition: 'attachment; filename="alcove-record.keys.json"',
+      },
+    };
+    for (const [name, { route, contentType, disposition }] of Object.entries(
+      expected,
+    )) {
+      const response = await download(route, id, name);
+      expect(response.status, name).toBe(200);
+      expect(Object.fromEntries(response.headers.entries()), name).toEqual({
+        "cache-control": "no-store",
+        "content-disposition": disposition,
+        "content-type": contentType,
+        "x-content-type-options": "nosniff",
+      });
+      await response.body!.cancel();
+    }
   });
 });
 
