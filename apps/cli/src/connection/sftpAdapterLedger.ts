@@ -1,4 +1,3 @@
-import { InternalConsistencyError } from "@alcove/core";
 /**
  * The operator-facing accounting one SFTP adapter keeps over a run: the sessions
  * it established and lost, the counters its end-of-run summary reports, the
@@ -9,6 +8,8 @@ import { InternalConsistencyError } from "@alcove/core";
  * docs/notes/sftp-adapter-state-machine.md, "The ledger", for the model and the
  * rationale behind it.
  */
+
+import { InternalConsistencyError } from "@alcove/core";
 
 /**
  * Warn cadence for the adapter's repeating operator conditions: the first

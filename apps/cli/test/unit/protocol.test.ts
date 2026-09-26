@@ -4009,68 +4009,82 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
   expectNoGenericRecoveryAdvisory(mockState.errors);
 }, 20_000);
 
-test("runProtocol suppresses the generic advisory for the reply-cap internal fault", async () => {
-  // The single-pass reply-cap safety check fires mid-data-exchange, so it
-  // reaches the catch with tokenRotated=true -- the one window where the
-  // generic "retry without re-inviting" advisory does fire -- and its own
-  // message prescribes the opposite: report the fault, because a retry
-  // rebuilds the same reply and refuses it again. InternalConsistencyError
-  // has the class-level alcoveRecoveryHintEmitted tag, so the hint-walker
-  // suppresses the generic advisory and leaves the operator the fault's own
-  // remedy alone.
-  const keyFileA = path.join(tmpDir, "a.key");
-  const keyFileB = path.join(tmpDir, "b.key");
-  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
-  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+test.each([
+  {
+    fault: "the reply-cap check, whose message states its step",
+    raise: () =>
+      Object.assign(
+        new InternalConsistencyError(
+          "server: single-pass built a reply of 4096 byte(s), above the 2048 " +
+            "byte(s) both parties derive from their declared sizes. The " +
+            "exchange cannot proceed; report it with this message.",
+        ),
+        { alcoveRecoveryHintEmitted: true },
+      ),
+  },
+  {
+    fault: "a guard whose message states only the failed condition",
+    raise: () => new InternalConsistencyError("runKex: psk must be 32 bytes"),
+  },
+])(
+  "runProtocol suppresses the generic advisory for $fault",
+  async ({ raise }) => {
+    // An internal fault can fire mid-data-exchange, so it reaches the catch with
+    // tokenRotated=true -- the one window where the generic "retry without
+    // re-inviting" advisory does fire -- and a retry rebuilds the same state and
+    // refuses it again. The advisory is suppressed whether the fault's message
+    // states its own report-it step or the command boundary supplies it.
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
-  async function waitForRotationThenThrowInternalFault(): Promise<never> {
-    await waitForBothKeysRotated(keyFileA, keyFileB);
-    throw new InternalConsistencyError(
-      "server: single-pass built a reply of 4096 byte(s), above the 2048 " +
-        "byte(s) both parties derive from their declared sizes. The exchange " +
-        "cannot proceed; report it with this message.",
+    async function waitForRotationThenThrowInternalFault(): Promise<never> {
+      await waitForBothKeysRotated(keyFileA, keyFileB);
+      throw raise();
+    }
+    vi.mocked(runExchange)
+      .mockImplementationOnce(waitForRotationThenThrowInternalFault)
+      .mockImplementationOnce(waitForRotationThenThrowInternalFault);
+
+    const pA = runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test-a",
+    });
+    const pB = runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test-b",
+    });
+
+    const [resultA, resultB] = await Promise.allSettled([pA, pB]);
+    expect(resultA.status).toBe("rejected");
+    expect(resultB.status).toBe("rejected");
+    // The fault itself still propagates to the command boundary, which maps the
+    // class to exit 70: the suppression removes the contradicting line, not the
+    // guidance.
+    expect((resultA as PromiseRejectedResult).reason).toBeInstanceOf(
+      InternalConsistencyError,
     );
-  }
-  vi.mocked(runExchange)
-    .mockImplementationOnce(waitForRotationThenThrowInternalFault)
-    .mockImplementationOnce(waitForRotationThenThrowInternalFault);
-
-  const pA = runProtocol({
-    connection: {
-      channel: "filedrop",
-      path: dropDir,
-      options: TWO_PARTY_OPTIONS,
-    },
-    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    prepared: minimalPrepared,
-    output: undefined,
-    verbosity: -1,
-    loggerName: "test-a",
-  });
-  const pB = runProtocol({
-    connection: {
-      channel: "filedrop",
-      path: dropDir,
-      options: TWO_PARTY_OPTIONS,
-    },
-    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    prepared: minimalPrepared,
-    output: undefined,
-    verbosity: -1,
-    loggerName: "test-b",
-  });
-
-  const [resultA, resultB] = await Promise.allSettled([pA, pB]);
-  expect(resultA.status).toBe("rejected");
-  expect(resultB.status).toBe("rejected");
-  // The fault itself still propagates to the command boundary, which renders its
-  // report-it remedy and maps the class to exit 70: the suppression removes the
-  // contradicting line, not the guidance.
-  expect((resultA as PromiseRejectedResult).reason).toBeInstanceOf(
-    InternalConsistencyError,
-  );
-  expectNoGenericRecoveryAdvisory(mockState.errors);
-}, 20_000);
+    expectNoGenericRecoveryAdvisory(mockState.errors);
+  },
+  20_000,
+);
 
 test("runProtocol suppresses the generic advisory for the invitation-term divergence refusal", async () => {
   // The binding refuses at the terms exchange, inside the data exchange and so

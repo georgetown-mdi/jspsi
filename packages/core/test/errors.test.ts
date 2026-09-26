@@ -122,23 +122,20 @@ describe("errors left without a recovery hint", () => {
 });
 
 describe("the internal fault's recovery hint", () => {
-  test("InternalConsistencyError tags the hint on the class and stays a plain Error", () => {
-    // The tag suppresses the CLI's generic "retry the exchange without
-    // re-inviting" advisory at the raise site -- mid-data-exchange, after the
-    // handshake rotated the secret. It sits on the CLASS because every
-    // internal fault takes the same step, and the one raise site's message
-    // states it (pinned in link.test.ts). Not a UsageError: the boundary
-    // maps this class to exit 70, not the 64 that would send the operator to
-    // an input the single-pass ceiling gate already cleared.
-    const err = new InternalConsistencyError(
-      "server: single-pass built a reply of 4096 byte(s), above the 2048 " +
-        "byte(s) both parties derive from their declared sizes. The exchange " +
-        "cannot proceed; report it with this message.",
-    );
+  test("InternalConsistencyError sets no hint on the class and stays a plain Error", () => {
+    // Most raise sites state only the failed condition, so the class makes
+    // no claim that its message holds a next step; the CLI supplies one
+    // centrally. Not a UsageError: the boundary maps this class to exit 70,
+    // not the 64 that would send the operator to an input the single-pass
+    // ceiling gate already cleared.
+    const err = new InternalConsistencyError("runKex: psk must be 32 bytes");
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(UsageError);
     expect(err.name).toBe("InternalConsistencyError");
-    expect(err.alcoveRecoveryHintEmitted).toBe(true);
+    expect(
+      (err as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
+    ).toBeUndefined();
   });
 });
 

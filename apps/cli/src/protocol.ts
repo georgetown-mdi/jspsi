@@ -86,7 +86,10 @@ import {
   type TeardownOutcome,
 } from "./transportTeardown";
 import { writeOutput } from "./util/dataIo";
-import { AUTHENTICATION_FAILED_EXIT_CODE } from "./util/exit";
+import {
+  AUTHENTICATION_FAILED_EXIT_CODE,
+  internalFaultNextStep,
+} from "./util/exit";
 import { noteSignalOwnsExit } from "./util/exitGate";
 import { runBeforeEachLogLine } from "./util/logging";
 import { logRuntimeEnv } from "./util/runtimeEnv";
@@ -2659,11 +2662,12 @@ export async function runProtocol(
     // the generic advisory is skipped rather than printed beneath a step
     // it contradicts. Set wherever that holds: the saveKeyFile-failure
     // path below, authenticateConnection's own validation errors (token
-    // format, pre- and post-handshake expiry -- see auth.ts), core's
-    // terminal transport refusals, and the single-pass reply-cap internal
-    // fault. Key-exchange protocol failures from runKex are NOT tagged and
-    // do get the generic advisory, which adds useful "retry first; if it
-    // fails, re-invite" context.
+    // format, pre- and post-handshake expiry -- see auth.ts), and core's
+    // terminal transport refusals. An untagged internal fault is skipped
+    // too: the command boundary shows INTERNAL_FAULT_NEXT_STEP beneath it,
+    // and a retry is what that step rules out. Key-exchange protocol
+    // failures from runKex are NOT tagged and do get the generic advisory,
+    // which adds useful "retry first; if it fails, re-invite" context.
     //
     // The walk follows `cause` so a future wrap (e.g. `new Error('outer: '
     // + inner.message, { cause: inner })`) still suppresses the generic
@@ -2782,7 +2786,8 @@ export async function runProtocol(
     )
       log.error(BOTH_SWEPT_GUIDANCE);
 
-    const hintAlreadyEmitted = isHintTagged(err);
+    const hintAlreadyEmitted =
+      isHintTagged(err) || internalFaultNextStep(err) !== undefined;
     if (!hintAlreadyEmitted) {
       if (run.tokenRotated && run.onAuthenticatedError === undefined) {
         log.error(

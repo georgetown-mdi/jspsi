@@ -7,6 +7,7 @@
 
 import {
   AuthenticationError,
+  causeChainSome,
   ConnectionError,
   getLogger,
   InternalConsistencyError,
@@ -29,6 +30,48 @@ import {
  * documented response to a 70 is to report it (see docs/CLI.md, Exit codes).
  */
 export const INTERNAL_FAULT_EXIT_CODE = 70;
+
+/**
+ * The next step shown beneath an {@link InternalConsistencyError} whose message
+ * states none of its own: the same step for every internal fault, since no
+ * input the operator controls moves one and a retry reaches the same refusal.
+ */
+export const INTERNAL_FAULT_NEXT_STEP =
+  "This is a fault in Alcove itself: report it with this message; retrying " +
+  "will not help.";
+
+/**
+ * {@link INTERNAL_FAULT_NEXT_STEP} when `err` is an
+ * {@link InternalConsistencyError}, bare or behind `transport`-kind wraps as
+ * {@link exitCodeForError} reads it, and nothing in its cause chain holds
+ * core's `alcoveRecoveryHintEmitted` tag; otherwise `undefined`. A tagged
+ * fault's message already states its step, so adding this one would give the
+ * operator two.
+ */
+export function internalFaultNextStep(err: unknown): string | undefined {
+  if (!(firstLinkBehindTransportWraps(err) instanceof InternalConsistencyError))
+    return undefined;
+  const tagged = causeChainSome(
+    err,
+    (link) =>
+      (link as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted === true,
+  );
+  return tagged ? undefined : INTERNAL_FAULT_NEXT_STEP;
+}
+
+/**
+ * The display-safe text a command boundary shows for a failure: the
+ * sanitized error chain, followed on its own line by
+ * {@link internalFaultNextStep} when that applies. The terminal event's
+ * `message` is this same text, so stderr and the event stream state the same
+ * step.
+ */
+export function renderFailureForOperator(err: unknown): string {
+  const text = sanitizeErrorForDisplay(err);
+  const nextStep = internalFaultNextStep(err);
+  return nextStep === undefined ? text : `${text}\n${nextStep}`;
+}
 
 /**
  * The process exit code for an authentication failure: `EX_NOPERM` (77). Held
@@ -156,7 +199,7 @@ function firstLinkBehindTransportWraps(err: unknown): unknown {
 }
 
 /**
- * Log a caught error (sanitized) at error level and exit the process with
+ * Log a caught error ({@link renderFailureForOperator}) at error level and exit the process with
  * `code`. The single log-and-exit boundary the bootstrap-style command handlers
  * route a caught error through, so the error-level routing and the sanitized
  * formatting cannot drift between call sites. `code` is supplied by the caller
@@ -170,7 +213,7 @@ export function exitWithError(
   err: unknown,
   code: number,
 ): never {
-  log.error(sanitizeErrorForDisplay(err));
+  log.error(renderFailureForOperator(err));
   process.exit(code);
 }
 
@@ -194,7 +237,7 @@ export async function runOrExit(
   try {
     await body();
   } catch (err) {
-    getLogger(loggerName).error(sanitizeErrorForDisplay(err));
+    getLogger(loggerName).error(renderFailureForOperator(err));
     process.exit(exitCodeForError(err));
   }
 }

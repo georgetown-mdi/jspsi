@@ -56,6 +56,56 @@ describe("internalFaultPlainThrows over synthetic source", () => {
     expect(found.map((site) => site.shape)).toEqual(["never-typed branch"]);
   });
 
+  it("finds a plain Error in a branch after a never binding", () => {
+    const found = findings(
+      [
+        "function f(kind: 'a'): void {",
+        "  if (kind === 'a') return;",
+        "  const unhandled: never = kind;",
+        "  if (String(unhandled) !== '')",
+        "    throw new Error('unhandled');",
+        "}",
+      ].join("\n"),
+    );
+    expect(found).toEqual([
+      { file: "fixture.ts", line: 5, shape: "never-typed branch" },
+    ]);
+  });
+
+  it("passes a plain Error in an earlier branch than an unrelated never binding", () => {
+    const found = findings(
+      [
+        "function f(kind: 'a' | 'b', ready: boolean): number {",
+        "  if (!ready) {",
+        '    throw new Error("the server went away");',
+        "  }",
+        "  if (kind === 'a') return 1;",
+        "  if (kind === 'b') return 2;",
+        "  const unhandled: never = kind;",
+        "  return unhandled;",
+        "}",
+      ].join("\n"),
+    );
+    expect(found).toEqual([]);
+  });
+
+  it("passes a plain Error ahead of a never binding in its own block", () => {
+    const found = findings(
+      [
+        "function f(kind: 'a', ok: boolean): void {",
+        "  switch (kind) {",
+        "    default: {",
+        '      if (!ok) throw new Error("not ready");',
+        "      const unhandled: never = kind as never;",
+        "      void unhandled;",
+        "    }",
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+    expect(found).toEqual([]);
+  });
+
   it("finds a plain Error whose message says internal error", () => {
     const found = findings(
       [

@@ -8,13 +8,14 @@ import {
   causeChainSome,
   getLogger,
   redactAndSanitizeForDisplay,
-  sanitizeErrorForDisplay,
 } from "@alcove/core";
 import type {
   EntityClusterSummary,
   ExchangeStageDefinition,
   ResolvedMatching,
 } from "@alcove/core";
+
+import { internalFaultNextStep, renderFailureForOperator } from "./util/exit";
 
 const log = getLogger("event-stream");
 
@@ -256,12 +257,16 @@ export interface ResultEvent extends EventBase {
 export interface ErrorEvent extends EventBase {
   type: "error";
   category: ExchangeErrorCategory;
-  /** Display-safe error text ({@link sanitizeErrorForDisplay}). */
+  /**
+   * Display-safe error text, the same text stderr receives
+   * ({@link renderFailureForOperator}).
+   */
   message: string;
   /**
-   * Present and `true` when {@link message} holds its own next step, read off
-   * core's `alcoveRecoveryHintEmitted` tag ({@link errorStatesItsOwnNextStep}).
-   * A supervisor showing fixed copy for this category shows the message
+   * Present and `true` when {@link message} holds its own next step: read off
+   * core's `alcoveRecoveryHintEmitted` tag ({@link errorStatesItsOwnNextStep}),
+   * or set where the CLI appended {@link internalFaultNextStep}'s step to an
+   * internal fault's message. A supervisor showing fixed copy for this category shows the message
    * instead, and adds no advisory of its own; absent, it has no such
    * assurance. Omitted rather than emitted `false`, so the field is the
    * assurance and nothing else.
@@ -503,8 +508,9 @@ export function buildErrorEvent(error: unknown, phase: ErrorPhase): ErrorEvent {
     // Error text can hold partner- or server-controlled bytes in its message or
     // cause chain, so route it through the display-boundary sanitizer that
     // stderr uses; the category and version fields are this party's own vocabulary.
-    message: sanitizeErrorForDisplay(error),
-    ...(errorStatesItsOwnNextStep(error)
+    message: renderFailureForOperator(error),
+    ...(errorStatesItsOwnNextStep(error) ||
+    internalFaultNextStep(error) !== undefined
       ? { recoveryHint: true as const }
       : {}),
   };

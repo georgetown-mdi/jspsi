@@ -10,9 +10,10 @@
 // time, and nothing fails at runtime to show it. This check fails on the two
 // shapes that mark such a guard unambiguously in source:
 //
-//   - `throw new Error(...)` in a block that binds a value to `never` -- the
-//     exhaustiveness branch, whose `never` binding proves at build time that
-//     the branch is unreachable while the types hold.
+//   - `throw new Error(...)` after a statement binding a value to `never` in
+//     the same block or an enclosing one -- the exhaustiveness branch, whose
+//     `never` binding proves at build time that the code after it is
+//     unreachable while the types hold.
 //   - `throw new Error(...)` whose message text says "internal error".
 //
 // Either shape throws `InternalConsistencyError` (packages/core/src/errors.ts)
@@ -76,12 +77,19 @@ function statementsOf(node) {
 }
 
 // The throw's enclosing statement lists, innermost first, up to the function
-// that holds it: a `never` binding in any of them is the branch the throw ends.
+// that holds it: a `never` binding ahead of the statement on the throw's path
+// in any of them puts the throw in the code the binding proves unreachable. A
+// binding after that statement, or in a sibling branch, does not.
 function inNeverBranch(throwStatement) {
+  let onPath = throwStatement;
   for (let node = throwStatement.parent; node; node = node.parent) {
     if (ts.isFunctionLike(node) || ts.isSourceFile(node)) return false;
     const statements = statementsOf(node);
-    if (statements?.some(bindsNever)) return true;
+    if (statements !== undefined) {
+      const index = statements.indexOf(onPath);
+      if (index > 0 && statements.slice(0, index).some(bindsNever)) return true;
+    }
+    onPath = node;
   }
   return false;
 }

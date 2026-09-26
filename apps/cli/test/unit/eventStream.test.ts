@@ -35,7 +35,11 @@ import {
   type ErrorPhase,
   type StreamEvent,
 } from "../../src/eventStream";
-import { exitCodeForError } from "../../src/util/exit";
+import {
+  INTERNAL_FAULT_NEXT_STEP,
+  exitCodeForError,
+  renderFailureForOperator,
+} from "../../src/util/exit";
 import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
 
 afterEach(() => {
@@ -473,6 +477,51 @@ test("the marker survives a wrap, since the wrapped message still states it", ()
     }),
   });
   expect(buildErrorEvent(wrapped, "run").recoveryHint).toBe(true);
+});
+
+function occurrences(text: string, needle: string): number {
+  return text.split(needle).length - 1;
+}
+
+test("an internal fault with a bare message gets one next step, marked", () => {
+  // The raise site states only the failed condition, so the CLI adds its one
+  // fixed step and marks the message as holding it: a consumer shows the
+  // message and adds no advisory, and the step appears exactly once.
+  const bare = new InternalConsistencyError("runKex: psk must be 32 bytes");
+  const wrapped = new ConnectionError("send failed", "transport", {
+    cause: bare,
+  });
+  for (const err of [bare, wrapped]) {
+    const event = buildErrorEvent(err, "run");
+    expect(exitCodeForError(err)).toBe(70);
+    expect(event.recoveryHint).toBe(true);
+    expect(event.message).toContain("runKex: psk must be 32 bytes");
+    expect(occurrences(event.message, INTERNAL_FAULT_NEXT_STEP)).toBe(1);
+    expect(event.message.endsWith(INTERNAL_FAULT_NEXT_STEP)).toBe(true);
+    expect(event.message).toBe(renderFailureForOperator(err));
+  }
+});
+
+test("an internal fault whose message states its step gets no second one", () => {
+  const selfExplaining = Object.assign(
+    new InternalConsistencyError(
+      "server: the reply outgrew the cap. The exchange cannot proceed; " +
+        "report it with this message.",
+    ),
+    { alcoveRecoveryHintEmitted: true },
+  );
+  const event = buildErrorEvent(selfExplaining, "run");
+  expect(event.recoveryHint).toBe(true);
+  expect(event.message).not.toContain(INTERNAL_FAULT_NEXT_STEP);
+  expect(occurrences(event.message, "report it")).toBe(1);
+});
+
+test("a failure other than an internal fault gets no internal-fault step", () => {
+  const plain = new Error("the server went away");
+  expect(buildErrorEvent(plain, "run").message).not.toContain(
+    INTERNAL_FAULT_NEXT_STEP,
+  );
+  expect(buildErrorEvent(plain, "run").recoveryHint).toBeUndefined();
 });
 
 test("classifies an output-phase failure as output", () => {

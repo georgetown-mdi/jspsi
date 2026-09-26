@@ -1640,7 +1640,7 @@ function singlePassOverCapMessage(
 // so it names the two byte counts and withholds the dataset remedies, which
 // cannot move it. Raised as an InternalConsistencyError, whose
 // classification denotes the remedy: report it, rather than fix an input or
-// retry a transport.
+// retry a transport. The message states that step, so its instance is tagged.
 function singlePassReplyOverCapMessage(
   id: string,
   replyBytes: number,
@@ -2015,12 +2015,15 @@ export async function linkViaSinglePassPSI(
       receiverSize,
     );
     if (reply.byteLength > replyCap) {
-      throw new InternalConsistencyError(
-        singlePassReplyOverCapMessage(
-          participant.id,
-          reply.byteLength,
-          replyCap,
+      throw Object.assign(
+        new InternalConsistencyError(
+          singlePassReplyOverCapMessage(
+            participant.id,
+            reply.byteLength,
+            replyCap,
+          ),
         ),
+        { alcoveRecoveryHintEmitted: true },
       );
     }
 

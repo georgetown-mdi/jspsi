@@ -120,9 +120,13 @@ describe("assertRoundDiagonalClosure", () => {
       thrown = err;
     }
     expect(thrown).toBeInstanceOf(InternalConsistencyError);
-    // Every internal fault states its own next step; the class's hint tag
-    // suppresses the front end's generic retry advisory beneath it.
+    // The message states its own next step, so the instance is tagged and the
+    // CLI adds no second one.
     expect((thrown as Error).message).toMatch(/report it with this message/);
+    expect(
+      (thrown as { alcoveRecoveryHintEmitted?: unknown })
+        .alcoveRecoveryHintEmitted,
+    ).toBe(true);
     return thrown as InternalConsistencyError;
   };
 
