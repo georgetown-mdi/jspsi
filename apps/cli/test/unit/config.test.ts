@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import YAML from "yaml";
 import { ZodError } from "zod";
 import {
@@ -123,34 +123,38 @@ test("existing options are preserved when adding timeout overrides", () => {
 
 // --- pollIntervalMs override (--polling-frequency) ---------------------------
 
-test("pollIntervalMs override is applied verbatim (already milliseconds, no scaling)", () => {
-  // Unlike peerTimeout (seconds -> ms), the poll interval override is already in
-  // milliseconds, so a 100 override lands as pollIntervalMs 100 unchanged.
-  const result = applyConnectionOverrides(baseSFTP, {
-    options: { pollIntervalMs: 100 },
-  }) as SFTPConnectionConfig;
-  expect(result.options?.pollIntervalMs).toBe(100);
-});
-
-test("pollIntervalMs override applies on the filedrop channel too", () => {
-  const base: ConnectionConfig = { channel: "filedrop", path: "/mnt/drop" };
-  const result = applyConnectionOverrides(base, {
-    options: { pollIntervalMs: 250 },
-  }) as FileDropConnectionConfig;
-  expect(result.options?.pollIntervalMs).toBe(250);
-});
-
-test("pollIntervalMs override is dropped on webrtc (a FileSyncOptions-only field)", () => {
-  // pollIntervalMs is a FileSyncOptions field, so the file-sync-gated block skips
-  // it on webrtc rather than writing an option the webrtc schema does not include.
-  // webrtc's options type is SharedOptions (no pollIntervalMs), so read it through
-  // a record cast to assert the field is absent.
-  const result = applyConnectionOverrides(baseWebRTC, {
-    options: { pollIntervalMs: 100 },
+describe("pollIntervalMs", () => {
+  test("override is applied verbatim (already milliseconds, no scaling)", () => {
+    // Unlike peerTimeout (seconds -> ms), the poll interval override is already in
+    // milliseconds, so a 100 override lands as pollIntervalMs 100 unchanged.
+    const result = applyConnectionOverrides(baseSFTP, {
+      options: { pollIntervalMs: 100 },
+    }) as SFTPConnectionConfig;
+    expect(result.options?.pollIntervalMs).toBe(100);
   });
-  expect(
-    (result.options as Record<string, unknown> | undefined)?.["pollIntervalMs"],
-  ).toBeUndefined();
+
+  test("override applies on the filedrop channel too", () => {
+    const base: ConnectionConfig = { channel: "filedrop", path: "/mnt/drop" };
+    const result = applyConnectionOverrides(base, {
+      options: { pollIntervalMs: 250 },
+    }) as FileDropConnectionConfig;
+    expect(result.options?.pollIntervalMs).toBe(250);
+  });
+
+  test("override is dropped on webrtc (a FileSyncOptions-only field)", () => {
+    // pollIntervalMs is a FileSyncOptions field, so the file-sync-gated block skips
+    // it on webrtc rather than writing an option the webrtc schema does not include.
+    // webrtc's options type is SharedOptions (no pollIntervalMs), so read it through
+    // a record cast to assert the field is absent.
+    const result = applyConnectionOverrides(baseWebRTC, {
+      options: { pollIntervalMs: 100 },
+    });
+    expect(
+      (result.options as Record<string, unknown> | undefined)?.[
+        "pollIntervalMs"
+      ],
+    ).toBeUndefined();
+  });
 });
 
 test("an existing pollIntervalMs in the config is overridden by --polling-frequency", () => {
@@ -167,50 +171,52 @@ test("an existing pollIntervalMs in the config is overridden by --polling-freque
 
 // --- connectionPerPoll override (--connection-per-poll) ----------------------
 
-test("connectionPerPoll override is applied on the sftp channel", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    options: { connectionPerPoll: true },
-  }) as SFTPConnectionConfig;
-  expect(result.options?.connectionPerPoll).toBe(true);
-});
-
-test("connectionPerPoll override is dropped on filedrop (SFTP-only)", () => {
-  // Unlike pollIntervalMs (valid on both file-sync channels), connectionPerPoll is
-  // SFTP-only: filedrop holds no session, so the override is not written there and
-  // the CLI warns it is ignored instead.
-  const base: ConnectionConfig = { channel: "filedrop", path: "/mnt/drop" };
-  const result = applyConnectionOverrides(base, {
-    options: { connectionPerPoll: true },
-  }) as FileDropConnectionConfig;
-  expect(
-    (result.options as Record<string, unknown> | undefined)?.[
-      "connectionPerPoll"
-    ],
-  ).toBeUndefined();
-});
-
-test("connectionPerPoll override is dropped on webrtc", () => {
-  const result = applyConnectionOverrides(baseWebRTC, {
-    options: { connectionPerPoll: true },
+describe("connectionPerPoll", () => {
+  test("override is applied on the sftp channel", () => {
+    const result = applyConnectionOverrides(baseSFTP, {
+      options: { connectionPerPoll: true },
+    }) as SFTPConnectionConfig;
+    expect(result.options?.connectionPerPoll).toBe(true);
   });
-  expect(
-    (result.options as Record<string, unknown> | undefined)?.[
-      "connectionPerPoll"
-    ],
-  ).toBeUndefined();
-});
 
-test("connectionPerPoll override preserves other existing options on sftp", () => {
-  const base: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-    options: { pollIntervalMs: 300_000 },
-  };
-  const result = applyConnectionOverrides(base, {
-    options: { connectionPerPoll: true },
-  }) as SFTPConnectionConfig;
-  expect(result.options?.connectionPerPoll).toBe(true);
-  expect(result.options?.pollIntervalMs).toBe(300_000);
+  test("override is dropped on filedrop (SFTP-only)", () => {
+    // Unlike pollIntervalMs (valid on both file-sync channels), connectionPerPoll is
+    // SFTP-only: filedrop holds no session, so the override is not written there and
+    // the CLI warns it is ignored instead.
+    const base: ConnectionConfig = { channel: "filedrop", path: "/mnt/drop" };
+    const result = applyConnectionOverrides(base, {
+      options: { connectionPerPoll: true },
+    }) as FileDropConnectionConfig;
+    expect(
+      (result.options as Record<string, unknown> | undefined)?.[
+        "connectionPerPoll"
+      ],
+    ).toBeUndefined();
+  });
+
+  test("override is dropped on webrtc", () => {
+    const result = applyConnectionOverrides(baseWebRTC, {
+      options: { connectionPerPoll: true },
+    });
+    expect(
+      (result.options as Record<string, unknown> | undefined)?.[
+        "connectionPerPoll"
+      ],
+    ).toBeUndefined();
+  });
+
+  test("override preserves other existing options on sftp", () => {
+    const base: ConnectionConfig = {
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      options: { pollIntervalMs: 300_000 },
+    };
+    const result = applyConnectionOverrides(base, {
+      options: { connectionPerPoll: true },
+    }) as SFTPConnectionConfig;
+    expect(result.options?.connectionPerPoll).toBe(true);
+    expect(result.options?.pollIntervalMs).toBe(300_000);
+  });
 });
 
 // --- timeout override re-validation ------------------------------------------
@@ -239,14 +245,16 @@ test("a non-positive connectionTimeout override is rejected with a UsageError", 
   ).toThrow(UsageError);
 });
 
-test("maxReconnectAttempts 0 passes re-validation (nonnegative, not positive)", () => {
-  // 0 is a valid maxReconnectAttempts ("connect once, do not reconnect") -- the
-  // schema floor is nonnegative, not positive -- so the new re-validation path
-  // must accept it rather than reject it alongside the non-positive timeouts.
-  const result = applyConnectionOverrides(baseSFTP, {
-    options: { maxReconnectAttempts: 0 },
+describe("maxReconnectAttempts", () => {
+  test("0 passes re-validation (nonnegative, not positive)", () => {
+    // 0 is a valid maxReconnectAttempts ("connect once, do not reconnect") -- the
+    // schema floor is nonnegative, not positive -- so the new re-validation path
+    // must accept it rather than reject it alongside the non-positive timeouts.
+    const result = applyConnectionOverrides(baseSFTP, {
+      options: { maxReconnectAttempts: 0 },
+    });
+    expect(result.options?.maxReconnectAttempts).toBe(0);
   });
-  expect(result.options?.maxReconnectAttempts).toBe(0);
 });
 
 test("a valid timeout override still passes through unchanged on webrtc", () => {
@@ -292,20 +300,24 @@ test("the two override blocks agree on a non-positive peerTimeoutMs floor", () =
 
 // --- server credential overrides ---------------------------------------------
 
-test("serverUsername overrides the connection username", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    server: { username: "alice" },
+describe("serverUsername", () => {
+  test("overrides the connection username", () => {
+    const result = applyConnectionOverrides(baseSFTP, {
+      server: { username: "alice" },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.server.username).toBe("alice");
   });
-  if (result.channel !== "sftp") return;
-  expect(result.server.username).toBe("alice");
 });
 
-test("serverPort overrides the connection port", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    server: { port: 2222 },
+describe("serverPort", () => {
+  test("overrides the connection port", () => {
+    const result = applyConnectionOverrides(baseSFTP, {
+      server: { port: 2222 },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.server.port).toBe(2222);
   });
-  if (result.channel !== "sftp") return;
-  expect(result.server.port).toBe(2222);
 });
 
 test("an out-of-range serverPort is rejected on the ordinary path (no outboundPath)", () => {
@@ -327,42 +339,44 @@ test("a negative serverPort is rejected on the ordinary path", () => {
 
 const FP = "SHA256:" + "A".repeat(43);
 
-test("hostKeyFingerprint overrides an unpinned connection", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    server: { hostKeyFingerprint: FP },
+describe("hostKeyFingerprint", () => {
+  test("overrides an unpinned connection", () => {
+    const result = applyConnectionOverrides(baseSFTP, {
+      server: { hostKeyFingerprint: FP },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.server.hostKeyFingerprint).toBe(FP);
   });
-  if (result.channel !== "sftp") return;
-  expect(result.server.hostKeyFingerprint).toBe(FP);
-});
 
-test("hostKeyFingerprint overwrites a fingerprint already pinned in the base config", () => {
-  // An explicit CLI pin is the operator's current word on the server's
-  // identity, so it supersedes whatever the loaded config already had
-  // rather than being ignored or merged alongside it.
-  const other = "SHA256:" + "B".repeat(42) + "A";
-  const base: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "sftp.example.org", hostKeyFingerprint: other },
-  };
-  const result = applyConnectionOverrides(base, {
-    server: { hostKeyFingerprint: FP },
+  test("overwrites a fingerprint already pinned in the base config", () => {
+    // An explicit CLI pin is the operator's current word on the server's
+    // identity, so it supersedes whatever the loaded config already had
+    // rather than being ignored or merged alongside it.
+    const other = "SHA256:" + "B".repeat(42) + "A";
+    const base: ConnectionConfig = {
+      channel: "sftp",
+      server: { host: "sftp.example.org", hostKeyFingerprint: other },
+    };
+    const result = applyConnectionOverrides(base, {
+      server: { hostKeyFingerprint: FP },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.server.hostKeyFingerprint).toBe(FP);
   });
-  if (result.channel !== "sftp") return;
-  expect(result.server.hostKeyFingerprint).toBe(FP);
-});
 
-test("hostKeyFingerprint override participates in the same schema re-validation as other server overrides", () => {
-  // applyConnectionOverrides itself does not format-check the string -- CLI
-  // format validation happens earlier, at parse time (hostKeyFingerprintFlag) --
-  // but a malformed value that reaches here (e.g. from a non-CLI caller) must
-  // still be caught by the connection-wide re-validation the hostKeyFingerprint
-  // override triggers (serverModified -> safeParseConnectionConfig), exactly as
-  // an out-of-range serverPort is.
-  expect(() =>
-    applyConnectionOverrides(baseSFTP, {
-      server: { hostKeyFingerprint: "not-a-valid-fingerprint" },
-    }),
-  ).toThrow(UsageError);
+  test("override participates in the same schema re-validation as other server overrides", () => {
+    // applyConnectionOverrides itself does not format-check the string -- CLI
+    // format validation happens earlier, at parse time (hostKeyFingerprintFlag) --
+    // but a malformed value that reaches here (e.g. from a non-CLI caller) must
+    // still be caught by the connection-wide re-validation the hostKeyFingerprint
+    // override triggers (serverModified -> safeParseConnectionConfig), exactly as
+    // an out-of-range serverPort is.
+    expect(() =>
+      applyConnectionOverrides(baseSFTP, {
+        server: { hostKeyFingerprint: "not-a-valid-fingerprint" },
+      }),
+    ).toThrow(UsageError);
+  });
 });
 
 test("an absent hostKeyFingerprint override leaves an existing pin untouched", () => {
@@ -375,18 +389,22 @@ test("an absent hostKeyFingerprint override leaves an existing pin untouched", (
   expect(result.server.hostKeyFingerprint).toBe(FP);
 });
 
-test("hostKeyFingerprint override is dropped (not an error) off the sftp channel", () => {
-  // Like the sibling credential overrides, a fingerprint override is meaningless
-  // on webrtc (no SFTP host key to pin) and is silently ignored rather than
-  // rejected -- webrtc has its own connection-security surface (TURN/ICE),
-  // not an SSH host key.
-  const result = applyConnectionOverrides(baseWebRTC, {
-    server: { hostKeyFingerprint: FP },
+describe("hostKeyFingerprint", () => {
+  test("override is dropped (not an error) off the sftp channel", () => {
+    // Like the sibling credential overrides, a fingerprint override is meaningless
+    // on webrtc (no SFTP host key to pin) and is silently ignored rather than
+    // rejected -- webrtc has its own connection-security surface (TURN/ICE),
+    // not an SSH host key.
+    const result = applyConnectionOverrides(baseWebRTC, {
+      server: { hostKeyFingerprint: FP },
+    });
+    if (result.channel !== "webrtc") return;
+    expect(
+      (result.server as unknown as Record<string, unknown>)[
+        "hostKeyFingerprint"
+      ],
+    ).toBeUndefined();
   });
-  if (result.channel !== "webrtc") return;
-  expect(
-    (result.server as unknown as Record<string, unknown>)["hostKeyFingerprint"],
-  ).toBeUndefined();
 });
 
 test("a serverPassword conflicting with a base config's privateKey is rejected on the ordinary path", () => {
@@ -402,30 +420,32 @@ test("a serverPassword conflicting with a base config's privateKey is rejected o
   ).toThrow("at most one primary authentication method");
 });
 
-test("serverPrivateKeyPassphrase applies alongside a private-key override", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    server: { privateKey: "@key.pem", privateKeyPassphrase: "@pass.txt" },
+describe("serverPrivateKeyPassphrase", () => {
+  test("applies alongside a private-key override", () => {
+    const result = applyConnectionOverrides(baseSFTP, {
+      server: { privateKey: "@key.pem", privateKeyPassphrase: "@pass.txt" },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.server.privateKey).toBe("@key.pem");
+    // The literal @path is passed through verbatim (resolved later, at live use),
+    // just like the sibling credential overrides.
+    expect(result.server.privateKeyPassphrase).toBe("@pass.txt");
   });
-  if (result.channel !== "sftp") return;
-  expect(result.server.privateKey).toBe("@key.pem");
-  // The literal @path is passed through verbatim (resolved later, at live use),
-  // just like the sibling credential overrides.
-  expect(result.server.privateKeyPassphrase).toBe("@pass.txt");
-});
 
-test("serverPrivateKeyPassphrase applies when the private key is already in the base config", () => {
-  // The exchange path: the passphrase unlocks a private_key the loaded config
-  // already has, so --server-private-key need not be re-passed to satisfy
-  // the requires-private-key precondition.
-  const base: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "sftp.example.org", privateKey: "@/keys/id_ed25519" },
-  };
-  const result = applyConnectionOverrides(base, {
-    server: { privateKeyPassphrase: "@pass.txt" },
+  test("applies when the private key is already in the base config", () => {
+    // The exchange path: the passphrase unlocks a private_key the loaded config
+    // already has, so --server-private-key need not be re-passed to satisfy
+    // the requires-private-key precondition.
+    const base: ConnectionConfig = {
+      channel: "sftp",
+      server: { host: "sftp.example.org", privateKey: "@/keys/id_ed25519" },
+    };
+    const result = applyConnectionOverrides(base, {
+      server: { privateKeyPassphrase: "@pass.txt" },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.server.privateKeyPassphrase).toBe("@pass.txt");
   });
-  if (result.channel !== "sftp") return;
-  expect(result.server.privateKeyPassphrase).toBe("@pass.txt");
 });
 
 test("a passphrase override with no private key is rejected with a UsageError", () => {
@@ -460,25 +480,27 @@ test("a passphrase override is ignored (not an error) off the sftp channel", () 
 
 // --- keyboard-interactive override -------------------------------------------
 
-test("serverKeyboardInteractive applies alongside a password override", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    server: { password: "@pass.txt", keyboardInteractive: true },
+describe("serverKeyboardInteractive", () => {
+  test("applies alongside a password override", () => {
+    const result = applyConnectionOverrides(baseSFTP, {
+      server: { password: "@pass.txt", keyboardInteractive: true },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.server.keyboardInteractive).toBe(true);
+    expect(result.server.password).toBe("@pass.txt");
   });
-  if (result.channel !== "sftp") return;
-  expect(result.server.keyboardInteractive).toBe(true);
-  expect(result.server.password).toBe("@pass.txt");
-});
 
-test("serverKeyboardInteractive applies when the password is already in the base config", () => {
-  const base: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "sftp.example.org", password: "@/secrets/pw" },
-  };
-  const result = applyConnectionOverrides(base, {
-    server: { keyboardInteractive: true },
+  test("applies when the password is already in the base config", () => {
+    const base: ConnectionConfig = {
+      channel: "sftp",
+      server: { host: "sftp.example.org", password: "@/secrets/pw" },
+    };
+    const result = applyConnectionOverrides(base, {
+      server: { keyboardInteractive: true },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.server.keyboardInteractive).toBe(true);
   });
-  if (result.channel !== "sftp") return;
-  expect(result.server.keyboardInteractive).toBe(true);
 });
 
 test("a keyboard-interactive override with no password is rejected with a UsageError", () => {
@@ -547,48 +569,50 @@ test("the input connection object is not mutated", () => {
 
 // --- peerId validation -------------------------------------------------------
 
-test("peerId override accepted when timestampInFilename is already set in config", () => {
-  const base: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-    options: { timestampInFilename: true },
-  };
-  const result = applyConnectionOverrides(base, {
-    options: { peerId: "agency-a" },
+describe("peerId", () => {
+  test("override accepted when timestampInFilename is already set in config", () => {
+    const base: ConnectionConfig = {
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      options: { timestampInFilename: true },
+    };
+    const result = applyConnectionOverrides(base, {
+      options: { peerId: "agency-a" },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.options?.peerId).toBe("agency-a");
   });
-  if (result.channel !== "sftp") return;
-  expect(result.options?.peerId).toBe("agency-a");
-});
 
-test("peerId 'temp' is rejected by applyConnectionOverrides", () => {
-  const base: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-    options: { timestampInFilename: true },
-  };
-  // Invalid option combinations are usage errors (CLI exit 64), not exit 69.
-  expect(() =>
-    applyConnectionOverrides(base, { options: { peerId: "temp" } }),
-  ).toThrow(UsageError);
-  expect(() =>
-    applyConnectionOverrides(base, { options: { peerId: "temp" } }),
-  ).toThrow("reserved");
-});
+  test("'temp' is rejected by applyConnectionOverrides", () => {
+    const base: ConnectionConfig = {
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      options: { timestampInFilename: true },
+    };
+    // Invalid option combinations are usage errors (CLI exit 64), not exit 69.
+    expect(() =>
+      applyConnectionOverrides(base, { options: { peerId: "temp" } }),
+    ).toThrow(UsageError);
+    expect(() =>
+      applyConnectionOverrides(base, { options: { peerId: "temp" } }),
+    ).toThrow("reserved");
+  });
 
-test("peerId without timestampInFilename is rejected by applyConnectionOverrides", () => {
-  expect(() =>
-    applyConnectionOverrides(baseSFTP, { options: { peerId: "agency-a" } }),
-  ).toThrow("timestamp_in_filename");
-});
+  test("without timestampInFilename is rejected by applyConnectionOverrides", () => {
+    expect(() =>
+      applyConnectionOverrides(baseSFTP, { options: { peerId: "agency-a" } }),
+    ).toThrow("timestamp_in_filename");
+  });
 
-test("peerId without timestampInFilename is rejected on filedrop too", () => {
-  const base: ConnectionConfig = {
-    channel: "filedrop",
-    path: "/mnt/share",
-  };
-  expect(() =>
-    applyConnectionOverrides(base, { options: { peerId: "agency-a" } }),
-  ).toThrow("timestamp_in_filename");
+  test("without timestampInFilename is rejected on filedrop too", () => {
+    const base: ConnectionConfig = {
+      channel: "filedrop",
+      path: "/mnt/share",
+    };
+    expect(() =>
+      applyConnectionOverrides(base, { options: { peerId: "agency-a" } }),
+    ).toThrow("timestamp_in_filename");
+  });
 });
 
 test("empty peerId is rejected by applyConnectionOverrides", () => {
@@ -604,40 +628,42 @@ test("empty peerId is rejected by applyConnectionOverrides", () => {
 
 // --- retainFiles implication --------------------------------------------------
 
-test("retainFiles: true with unset lockless and timestamp implies both true", () => {
-  const result = applyConnectionOverrides(baseSFTP, {
-    options: { retainFiles: true },
+describe("retainFiles", () => {
+  test("true with unset lockless and timestamp implies both true", () => {
+    const result = applyConnectionOverrides(baseSFTP, {
+      options: { retainFiles: true },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.options?.retainFiles).toBe(true);
+    expect(result.options?.locklessRendezvous).toBe(true);
+    expect(result.options?.timestampInFilename).toBe(true);
   });
-  if (result.channel !== "sftp") return;
-  expect(result.options?.retainFiles).toBe(true);
-  expect(result.options?.locklessRendezvous).toBe(true);
-  expect(result.options?.timestampInFilename).toBe(true);
-});
 
-test("retainFiles: true preserves an already-set locklessRendezvous: true", () => {
-  const base: ConnectionConfig = {
-    channel: "sftp",
-    server: { host: "sftp.example.org" },
-    options: { locklessRendezvous: true, timestampInFilename: true },
-  };
-  const result = applyConnectionOverrides(base, {
-    options: { retainFiles: true },
+  test("true preserves an already-set locklessRendezvous: true", () => {
+    const base: ConnectionConfig = {
+      channel: "sftp",
+      server: { host: "sftp.example.org" },
+      options: { locklessRendezvous: true, timestampInFilename: true },
+    };
+    const result = applyConnectionOverrides(base, {
+      options: { retainFiles: true },
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.options?.locklessRendezvous).toBe(true);
   });
-  if (result.channel !== "sftp") return;
-  expect(result.options?.locklessRendezvous).toBe(true);
-});
 
-test("retainFiles: true with explicit locklessRendezvous: false throws", () => {
-  expect(() =>
-    applyConnectionOverrides(baseSFTP, {
-      options: { retainFiles: true, locklessRendezvous: false },
-    }),
-  ).toThrow(UsageError);
-  expect(() =>
-    applyConnectionOverrides(baseSFTP, {
-      options: { retainFiles: true, locklessRendezvous: false },
-    }),
-  ).toThrow("lockless_rendezvous");
+  test("true with explicit locklessRendezvous: false throws", () => {
+    expect(() =>
+      applyConnectionOverrides(baseSFTP, {
+        options: { retainFiles: true, locklessRendezvous: false },
+      }),
+    ).toThrow(UsageError);
+    expect(() =>
+      applyConnectionOverrides(baseSFTP, {
+        options: { retainFiles: true, locklessRendezvous: false },
+      }),
+    ).toThrow("lockless_rendezvous");
+  });
 });
 
 // --- outbound-path (split inbound/outbound directory) ------------------------
@@ -652,74 +678,76 @@ const baseFiledrop: ConnectionConfig = {
   path: "/mnt/share/in",
 };
 
-test("outboundPath splits an sftp shared path into inbound/outbound", () => {
-  const result = applyConnectionOverrides(baseSFTPWithPath, {
-    options: { retainFiles: true },
-    server: { outboundPath: "/drop/out" },
-  });
-  if (result.channel !== "sftp") return;
-  expect(result.server.inboundPath).toBe("/drop/in");
-  expect(result.server.outboundPath).toBe("/drop/out");
-  expect(result.server.path).toBeUndefined();
-  // --retain-files alone suffices; it implies lockless + timestamp.
-  expect(result.options?.retainFiles).toBe(true);
-});
-
-test("outboundPath splits a filedrop shared path into inbound/outbound", () => {
-  const result = applyConnectionOverrides(baseFiledrop, {
-    options: { retainFiles: true },
-    server: { outboundPath: "/mnt/share/out" },
-  });
-  if (result.channel !== "filedrop") return;
-  expect(result.inboundPath).toBe("/mnt/share/in");
-  expect(result.outboundPath).toBe("/mnt/share/out");
-  expect(result.path).toBeUndefined();
-});
-
-test("outboundPath overrides only the outbound on an already-split config", () => {
-  const base: ConnectionConfig = {
-    channel: "filedrop",
-    inboundPath: "/mnt/share/in",
-    outboundPath: "/mnt/share/old-out",
-    options: {
-      retainFiles: true,
-      locklessRendezvous: true,
-      timestampInFilename: true,
-    },
-  };
-  const result = applyConnectionOverrides(base, {
-    server: { outboundPath: "/mnt/share/new-out" },
-  });
-  if (result.channel !== "filedrop") return;
-  expect(result.inboundPath).toBe("/mnt/share/in");
-  expect(result.outboundPath).toBe("/mnt/share/new-out");
-  expect(result.path).toBeUndefined();
-});
-
-test("outboundPath without retain mode is rejected naming --retain-files", () => {
-  expect(() =>
-    applyConnectionOverrides(baseSFTPWithPath, {
+describe("outboundPath", () => {
+  test("splits an sftp shared path into inbound/outbound", () => {
+    const result = applyConnectionOverrides(baseSFTPWithPath, {
+      options: { retainFiles: true },
       server: { outboundPath: "/drop/out" },
-    }),
-  ).toThrow(UsageError);
-  expect(() =>
-    applyConnectionOverrides(baseSFTPWithPath, {
-      server: { outboundPath: "/drop/out" },
-    }),
-  ).toThrow("--retain-files");
-});
+    });
+    if (result.channel !== "sftp") return;
+    expect(result.server.inboundPath).toBe("/drop/in");
+    expect(result.server.outboundPath).toBe("/drop/out");
+    expect(result.server.path).toBeUndefined();
+    // --retain-files alone suffices; it implies lockless + timestamp.
+    expect(result.options?.retainFiles).toBe(true);
+  });
 
-test("outboundPath equal to the inbound path is rejected", () => {
-  const overrides = {
-    options: { retainFiles: true },
-    server: { outboundPath: "/mnt/share/in" },
-  };
-  expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
-    UsageError,
-  );
-  expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
-    "differ",
-  );
+  test("splits a filedrop shared path into inbound/outbound", () => {
+    const result = applyConnectionOverrides(baseFiledrop, {
+      options: { retainFiles: true },
+      server: { outboundPath: "/mnt/share/out" },
+    });
+    if (result.channel !== "filedrop") return;
+    expect(result.inboundPath).toBe("/mnt/share/in");
+    expect(result.outboundPath).toBe("/mnt/share/out");
+    expect(result.path).toBeUndefined();
+  });
+
+  test("overrides only the outbound on an already-split config", () => {
+    const base: ConnectionConfig = {
+      channel: "filedrop",
+      inboundPath: "/mnt/share/in",
+      outboundPath: "/mnt/share/old-out",
+      options: {
+        retainFiles: true,
+        locklessRendezvous: true,
+        timestampInFilename: true,
+      },
+    };
+    const result = applyConnectionOverrides(base, {
+      server: { outboundPath: "/mnt/share/new-out" },
+    });
+    if (result.channel !== "filedrop") return;
+    expect(result.inboundPath).toBe("/mnt/share/in");
+    expect(result.outboundPath).toBe("/mnt/share/new-out");
+    expect(result.path).toBeUndefined();
+  });
+
+  test("without retain mode is rejected naming --retain-files", () => {
+    expect(() =>
+      applyConnectionOverrides(baseSFTPWithPath, {
+        server: { outboundPath: "/drop/out" },
+      }),
+    ).toThrow(UsageError);
+    expect(() =>
+      applyConnectionOverrides(baseSFTPWithPath, {
+        server: { outboundPath: "/drop/out" },
+      }),
+    ).toThrow("--retain-files");
+  });
+
+  test("equal to the inbound path is rejected", () => {
+    const overrides = {
+      options: { retainFiles: true },
+      server: { outboundPath: "/mnt/share/in" },
+    };
+    expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
+      UsageError,
+    );
+    expect(() => applyConnectionOverrides(baseFiledrop, overrides)).toThrow(
+      "differ",
+    );
+  });
 });
 
 test("a relative filedrop outbound path is rejected (filedrop requires absolute)", () => {
@@ -745,166 +773,119 @@ test("a relative sftp outbound path is allowed (sftp permits relative paths)", (
   expect(result.server.outboundPath).toBe("outgoing");
 });
 
-test("outboundPath on an sftp login-home (no inbound path) is rejected as set-together", () => {
-  // baseSFTP has no server.path, so the inbound half is unset; a split needs both.
-  expect(() =>
-    applyConnectionOverrides(baseSFTP, {
-      options: { retainFiles: true },
-      server: { outboundPath: "/drop/out" },
-    }),
-  ).toThrow("set together");
-});
+describe("outboundPath", () => {
+  test("on an sftp login-home (no inbound path) is rejected as set-together", () => {
+    // baseSFTP has no server.path, so the inbound half is unset; a split needs both.
+    expect(() =>
+      applyConnectionOverrides(baseSFTP, {
+        options: { retainFiles: true },
+        server: { outboundPath: "/drop/out" },
+      }),
+    ).toThrow("set together");
+  });
 
-test("outboundPath on a webrtc connection is rejected", () => {
-  const webrtc: ConnectionConfig = {
-    channel: "webrtc",
-    server: { host: "peer.example.org" },
-  };
-  expect(() =>
-    applyConnectionOverrides(webrtc, { server: { outboundPath: "/out" } }),
-  ).toThrow("sftp and filedrop");
+  test("on a webrtc connection is rejected", () => {
+    const webrtc: ConnectionConfig = {
+      channel: "webrtc",
+      server: { host: "peer.example.org" },
+    };
+    expect(() =>
+      applyConnectionOverrides(webrtc, { server: { outboundPath: "/out" } }),
+    ).toThrow("sftp and filedrop");
+  });
 });
 
 // --- saveConfig --------------------------------------------------------------
 
-test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const spec: ExchangeSpec = {
-    connection: { channel: "filedrop", path: "/mnt/share" },
-    linkageTerms: getDefaultLinkageTerms("Agency A"),
-  };
-  saveConfig(configPath, spec);
-  const raw = fs.readFileSync(configPath, "utf8");
-  // camelCase TS keys are written in their snake_case YAML form ...
-  expect(raw).toContain("linkage_fields:");
-  expect(raw).toContain("linkage_keys:");
-  expect(raw).toContain("expects_output:");
-  expect(raw).toContain("share_with_partner:");
-  // The rule-set citation the default terms have, so the saved config names the
-  // set the exchange it configures will run.
-  expect(raw).toContain("linkage_rule_set:");
-  expect(raw).toContain("field_set:");
-  expect(raw).toContain("key_set:");
-  // ... never camelCase.
-  expect(raw).not.toContain("linkageFields");
-  expect(raw).not.toContain("expectsOutput");
-  // Semantic-type VALUES are snake_case too, and stay snake_case across the
-  // round-trip: camelizeKeys/snakeizeKeys transform keys only, so the value is
-  // byte-stable iff it is already snake_case in memory (approach (b)). A
-  // camelCase value (e.g. firstName) here would mean an enum value leaked onto
-  // disk off-convention.
-  expect(raw).toContain("type: first_name");
-  expect(raw).toContain("type: date_of_birth");
-  expect(raw).not.toContain("firstName");
-  expect(raw).not.toContain("dateOfBirth");
-  // The writer is the inverse of the reader's camelizeKeys: parsing the
-  // written file reproduces the original spec exactly.
-  expect(parseExchangeSpec(YAML.parse(raw))).toEqual(spec);
-});
-
-test.skipIf(process.platform === "win32")(
-  "saveConfig writes the config owner-read-only (0600)",
-  () => {
-    // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
-    // synthetic mode there, so this assertion is Unix-only.
+describe("saveConfig", () => {
+  test("emits snake_case keys and round-trips through parseExchangeSpec", () => {
     const configPath = path.join(dir, "alcove.yaml");
-    // A spec with an inline SFTP credential is exactly why the config must
-    // be owner-only: the 0600 mode is what keeps the password from other users.
     const spec: ExchangeSpec = {
-      connection: {
-        channel: "sftp",
-        server: { host: "h", username: "u", password: "s3cret-inline" },
-      },
+      connection: { channel: "filedrop", path: "/mnt/share" },
       linkageTerms: getDefaultLinkageTerms("Agency A"),
     };
     saveConfig(configPath, spec);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-    expect(fs.readFileSync(configPath, "utf8")).toContain("s3cret-inline");
-  },
-);
+    const raw = fs.readFileSync(configPath, "utf8");
+    // camelCase TS keys are written in their snake_case YAML form ...
+    expect(raw).toContain("linkage_fields:");
+    expect(raw).toContain("linkage_keys:");
+    expect(raw).toContain("expects_output:");
+    expect(raw).toContain("share_with_partner:");
+    // The rule-set citation the default terms have, so the saved config names the
+    // set the exchange it configures will run.
+    expect(raw).toContain("linkage_rule_set:");
+    expect(raw).toContain("field_set:");
+    expect(raw).toContain("key_set:");
+    // ... never camelCase.
+    expect(raw).not.toContain("linkageFields");
+    expect(raw).not.toContain("expectsOutput");
+    // Semantic-type VALUES are snake_case too, and stay snake_case across the
+    // round-trip: camelizeKeys/snakeizeKeys transform keys only, so the value is
+    // byte-stable iff it is already snake_case in memory (approach (b)). A
+    // camelCase value (e.g. firstName) here would mean an enum value leaked onto
+    // disk off-convention.
+    expect(raw).toContain("type: first_name");
+    expect(raw).toContain("type: date_of_birth");
+    expect(raw).not.toContain("firstName");
+    expect(raw).not.toContain("dateOfBirth");
+    // The writer is the inverse of the reader's camelizeKeys: parsing the
+    // written file reproduces the original spec exactly.
+    expect(parseExchangeSpec(YAML.parse(raw))).toEqual(spec);
+  });
 
-test("saveConfig strips sharedSecret/expires and does not mutate the caller's spec", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-  const spec = {
-    connection: {
-      channel: "sftp",
-      server: { host: "h" },
+  test.skipIf(process.platform === "win32")(
+    "writes the config owner-read-only (0600)",
+    () => {
+      // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
+      // synthetic mode there, so this assertion is Unix-only.
+      const configPath = path.join(dir, "alcove.yaml");
+      // A spec with an inline SFTP credential is exactly why the config must
+      // be owner-only: the 0600 mode is what keeps the password from other users.
+      const spec: ExchangeSpec = {
+        connection: {
+          channel: "sftp",
+          server: { host: "h", username: "u", password: "s3cret-inline" },
+        },
+        linkageTerms: getDefaultLinkageTerms("Agency A"),
+      };
+      saveConfig(configPath, spec);
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(configPath, "utf8")).toContain("s3cret-inline");
     },
-    authentication: {
-      sharedSecret: token,
-      expires: "2028-01-01T00:00:00.000Z",
-    },
-    linkageTerms: getDefaultLinkageTerms("Agency A"),
-  } as unknown as ExchangeSpec;
-  saveConfig(configPath, spec);
-  const raw = fs.readFileSync(configPath, "utf8");
-  // Key material never lands in the config, even when the caller leaves it set.
-  expect(raw).not.toContain("shared_secret");
-  expect(raw).not.toContain(token);
-  expect(raw).not.toContain("expires");
-  // The now-empty authentication container is pruned, not left as `{}`.
-  expect(raw).not.toContain("authentication");
-  // The strip runs on a clone; the caller's spec is untouched.
-  expect(spec.authentication?.sharedSecret).toBe(token);
-  expect(spec.authentication?.expires).toBe("2028-01-01T00:00:00.000Z");
+  );
+
+  test("strips sharedSecret/expires and does not mutate the caller's spec", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const spec = {
+      connection: {
+        channel: "sftp",
+        server: { host: "h" },
+      },
+      authentication: {
+        sharedSecret: token,
+        expires: "2028-01-01T00:00:00.000Z",
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    } as unknown as ExchangeSpec;
+    saveConfig(configPath, spec);
+    const raw = fs.readFileSync(configPath, "utf8");
+    // Key material never lands in the config, even when the caller leaves it set.
+    expect(raw).not.toContain("shared_secret");
+    expect(raw).not.toContain(token);
+    expect(raw).not.toContain("expires");
+    // The now-empty authentication container is pruned, not left as `{}`.
+    expect(raw).not.toContain("authentication");
+    // The strip runs on a clone; the caller's spec is untouched.
+    expect(spec.authentication?.sharedSecret).toBe(token);
+    expect(spec.authentication?.expires).toBe("2028-01-01T00:00:00.000Z");
+  });
 });
 
 // --- persistHostKeyFingerprint -----------------------------------------------
 
 const FP_A = "SHA256:" + "A".repeat(43);
 const FP_B = "SHA256:" + "B".repeat(42) + "E";
-
-test("persistHostKeyFingerprint adds the pin and preserves comments and other fields", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "# hand-authored config",
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: sftp.example.org # the drop",
-      "    username: alice",
-      "",
-    ].join("\n"),
-  );
-  persistHostKeyFingerprint(configPath, FP_A);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).toContain("host_key_fingerprint");
-  expect(raw).toContain(FP_A);
-  // The in-place document edit keeps the operator's comments and other fields.
-  expect(raw).toContain("# hand-authored config");
-  expect(raw).toContain("host: sftp.example.org # the drop");
-  expect(raw).toContain("username: alice");
-  const parsed = YAML.parse(raw) as {
-    connection: { server: { host_key_fingerprint: string } };
-  };
-  expect(parsed.connection.server.host_key_fingerprint).toBe(FP_A);
-});
-
-test("persistHostKeyFingerprint replaces an existing stored pin (the one-shot re-pin)", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: sftp.example.org",
-      `    host_key_fingerprint: ${FP_A}`,
-      "",
-    ].join("\n"),
-  );
-  persistHostKeyFingerprint(configPath, FP_B);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).toContain(FP_B);
-  expect(raw).not.toContain(FP_A);
-  const parsed = YAML.parse(raw) as {
-    connection: { server: { host_key_fingerprint: string } };
-  };
-  expect(parsed.connection.server.host_key_fingerprint).toBe(FP_B);
-});
 
 /** A config document holding `fields` beside loadable linkage terms. */
 function configWithLinkageTerms(fields: Record<string, unknown>): string {
@@ -914,145 +895,221 @@ function configWithLinkageTerms(fields: Record<string, unknown>): string {
   });
 }
 
-test("persistHostKeyFingerprint replaces a camelCase pin under one snake_case spelling", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    configWithLinkageTerms({
-      connection: {
-        channel: "sftp",
-        server: {
-          host: "sftp.example.org",
-          username: "alice",
-          hostKeyFingerprint: FP_A,
-        },
-      },
-    }),
-  );
-  persistHostKeyFingerprint(configPath, FP_B);
-  const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
-    connection: { server: Record<string, unknown> };
-  };
-  expect(raw.connection.server).toEqual({
-    host: "sftp.example.org",
-    username: "alice",
-    host_key_fingerprint: FP_B,
-  });
-  const connection = parseExchangeSpec(raw).connection as SFTPConnectionConfig;
-  expect(connection.server.hostKeyFingerprint).toBe(FP_B);
-});
-
-test.skipIf(process.platform === "win32")(
-  "persistHostKeyFingerprint writes the config owner-read-only (0600)",
-  () => {
+describe("persistHostKeyFingerprint", () => {
+  test("adds the pin and preserves comments and other fields", () => {
     const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
-      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+      [
+        "# hand-authored config",
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: sftp.example.org # the drop",
+        "    username: alice",
+        "",
+      ].join("\n"),
     );
     persistHostKeyFingerprint(configPath, FP_A);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-  },
-);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("host_key_fingerprint");
+    expect(raw).toContain(FP_A);
+    // The in-place document edit keeps the operator's comments and other fields.
+    expect(raw).toContain("# hand-authored config");
+    expect(raw).toContain("host: sftp.example.org # the drop");
+    expect(raw).toContain("username: alice");
+    const parsed = YAML.parse(raw) as {
+      connection: { server: { host_key_fingerprint: string } };
+    };
+    expect(parsed.connection.server.host_key_fingerprint).toBe(FP_A);
+  });
 
-test("persistHostKeyFingerprint throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  // A clearly invalid mapping (a value with a bare ':' block-mapping conflict).
-  fs.writeFileSync(configPath, "connection:\n  - a\n  b: c\n");
-  expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(UsageError);
-});
-
-// The two source-bearing leak channels an in-place config edit can hit, each with
-// an inline credential on the offending line: a syntax error collected in
-// doc.errors before the edit, and an unresolved alias, which leaves doc.errors
-// empty and setIn succeeding, so the failure only shows at doc.toString(), echoing
-// the alias token. Both route through the shared sensitive-file chokepoint, so
-// this test covers them once rather than in each caller.
-const CREDENTIAL_LEAK_CHANNELS = [
-  {
-    channel: "a syntax error collected before the edit",
-    source: (secret: string) =>
-      `connection:\n  server:\n\t  password: ${secret}\n`,
-    expected: "could not be parsed as YAML",
-  },
-  {
-    channel: "an unresolved alias surfacing at serialization",
-    source: (secret: string) =>
-      `connection:\n  channel: sftp\n  server:\n    password: *${secret}\n`,
-    expected: "could not be serialized as YAML",
-  },
-] as const;
-
-test.each(CREDENTIAL_LEAK_CHANNELS)(
-  "persistHostKeyFingerprint reports the path only, never the source: $channel",
-  ({ source, expected }) => {
-    const SECRET = "S3cr3tSFTPPassw0rd";
+  test("replaces an existing stored pin (the one-shot re-pin)", () => {
     const configPath = path.join(dir, "alcove.yaml");
-    const original = source(SECRET);
-    fs.writeFileSync(configPath, original);
-    let caught: unknown;
-    try {
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: sftp.example.org",
+        `    host_key_fingerprint: ${FP_A}`,
+        "",
+      ].join("\n"),
+    );
+    persistHostKeyFingerprint(configPath, FP_B);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain(FP_B);
+    expect(raw).not.toContain(FP_A);
+    const parsed = YAML.parse(raw) as {
+      connection: { server: { host_key_fingerprint: string } };
+    };
+    expect(parsed.connection.server.host_key_fingerprint).toBe(FP_B);
+  });
+
+  test("replaces a camelCase pin under one snake_case spelling", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      configWithLinkageTerms({
+        connection: {
+          channel: "sftp",
+          server: {
+            host: "sftp.example.org",
+            username: "alice",
+            hostKeyFingerprint: FP_A,
+          },
+        },
+      }),
+    );
+    persistHostKeyFingerprint(configPath, FP_B);
+    const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      connection: { server: Record<string, unknown> };
+    };
+    expect(raw.connection.server).toEqual({
+      host: "sftp.example.org",
+      username: "alice",
+      host_key_fingerprint: FP_B,
+    });
+    const connection = parseExchangeSpec(raw)
+      .connection as SFTPConnectionConfig;
+    expect(connection.server.hostKeyFingerprint).toBe(FP_B);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "writes the config owner-read-only (0600)",
+    () => {
+      const configPath = path.join(dir, "alcove.yaml");
+      fs.writeFileSync(
+        configPath,
+        "connection:\n  channel: sftp\n  server:\n    host: h\n",
+      );
       persistHostKeyFingerprint(configPath, FP_A);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    expect((caught as Error).message).toContain(expected);
-    // The credential must not appear anywhere in the shown (and logged) error.
-    expect((caught as Error).message).not.toContain(SECRET);
-    // The operator's file is left byte-for-byte intact (the throw precedes the
-    // write), so a failed persist neither leaks the credential nor mangles it.
-    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-  },
-);
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    },
+  );
 
-test("persistHostKeyFingerprint raises a UsageError when connection.server is not a mapping", () => {
-  // A sftp config that PARSES (so it clears the channel guard) but whose
-  // connection.server is a scalar (not a mapping) makes YAML's setIn throw a raw
-  // library error; the function must report it as the actionable UsageError its
-  // contract promises, not an opaque stack trace, and must leave the original
-  // file untouched (the throw precedes the write).
-  const configPath = path.join(dir, "alcove.yaml");
-  const original = "connection:\n  channel: sftp\n  server: nope\n";
-  fs.writeFileSync(configPath, original);
-  expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(UsageError);
-  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-});
+  // The two source-bearing leak channels an in-place config edit can hit, each with
+  // an inline credential on the offending line: a syntax error collected in
+  // doc.errors before the edit, and an unresolved alias, which leaves doc.errors
+  // empty and setIn succeeding, so the failure only shows at doc.toString(), echoing
+  // the alias token. Both route through the shared sensitive-file chokepoint, so
+  // this test covers them once rather than in each caller.
+  const CREDENTIAL_LEAK_CHANNELS = [
+    {
+      channel: "a syntax error collected before the edit",
+      source: (secret: string) =>
+        `connection:\n  server:\n\t  password: ${secret}\n`,
+      expected: "could not be parsed as YAML",
+    },
+    {
+      channel: "an unresolved alias surfacing at serialization",
+      source: (secret: string) =>
+        `connection:\n  channel: sftp\n  server:\n    password: *${secret}\n`,
+      expected: "could not be serialized as YAML",
+    },
+  ] as const;
 
-test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file untouched", () => {
-  // The host-key pin is an sftp-only concept: connection.server is the sftp
-  // shape, so persisting a fingerprint onto a filedrop (no server) or webrtc
-  // (a different server shape) config would synthesize a bogus pin and a mapping
-  // that channel's schema does not expect. The guard fails closed before any
-  // write, echoing the offending channel, so the operator's file is left
-  // byte-for-byte intact.
-  const fixtures = [
-    {
-      // A string channel is echoed verbatim so the operator sees which channel
-      // was rejected.
-      source: "connection:\n  channel: filedrop\n  path: /mnt/share\n",
-      expectInMessage: '"filedrop"',
+  test.each(CREDENTIAL_LEAK_CHANNELS)(
+    "reports the path only, never the source: $channel",
+    ({ source, expected }) => {
+      const SECRET = "S3cr3tSFTPPassw0rd";
+      const configPath = path.join(dir, "alcove.yaml");
+      const original = source(SECRET);
+      fs.writeFileSync(configPath, original);
+      let caught: unknown;
+      try {
+        persistHostKeyFingerprint(configPath, FP_A);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UsageError);
+      expect((caught as Error).message).toContain(expected);
+      // The credential must not appear anywhere in the shown (and logged) error.
+      expect((caught as Error).message).not.toContain(SECRET);
+      // The operator's file is left byte-for-byte intact (the throw precedes the
+      // write), so a failed persist neither leaks the credential nor mangles it.
+      expect(fs.readFileSync(configPath, "utf8")).toBe(original);
     },
-    {
-      source:
-        "connection:\n  channel: webrtc\n  server:\n    signaling: wss://signal.example.org\n",
-      expectInMessage: '"webrtc"',
-    },
-    {
-      // No channel key at all: the guard reports it generically, never echoing
-      // `undefined`.
-      source: "connection:\n  server:\n    host: h\n",
-      expectInMessage: "absent or non-scalar",
-    },
-    {
-      // A channel that parses to a collection (here a sequence) is not a string,
-      // so it takes the same generic branch rather than being echoed.
-      source: "connection:\n  channel:\n    - sftp\n  server:\n    host: h\n",
-      expectInMessage: "absent or non-scalar",
-    },
-  ];
-  for (const { source, expectInMessage } of fixtures) {
+  );
+
+  test("raises a UsageError when connection.server is not a mapping", () => {
+    // A sftp config that PARSES (so it clears the channel guard) but whose
+    // connection.server is a scalar (not a mapping) makes YAML's setIn throw a raw
+    // library error; the function must report it as the actionable UsageError its
+    // contract promises, not an opaque stack trace, and must leave the original
+    // file untouched (the throw precedes the write).
     const configPath = path.join(dir, "alcove.yaml");
+    const original = "connection:\n  channel: sftp\n  server: nope\n";
+    fs.writeFileSync(configPath, original);
+    expect(() => persistHostKeyFingerprint(configPath, FP_A)).toThrow(
+      UsageError,
+    );
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  });
+
+  test("rejects a non-sftp config and leaves the file untouched", () => {
+    // The host-key pin is an sftp-only concept: connection.server is the sftp
+    // shape, so persisting a fingerprint onto a filedrop (no server) or webrtc
+    // (a different server shape) config would synthesize a bogus pin and a mapping
+    // that channel's schema does not expect. The guard fails closed before any
+    // write, echoing the offending channel, so the operator's file is left
+    // byte-for-byte intact.
+    const fixtures = [
+      {
+        // A string channel is echoed verbatim so the operator sees which channel
+        // was rejected.
+        source: "connection:\n  channel: filedrop\n  path: /mnt/share\n",
+        expectInMessage: '"filedrop"',
+      },
+      {
+        source:
+          "connection:\n  channel: webrtc\n  server:\n    signaling: wss://signal.example.org\n",
+        expectInMessage: '"webrtc"',
+      },
+      {
+        // No channel key at all: the guard reports it generically, never echoing
+        // `undefined`.
+        source: "connection:\n  server:\n    host: h\n",
+        expectInMessage: "absent or non-scalar",
+      },
+      {
+        // A channel that parses to a collection (here a sequence) is not a string,
+        // so it takes the same generic branch rather than being echoed.
+        source: "connection:\n  channel:\n    - sftp\n  server:\n    host: h\n",
+        expectInMessage: "absent or non-scalar",
+      },
+    ];
+    for (const { source, expectInMessage } of fixtures) {
+      const configPath = path.join(dir, "alcove.yaml");
+      fs.writeFileSync(configPath, source);
+      let caught: unknown;
+      try {
+        persistHostKeyFingerprint(configPath, FP_A);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UsageError);
+      expect((caught as Error).message).toContain(expectInMessage);
+      expect((caught as Error).message).toContain("sftp");
+      // Not mutated: the bytes are exactly what the operator wrote -- no pin
+      // synthesized, no server mapping fabricated on the filedrop config.
+      const after = fs.readFileSync(configPath, "utf8");
+      expect(after).toBe(source);
+      expect(after).not.toContain("host_key_fingerprint");
+    }
+  });
+
+  test("sanitizes the echoed channel for display", () => {
+    // The rejected channel is echoed so the operator sees what was wrong, but it
+    // is operator-authored config text that can contain control bytes -- an ESC that
+    // drives an ANSI sequence, or a newline usable for log-line spoofing. The
+    // error is display-bound (it reaches a terminal/log), so the channel reaches
+    // the operator escaped, never raw -- asserted at the rendered boundary, the
+    // altitude that escape happens at.
+    const configPath = path.join(dir, "alcove.yaml");
+    // A double-quoted YAML scalar whose value decodes to x<ESC><LF>y.
+    const source = 'connection:\n  channel: "x\\x1b\\ny"\n';
     fs.writeFileSync(configPath, source);
     let caught: unknown;
     try {
@@ -1061,161 +1118,136 @@ test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file un
       caught = err;
     }
     expect(caught).toBeInstanceOf(UsageError);
-    expect((caught as Error).message).toContain(expectInMessage);
-    expect((caught as Error).message).toContain("sftp");
-    // Not mutated: the bytes are exactly what the operator wrote -- no pin
-    // synthesized, no server mapping fabricated on the filedrop config.
-    const after = fs.readFileSync(configPath, "utf8");
-    expect(after).toBe(source);
-    expect(after).not.toContain("host_key_fingerprint");
-  }
-});
-
-test("persistHostKeyFingerprint sanitizes the echoed channel for display", () => {
-  // The rejected channel is echoed so the operator sees what was wrong, but it
-  // is operator-authored config text that can contain control bytes -- an ESC that
-  // drives an ANSI sequence, or a newline usable for log-line spoofing. The
-  // error is display-bound (it reaches a terminal/log), so the channel reaches
-  // the operator escaped, never raw -- asserted at the rendered boundary, the
-  // altitude that escape happens at.
-  const configPath = path.join(dir, "alcove.yaml");
-  // A double-quoted YAML scalar whose value decodes to x<ESC><LF>y.
-  const source = 'connection:\n  channel: "x\\x1b\\ny"\n';
-  fs.writeFileSync(configPath, source);
-  let caught: unknown;
-  try {
-    persistHostKeyFingerprint(configPath, FP_A);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  const rendered = sanitizeErrorForDisplay(caught);
-  // The raw control bytes never reach the operator ...
-  expect(rendered).not.toContain("\u001b");
-  expect(rendered).not.toContain("\n");
-  // ... they are shown as visible escapes instead.
-  expect(rendered).toContain("\\x1b");
-  expect(rendered).toContain("\\x0a");
-  // The file is left untouched (the throw precedes the write).
-  expect(fs.readFileSync(configPath, "utf8")).toBe(source);
-});
-
-test("persistHostKeyFingerprint round-trips a fingerprint containing + and /", () => {
-  // The SHA256 fingerprint alphabet includes '+' and '/'; the serializer must
-  // quote as needed so the value re-parses byte-for-byte -- a mis-quoted pin
-  // would later fail to match and refuse every connection.
-  const FP_SPECIAL = "SHA256:" + "a/b+c" + "D".repeat(38);
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    "connection:\n  channel: sftp\n  server:\n    host: h\n",
-  );
-  persistHostKeyFingerprint(configPath, FP_SPECIAL);
-  const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
-    connection: { server: { host_key_fingerprint: string } };
-  };
-  expect(parsed.connection.server.host_key_fingerprint).toBe(FP_SPECIAL);
-});
-
-test("saveConfig round-trips provider_options verbatim in both directions", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  // provider_options is opaque: a literal camelCase key (ssh2's readyTimeout)
-  // and a snake_case key must both survive the writer + reader unchanged. The
-  // writer must not snakeize readyTimeout, and the reader must not camelize
-  // keepalive_interval, because core's shared walker treats the providerOptions
-  // subtree as opaque in both directions.
-  const spec: ExchangeSpec = {
-    connection: {
-      channel: "sftp",
-      server: { host: "h" },
-      providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
-    },
-    linkageTerms: getDefaultLinkageTerms("Agency A"),
-  };
-
-  // write: keys land on disk byte-for-byte (camelCase stays camelCase, snake
-  // stays snake) -- not transformed by snakeizeKeys.
-  saveConfig(configPath, spec);
-  const raw1 = fs.readFileSync(configPath, "utf8");
-  expect(raw1).toContain("readyTimeout:");
-  expect(raw1).toContain("keepalive_interval:");
-  expect(raw1).not.toContain("ready_timeout:");
-  expect(raw1).not.toContain("keepaliveInterval:");
-
-  // read: parsing reproduces the spec exactly, opaque map included.
-  const parsed = parseExchangeSpec(YAML.parse(raw1));
-  expect(parsed).toEqual(spec);
-  if (parsed.connection.channel !== "sftp")
-    throw new Error("expected sftp channel");
-  expect(parsed.connection.providerOptions).toEqual({
-    readyTimeout: 5000,
-    keepalive_interval: 1000,
+    const rendered = sanitizeErrorForDisplay(caught);
+    // The raw control bytes never reach the operator ...
+    expect(rendered).not.toContain("\u001b");
+    expect(rendered).not.toContain("\n");
+    // ... they are shown as visible escapes instead.
+    expect(rendered).toContain("\\x1b");
+    expect(rendered).toContain("\\x0a");
+    // The file is left untouched (the throw precedes the write).
+    expect(fs.readFileSync(configPath, "utf8")).toBe(source);
   });
 
-  // read -> write: writing the re-read spec produces an identical opaque map,
-  // confirming the round-trip is stable in both directions.
-  saveConfig(configPath, parsed);
-  const raw2 = fs.readFileSync(configPath, "utf8");
-  expect(YAML.parse(raw2).connection.provider_options).toEqual(
-    YAML.parse(raw1).connection.provider_options,
-  );
-});
-
-test("saveConfig round-trips webrtc provider_options verbatim", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  // providerOptions is opaque on webrtc as well as sftp; the writer/reader
-  // key-normalization is channel-agnostic, so a literal camelCase key and a
-  // snake_case key must both survive the round-trip byte-for-byte.
-  const spec: ExchangeSpec = {
-    connection: {
-      channel: "webrtc",
-      server: { host: "api.peerjs.com" },
-      providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
-    },
-    linkageTerms: getDefaultLinkageTerms("Agency A"),
-  };
-
-  saveConfig(configPath, spec);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).toContain("readyTimeout:");
-  expect(raw).toContain("keepalive_interval:");
-  expect(raw).not.toContain("ready_timeout:");
-  expect(raw).not.toContain("keepaliveInterval:");
-
-  const parsed = parseExchangeSpec(YAML.parse(raw));
-  expect(parsed).toEqual(spec);
-  if (parsed.connection.channel !== "webrtc")
-    throw new Error("expected webrtc channel");
-  expect(parsed.connection.providerOptions).toEqual({
-    readyTimeout: 5000,
-    keepalive_interval: 1000,
+  test("round-trips a fingerprint containing + and /", () => {
+    // The SHA256 fingerprint alphabet includes '+' and '/'; the serializer must
+    // quote as needed so the value re-parses byte-for-byte -- a mis-quoted pin
+    // would later fail to match and refuse every connection.
+    const FP_SPECIAL = "SHA256:" + "a/b+c" + "D".repeat(38);
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+    );
+    persistHostKeyFingerprint(configPath, FP_SPECIAL);
+    const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      connection: { server: { host_key_fingerprint: string } };
+    };
+    expect(parsed.connection.server.host_key_fingerprint).toBe(FP_SPECIAL);
   });
 });
 
-test("saveConfig preserves WebRTC connection.role and prunes the authentication block", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
-  const spec = {
-    connection: {
-      channel: "webrtc",
-      server: { host: "api.peerjs.com" },
-      role: "inviter",
-    },
-    authentication: {
-      sharedSecret: token,
-      expires: "2028-01-01T00:00:00.000Z",
-    },
-    linkageTerms: getDefaultLinkageTerms("Agency A"),
-  } as unknown as ExchangeSpec;
-  saveConfig(configPath, spec);
-  const raw = fs.readFileSync(configPath, "utf8");
-  // connection.role survives (a connection field, never stripped) ...
-  expect(raw).toContain("role: inviter");
-  // ... while the authentication block, holding only key material, is pruned.
-  expect(raw).not.toContain("authentication");
-  expect(raw).not.toContain("shared_secret");
-  expect(raw).not.toContain(token);
-  expect(raw).not.toContain("expires");
+describe("saveConfig", () => {
+  test("round-trips provider_options verbatim in both directions", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    // provider_options is opaque: a literal camelCase key (ssh2's readyTimeout)
+    // and a snake_case key must both survive the writer + reader unchanged. The
+    // writer must not snakeize readyTimeout, and the reader must not camelize
+    // keepalive_interval, because core's shared walker treats the providerOptions
+    // subtree as opaque in both directions.
+    const spec: ExchangeSpec = {
+      connection: {
+        channel: "sftp",
+        server: { host: "h" },
+        providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    };
+
+    // write: keys land on disk byte-for-byte (camelCase stays camelCase, snake
+    // stays snake) -- not transformed by snakeizeKeys.
+    saveConfig(configPath, spec);
+    const raw1 = fs.readFileSync(configPath, "utf8");
+    expect(raw1).toContain("readyTimeout:");
+    expect(raw1).toContain("keepalive_interval:");
+    expect(raw1).not.toContain("ready_timeout:");
+    expect(raw1).not.toContain("keepaliveInterval:");
+
+    // read: parsing reproduces the spec exactly, opaque map included.
+    const parsed = parseExchangeSpec(YAML.parse(raw1));
+    expect(parsed).toEqual(spec);
+    if (parsed.connection.channel !== "sftp")
+      throw new Error("expected sftp channel");
+    expect(parsed.connection.providerOptions).toEqual({
+      readyTimeout: 5000,
+      keepalive_interval: 1000,
+    });
+
+    // read -> write: writing the re-read spec produces an identical opaque map,
+    // confirming the round-trip is stable in both directions.
+    saveConfig(configPath, parsed);
+    const raw2 = fs.readFileSync(configPath, "utf8");
+    expect(YAML.parse(raw2).connection.provider_options).toEqual(
+      YAML.parse(raw1).connection.provider_options,
+    );
+  });
+
+  test("round-trips webrtc provider_options verbatim", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    // providerOptions is opaque on webrtc as well as sftp; the writer/reader
+    // key-normalization is channel-agnostic, so a literal camelCase key and a
+    // snake_case key must both survive the round-trip byte-for-byte.
+    const spec: ExchangeSpec = {
+      connection: {
+        channel: "webrtc",
+        server: { host: "api.peerjs.com" },
+        providerOptions: { readyTimeout: 5000, keepalive_interval: 1000 },
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    };
+
+    saveConfig(configPath, spec);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("readyTimeout:");
+    expect(raw).toContain("keepalive_interval:");
+    expect(raw).not.toContain("ready_timeout:");
+    expect(raw).not.toContain("keepaliveInterval:");
+
+    const parsed = parseExchangeSpec(YAML.parse(raw));
+    expect(parsed).toEqual(spec);
+    if (parsed.connection.channel !== "webrtc")
+      throw new Error("expected webrtc channel");
+    expect(parsed.connection.providerOptions).toEqual({
+      readyTimeout: 5000,
+      keepalive_interval: 1000,
+    });
+  });
+
+  test("preserves WebRTC connection.role and prunes the authentication block", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    const spec = {
+      connection: {
+        channel: "webrtc",
+        server: { host: "api.peerjs.com" },
+        role: "inviter",
+      },
+      authentication: {
+        sharedSecret: token,
+        expires: "2028-01-01T00:00:00.000Z",
+      },
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+    } as unknown as ExchangeSpec;
+    saveConfig(configPath, spec);
+    const raw = fs.readFileSync(configPath, "utf8");
+    // connection.role survives (a connection field, never stripped) ...
+    expect(raw).toContain("role: inviter");
+    // ... while the authentication block, holding only key material, is pruned.
+    expect(raw).not.toContain("authentication");
+    expect(raw).not.toContain("shared_secret");
+    expect(raw).not.toContain(token);
+    expect(raw).not.toContain("expires");
+  });
 });
 
 // --- persistPartnerFingerprint -----------------------------------------------
@@ -1240,707 +1272,736 @@ function certificateModeConfigSource(pin?: string): string {
   ].join("\n");
 }
 
-test("persistPartnerFingerprint records the pin and preserves comments and other fields", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(configPath, certificateModeConfigSource());
-  persistPartnerFingerprint(configPath, PARTNER_FP_A);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).toContain("partner_fingerprint");
-  expect(raw).toContain(PARTNER_FP_A);
-  // The in-place document edit keeps the operator's comments and other fields.
-  expect(raw).toContain("# hand-authored config");
-  expect(raw).toContain("mode: certificate # signed receipts");
-  expect(raw).toContain("host: sftp.example.org # the drop");
-  const parsed = YAML.parse(raw) as {
-    signing: { partner_fingerprint: string; identity_file: string };
-  };
-  expect(parsed.signing.partner_fingerprint).toBe(PARTNER_FP_A);
-  expect(parsed.signing.identity_file).toBe(
-    "/run/signing/alcove-signing-identity.json",
-  );
-});
-
-test.skipIf(process.platform === "win32")(
-  "persistPartnerFingerprint writes the config owner-read-only (0600)",
-  () => {
-    const configPath = path.join(dir, "alcove.yaml");
-    fs.writeFileSync(configPath, certificateModeConfigSource());
-    persistPartnerFingerprint(configPath, PARTNER_FP_A);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-  },
-);
-
-test("persistPartnerFingerprint never overwrites a pin already on file", () => {
-  // Changing a pin is a deliberate act, as changing a host-key pin is: the
-  // partner's certificate is the anchor a receipt's attribution rests on, so a
-  // divergent value is refused and the operator's file is left byte for byte
-  // as it stands.
-  const configPath = path.join(dir, "alcove.yaml");
-  const original = certificateModeConfigSource(PARTNER_FP_A);
-  fs.writeFileSync(configPath, original);
-  expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_B)).toThrow(
-    UsageError,
-  );
-  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-});
-
 const SFTP_CONNECTION_FIELDS = {
   channel: "sftp",
   server: { host: "sftp.example.org", username: "alice" },
 };
 
-test("persistPartnerFingerprint fills an empty camelCase pin under one snake_case spelling", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    configWithLinkageTerms({
+describe("persistPartnerFingerprint", () => {
+  test("records the pin and preserves comments and other fields", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(configPath, certificateModeConfigSource());
+    persistPartnerFingerprint(configPath, PARTNER_FP_A);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("partner_fingerprint");
+    expect(raw).toContain(PARTNER_FP_A);
+    // The in-place document edit keeps the operator's comments and other fields.
+    expect(raw).toContain("# hand-authored config");
+    expect(raw).toContain("mode: certificate # signed receipts");
+    expect(raw).toContain("host: sftp.example.org # the drop");
+    const parsed = YAML.parse(raw) as {
+      signing: { partner_fingerprint: string; identity_file: string };
+    };
+    expect(parsed.signing.partner_fingerprint).toBe(PARTNER_FP_A);
+    expect(parsed.signing.identity_file).toBe(
+      "/run/signing/alcove-signing-identity.json",
+    );
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "writes the config owner-read-only (0600)",
+    () => {
+      const configPath = path.join(dir, "alcove.yaml");
+      fs.writeFileSync(configPath, certificateModeConfigSource());
+      persistPartnerFingerprint(configPath, PARTNER_FP_A);
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    },
+  );
+
+  test("never overwrites a pin already on file", () => {
+    // Changing a pin is a deliberate act, as changing a host-key pin is: the
+    // partner's certificate is the anchor a receipt's attribution rests on, so a
+    // divergent value is refused and the operator's file is left byte for byte
+    // as it stands.
+    const configPath = path.join(dir, "alcove.yaml");
+    const original = certificateModeConfigSource(PARTNER_FP_A);
+    fs.writeFileSync(configPath, original);
+    expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_B)).toThrow(
+      UsageError,
+    );
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  });
+
+  test("fills an empty camelCase pin under one snake_case spelling", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      configWithLinkageTerms({
+        connection: SFTP_CONNECTION_FIELDS,
+        signing: {
+          mode: "certificate",
+          identity_file: "/run/signing/alcove-signing-identity.json",
+          partnerFingerprint: null,
+        },
+      }),
+    );
+    persistPartnerFingerprint(configPath, PARTNER_FP_A);
+    const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      signing: Record<string, unknown>;
+    };
+    expect(raw.signing).toEqual({
+      mode: "certificate",
+      identity_file: "/run/signing/alcove-signing-identity.json",
+      partner_fingerprint: PARTNER_FP_A,
+    });
+    expect(parseExchangeSpec(raw).signing).toMatchObject({
+      partnerFingerprint: PARTNER_FP_A,
+    });
+  });
+
+  test("refuses beside a camelCase pin already on file", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const original = configWithLinkageTerms({
       connection: SFTP_CONNECTION_FIELDS,
       signing: {
         mode: "certificate",
         identity_file: "/run/signing/alcove-signing-identity.json",
-        partnerFingerprint: null,
+        partnerFingerprint: PARTNER_FP_B,
       },
-    }),
-  );
-  persistPartnerFingerprint(configPath, PARTNER_FP_A);
-  const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
-    signing: Record<string, unknown>;
-  };
-  expect(raw.signing).toEqual({
-    mode: "certificate",
-    identity_file: "/run/signing/alcove-signing-identity.json",
-    partner_fingerprint: PARTNER_FP_A,
-  });
-  expect(parseExchangeSpec(raw).signing).toMatchObject({
-    partnerFingerprint: PARTNER_FP_A,
-  });
-});
-
-test("persistPartnerFingerprint refuses beside a camelCase pin already on file", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const original = configWithLinkageTerms({
-    connection: SFTP_CONNECTION_FIELDS,
-    signing: {
-      mode: "certificate",
-      identity_file: "/run/signing/alcove-signing-identity.json",
-      partnerFingerprint: PARTNER_FP_B,
-    },
-  });
-  fs.writeFileSync(configPath, original);
-  expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
-    UsageError,
-  );
-  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-  expect(parseExchangeSpec(YAML.parse(original)).signing).toMatchObject({
-    partnerFingerprint: PARTNER_FP_B,
-  });
-});
-
-test("persistPartnerFingerprint refuses a document that is not in certificate mode", () => {
-  // The pin belongs only in a config that signs receipts with a certificate:
-  // anywhere else it names a trust anchor nothing reads. Each fixture's file is
-  // left byte for byte intact, the refusal preceding any write.
-  const fixtures = [
-    {
-      source: "signing:\n  mode: none\n",
-      expectInMessage: '"none"',
-    },
-    {
-      source: "signing:\n  mode: session-derived\n",
-      expectInMessage: '"session-derived"',
-    },
-    {
-      // No signing block at all: reported generically, never echoing
-      // `undefined`.
-      source: "connection:\n  channel: sftp\n  server:\n    host: h\n",
-      expectInMessage: "absent or non-scalar",
-    },
-    {
-      // A mode that parses to a collection is not a string, so it takes the
-      // same generic branch rather than being echoed.
-      source: "signing:\n  mode:\n    - certificate\n",
-      expectInMessage: "absent or non-scalar",
-    },
-    {
-      // An alias-spelled mode reaches getIn as an Alias node rather than the
-      // string it resolves to, so it takes the generic branch too: refusing a
-      // config no hand-authored file writes, rather than reading a mode
-      // through a reference.
-      source: "defaults: &m certificate\nsigning:\n  mode: *m\n",
-      expectInMessage: "absent or non-scalar",
-    },
-  ];
-  for (const { source, expectInMessage } of fixtures) {
-    const configPath = path.join(dir, "alcove.yaml");
-    fs.writeFileSync(configPath, source);
-    let caught: unknown;
-    try {
-      persistPartnerFingerprint(configPath, PARTNER_FP_A);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    expect((caught as Error).message).toContain(expectInMessage);
-    expect(fs.readFileSync(configPath, "utf8")).toBe(source);
-  }
-});
-
-test("persistPartnerFingerprint raises a UsageError when signing is not a mapping", () => {
-  // A document that PARSES but whose `signing` is a scalar makes YAML's setIn
-  // throw a raw library error; the function reports it as the actionable
-  // UsageError its contract promises, not an opaque stack trace. The mode guard
-  // reads through a scalar `signing` as absent, so the sequence form is what
-  // reaches setIn.
-  const configPath = path.join(dir, "alcove.yaml");
-  const original = "signing:\n  - mode: certificate\n";
-  fs.writeFileSync(configPath, original);
-  expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
-    UsageError,
-  );
-  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-});
-
-test("persistPartnerFingerprint throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(configPath, "signing:\n  - a\n  b: c\n");
-  expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
-    UsageError,
-  );
-});
-
-test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-  "persistPartnerFingerprint names the fingerprint and the remedies when the write fails (skipped where a directory cannot be made read-only for its owner)",
-  () => {
-    // The pre-flight in the exchange command catches the read-only mount before
-    // the run connects; this is the mount that turned read-only after it passed.
-    // The adoption has already happened by then, so the refusal has to hand the
-    // operator the value to record and both ways to record it.
-    const readOnlyDir = path.join(dir, "readonly");
-    fs.mkdirSync(readOnlyDir);
-    const configPath = path.join(readOnlyDir, "alcove.yaml");
-    const original = certificateModeConfigSource();
+    });
     fs.writeFileSync(configPath, original);
-    fs.chmodSync(readOnlyDir, 0o555);
-    let caught: unknown;
-    try {
-      persistPartnerFingerprint(configPath, PARTNER_FP_A);
-    } catch (err) {
-      caught = err;
-    } finally {
-      // Restore the mode so afterEach can remove the tmp dir.
-      fs.chmodSync(readOnlyDir, 0o755);
-    }
-    expect(caught).toBeInstanceOf(OperatorConfigError);
-    const message = (caught as Error).message;
-    expect(message).toContain(configPath);
-    expect(message).toContain(PARTNER_FP_A);
-    expect(message).toContain("signing.partner_fingerprint");
-    expect(message).toContain("alcove fingerprint");
-    expect(message).toContain("mount the configuration writable");
-    // The refusal leaves the file exactly as it stands: the atomic replace
-    // never reached the destination.
+    expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
+      UsageError,
+    );
     expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-  },
-);
+    expect(parseExchangeSpec(YAML.parse(original)).signing).toMatchObject({
+      partnerFingerprint: PARTNER_FP_B,
+    });
+  });
+
+  test("refuses a document that is not in certificate mode", () => {
+    // The pin belongs only in a config that signs receipts with a certificate:
+    // anywhere else it names a trust anchor nothing reads. Each fixture's file is
+    // left byte for byte intact, the refusal preceding any write.
+    const fixtures = [
+      {
+        source: "signing:\n  mode: none\n",
+        expectInMessage: '"none"',
+      },
+      {
+        source: "signing:\n  mode: session-derived\n",
+        expectInMessage: '"session-derived"',
+      },
+      {
+        // No signing block at all: reported generically, never echoing
+        // `undefined`.
+        source: "connection:\n  channel: sftp\n  server:\n    host: h\n",
+        expectInMessage: "absent or non-scalar",
+      },
+      {
+        // A mode that parses to a collection is not a string, so it takes the
+        // same generic branch rather than being echoed.
+        source: "signing:\n  mode:\n    - certificate\n",
+        expectInMessage: "absent or non-scalar",
+      },
+      {
+        // An alias-spelled mode reaches getIn as an Alias node rather than the
+        // string it resolves to, so it takes the generic branch too: refusing a
+        // config no hand-authored file writes, rather than reading a mode
+        // through a reference.
+        source: "defaults: &m certificate\nsigning:\n  mode: *m\n",
+        expectInMessage: "absent or non-scalar",
+      },
+    ];
+    for (const { source, expectInMessage } of fixtures) {
+      const configPath = path.join(dir, "alcove.yaml");
+      fs.writeFileSync(configPath, source);
+      let caught: unknown;
+      try {
+        persistPartnerFingerprint(configPath, PARTNER_FP_A);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UsageError);
+      expect((caught as Error).message).toContain(expectInMessage);
+      expect(fs.readFileSync(configPath, "utf8")).toBe(source);
+    }
+  });
+
+  test("raises a UsageError when signing is not a mapping", () => {
+    // A document that PARSES but whose `signing` is a scalar makes YAML's setIn
+    // throw a raw library error; the function reports it as the actionable
+    // UsageError its contract promises, not an opaque stack trace. The mode guard
+    // reads through a scalar `signing` as absent, so the sequence form is what
+    // reaches setIn.
+    const configPath = path.join(dir, "alcove.yaml");
+    const original = "signing:\n  - mode: certificate\n";
+    fs.writeFileSync(configPath, original);
+    expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
+      UsageError,
+    );
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  });
+});
+
+describe("persistPartnerFingerprint", () => {
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "names the fingerprint and the remedies when the write fails (skipped where a directory cannot be made read-only for its owner)",
+    () => {
+      // The pre-flight in the exchange command catches the read-only mount before
+      // the run connects; this is the mount that turned read-only after it passed.
+      // The adoption has already happened by then, so the refusal has to hand the
+      // operator the value to record and both ways to record it.
+      const readOnlyDir = path.join(dir, "readonly");
+      fs.mkdirSync(readOnlyDir);
+      const configPath = path.join(readOnlyDir, "alcove.yaml");
+      const original = certificateModeConfigSource();
+      fs.writeFileSync(configPath, original);
+      fs.chmodSync(readOnlyDir, 0o555);
+      let caught: unknown;
+      try {
+        persistPartnerFingerprint(configPath, PARTNER_FP_A);
+      } catch (err) {
+        caught = err;
+      } finally {
+        // Restore the mode so afterEach can remove the tmp dir.
+        fs.chmodSync(readOnlyDir, 0o755);
+      }
+      expect(caught).toBeInstanceOf(OperatorConfigError);
+      const message = (caught as Error).message;
+      expect(message).toContain(configPath);
+      expect(message).toContain(PARTNER_FP_A);
+      expect(message).toContain("signing.partner_fingerprint");
+      expect(message).toContain("alcove fingerprint");
+      expect(message).toContain("mount the configuration writable");
+      // The refusal leaves the file exactly as it stands: the atomic replace
+      // never reached the destination.
+      expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+    },
+  );
+});
 
 // --- assertPartnerFingerprintRecordable --------------------------------------
 
-test("assertPartnerFingerprintRecordable passes every block that records no pin", () => {
-  // Only a certificate-mode block with no pin on file ever writes here, so
-  // every other shape is a no-op -- checked against a path that does not exist,
-  // which would fail the access probe if the guard read it at all.
-  const absent = path.join(dir, "no-such-dir", "alcove.yaml");
-  for (const signing of [
-    undefined,
-    { mode: "none" } as const,
-    { mode: "session-derived" } as const,
-    { mode: "certificate", partnerFingerprint: PARTNER_FP_A } as const,
-  ])
-    expect(() =>
-      assertPartnerFingerprintRecordable(signing, absent),
-    ).not.toThrow();
-});
+describe("assertPartnerFingerprintRecordable", () => {
+  test("passes every block that records no pin", () => {
+    // Only a certificate-mode block with no pin on file ever writes here, so
+    // every other shape is a no-op -- checked against a path that does not exist,
+    // which would fail the access probe if the guard read it at all.
+    const absent = path.join(dir, "no-such-dir", "alcove.yaml");
+    for (const signing of [
+      undefined,
+      { mode: "none" } as const,
+      { mode: "session-derived" } as const,
+      { mode: "certificate", partnerFingerprint: PARTNER_FP_A } as const,
+    ])
+      expect(() =>
+        assertPartnerFingerprintRecordable(signing, absent),
+      ).not.toThrow();
+  });
 
-test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-  "assertPartnerFingerprintRecordable refuses an unwritable configuration (skipped where a directory cannot be made read-only for its owner)",
-  () => {
-    const readOnlyDir = path.join(dir, "readonly");
-    fs.mkdirSync(readOnlyDir);
-    const configPath = path.join(readOnlyDir, "alcove.yaml");
-    fs.writeFileSync(configPath, certificateModeConfigSource());
-    fs.chmodSync(readOnlyDir, 0o555);
-    let caught: unknown;
-    try {
-      assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath);
-    } catch (err) {
-      caught = err;
-    } finally {
-      fs.chmodSync(readOnlyDir, 0o755);
-    }
-    expect(caught).toBeInstanceOf(OperatorConfigError);
-    expect((caught as Error).message).toContain(configPath);
-  },
-);
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "refuses an unwritable configuration (skipped where a directory cannot be made read-only for its owner)",
+    () => {
+      const readOnlyDir = path.join(dir, "readonly");
+      fs.mkdirSync(readOnlyDir);
+      const configPath = path.join(readOnlyDir, "alcove.yaml");
+      fs.writeFileSync(configPath, certificateModeConfigSource());
+      fs.chmodSync(readOnlyDir, 0o555);
+      let caught: unknown;
+      try {
+        assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath);
+      } catch (err) {
+        caught = err;
+      } finally {
+        fs.chmodSync(readOnlyDir, 0o755);
+      }
+      expect(caught).toBeInstanceOf(OperatorConfigError);
+      expect((caught as Error).message).toContain(configPath);
+    },
+  );
 
-test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-  "assertPartnerFingerprintRecordable passes a read-only configuration file in a writable directory, and the pin is recorded through it (skipped where a file cannot be made read-only for its owner)",
-  () => {
-    // The write renames a new file over the destination, and a rename needs no
-    // write bit on what it replaces, so the file's own mode decides nothing --
-    // refusing on it would cost the operator a run that could have pinned.
+  test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "passes a read-only configuration file in a writable directory, and the pin is recorded through it (skipped where a file cannot be made read-only for its owner)",
+    () => {
+      // The write renames a new file over the destination, and a rename needs no
+      // write bit on what it replaces, so the file's own mode decides nothing --
+      // refusing on it would cost the operator a run that could have pinned.
+      const configPath = path.join(dir, "alcove.yaml");
+      fs.writeFileSync(configPath, certificateModeConfigSource());
+      fs.chmodSync(configPath, 0o444);
+      try {
+        expect(() =>
+          assertPartnerFingerprintRecordable(
+            { mode: "certificate" },
+            configPath,
+          ),
+        ).not.toThrow();
+        persistPartnerFingerprint(configPath, PARTNER_FP_A);
+        const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+          signing: { partner_fingerprint: string };
+        };
+        expect(parsed.signing.partner_fingerprint).toBe(PARTNER_FP_A);
+      } finally {
+        fs.chmodSync(configPath, 0o644);
+      }
+    },
+  );
+
+  test("passes a writable configuration", () => {
     const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(configPath, certificateModeConfigSource());
-    fs.chmodSync(configPath, 0o444);
-    try {
-      expect(() =>
-        assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath),
-      ).not.toThrow();
-      persistPartnerFingerprint(configPath, PARTNER_FP_A);
-      const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
-        signing: { partner_fingerprint: string };
-      };
-      expect(parsed.signing.partner_fingerprint).toBe(PARTNER_FP_A);
-    } finally {
-      fs.chmodSync(configPath, 0o644);
-    }
-  },
-);
-
-test("assertPartnerFingerprintRecordable passes a writable configuration", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(configPath, certificateModeConfigSource());
-  expect(() =>
-    assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath),
-  ).not.toThrow();
+    expect(() =>
+      assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath),
+    ).not.toThrow();
+  });
 });
 
 // --- persistDisclosedPayloadColumns ------------------------------------------
 
-test("persistDisclosedPayloadColumns adds the field and preserves comments and other fields", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "# hand-authored config",
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: sftp.example.org # the drop",
-      "",
-    ].join("\n"),
-  );
-  persistDisclosedPayloadColumns(configPath, ["notes", "member_id"]);
-  const raw = fs.readFileSync(configPath, "utf8");
-  // Operator comments and other fields survive the surgical write.
-  expect(raw).toContain("# hand-authored config");
-  expect(raw).toContain("host: sftp.example.org # the drop");
-  const parsed = YAML.parse(raw) as {
-    disclosed_payload_columns: string[];
-  };
-  expect(parsed.disclosed_payload_columns).toEqual(["notes", "member_id"]);
-});
+describe("persistDisclosedPayloadColumns", () => {
+  test("adds the field and preserves comments and other fields", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "# hand-authored config",
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: sftp.example.org # the drop",
+        "",
+      ].join("\n"),
+    );
+    persistDisclosedPayloadColumns(configPath, ["notes", "member_id"]);
+    const raw = fs.readFileSync(configPath, "utf8");
+    // Operator comments and other fields survive the surgical write.
+    expect(raw).toContain("# hand-authored config");
+    expect(raw).toContain("host: sftp.example.org # the drop");
+    const parsed = YAML.parse(raw) as {
+      disclosed_payload_columns: string[];
+    };
+    expect(parsed.disclosed_payload_columns).toEqual(["notes", "member_id"]);
+  });
 
-test("persistDisclosedPayloadColumns refreshes a stale value (the re-invite fix)", () => {
-  // A config with an OLD commitment, re-minted over changed metadata: the
-  // field must be overwritten to the new set, never left stale (else the next
-  // exchange false-fires against a promise the partner no longer holds).
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: h",
-      "disclosed_payload_columns:",
-      "  - old_col",
-      "",
-    ].join("\n"),
-  );
-  persistDisclosedPayloadColumns(configPath, ["new_col"]);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).not.toContain("old_col");
-  const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
-  expect(parsed.disclosed_payload_columns).toEqual(["new_col"]);
-});
+  test("refreshes a stale value (the re-invite fix)", () => {
+    // A config with an OLD commitment, re-minted over changed metadata: the
+    // field must be overwritten to the new set, never left stale (else the next
+    // exchange false-fires against a promise the partner no longer holds).
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: h",
+        "disclosed_payload_columns:",
+        "  - old_col",
+        "",
+      ].join("\n"),
+    );
+    persistDisclosedPayloadColumns(configPath, ["new_col"]);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("old_col");
+    const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
+    expect(parsed.disclosed_payload_columns).toEqual(["new_col"]);
+  });
 
-test("persistDisclosedPayloadColumns removes the field when the commitment is undefined", () => {
-  // A re-invite from a config whose metadata is unknown publishes no subset, so a
-  // previously-recorded commitment must be cleared, not retained stale.
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: h",
-      "disclosed_payload_columns:",
-      "  - old_col",
-      "",
-    ].join("\n"),
-  );
-  persistDisclosedPayloadColumns(configPath, undefined);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).not.toContain("disclosed_payload_columns");
-  expect(raw).not.toContain("old_col");
-  // The rest of the config is intact.
-  const parsed = YAML.parse(raw) as {
-    connection: { channel: string };
-    disclosed_payload_columns?: string[];
-  };
-  expect(parsed.connection.channel).toBe("sftp");
-  expect(parsed.disclosed_payload_columns).toBeUndefined();
-});
+  test("removes the field when the commitment is undefined", () => {
+    // A re-invite from a config whose metadata is unknown publishes no subset, so a
+    // previously-recorded commitment must be cleared, not retained stale.
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: h",
+        "disclosed_payload_columns:",
+        "  - old_col",
+        "",
+      ].join("\n"),
+    );
+    persistDisclosedPayloadColumns(configPath, undefined);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("disclosed_payload_columns");
+    expect(raw).not.toContain("old_col");
+    // The rest of the config is intact.
+    const parsed = YAML.parse(raw) as {
+      connection: { channel: string };
+      disclosed_payload_columns?: string[];
+    };
+    expect(parsed.connection.channel).toBe("sftp");
+    expect(parsed.disclosed_payload_columns).toBeUndefined();
+  });
 
-test("persistDisclosedPayloadColumns writes an empty array verbatim (strict disclose-nothing)", () => {
-  // Empty is a real commitment ("disclose nothing"), distinct from absent; it must
-  // be written, not dropped.
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    "connection:\n  channel: sftp\n  server:\n    host: h\n",
-  );
-  persistDisclosedPayloadColumns(configPath, []);
-  const raw = fs.readFileSync(configPath, "utf8");
-  const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
-  expect(parsed.disclosed_payload_columns).toEqual([]);
-});
-
-test.skipIf(process.platform === "win32")(
-  "persistDisclosedPayloadColumns writes the config owner-read-only (0600)",
-  () => {
+  test("writes an empty array verbatim (strict disclose-nothing)", () => {
+    // Empty is a real commitment ("disclose nothing"), distinct from absent; it must
+    // be written, not dropped.
     const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
       "connection:\n  channel: sftp\n  server:\n    host: h\n",
     );
-    persistDisclosedPayloadColumns(configPath, ["notes"]);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-  },
-);
+    persistDisclosedPayloadColumns(configPath, []);
+    const raw = fs.readFileSync(configPath, "utf8");
+    const parsed = YAML.parse(raw) as { disclosed_payload_columns: string[] };
+    expect(parsed.disclosed_payload_columns).toEqual([]);
+  });
 
-test("persistDisclosedPayloadColumns throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const original = "connection: [unbalanced\n";
-  fs.writeFileSync(configPath, original);
-  // Routed through the same sensitive-file chokepoint as persistHostKeyFingerprint,
-  // so the parse failure is classified as a local usage error (exit 64) rather than
-  // a bare Error that would fall through to the generic exit code -- and, being a
-  // path-only failure raised before the write, leaves the file intact.
-  expect(() => persistDisclosedPayloadColumns(configPath, ["notes"])).toThrow(
-    UsageError,
+  test.skipIf(process.platform === "win32")(
+    "writes the config owner-read-only (0600)",
+    () => {
+      const configPath = path.join(dir, "alcove.yaml");
+      fs.writeFileSync(
+        configPath,
+        "connection:\n  channel: sftp\n  server:\n    host: h\n",
+      );
+      persistDisclosedPayloadColumns(configPath, ["notes"]);
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    },
   );
-  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
 });
 
 // --- persistExpectedPayloadColumns -------------------------------------------
 
-test("persistExpectedPayloadColumns adds the field and preserves comments and other fields", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "# hand-authored config",
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: sftp.example.org # the drop",
-      "",
-    ].join("\n"),
-  );
-  persistExpectedPayloadColumns(configPath, ["diagnosis", "notes"]);
-  const raw = fs.readFileSync(configPath, "utf8");
-  // Operator comments and other fields survive the surgical write.
-  expect(raw).toContain("# hand-authored config");
-  expect(raw).toContain("host: sftp.example.org # the drop");
-  const parsed = YAML.parse(raw) as {
-    expected_payload_columns: string[];
-  };
-  expect(parsed.expected_payload_columns).toEqual(["diagnosis", "notes"]);
-});
+describe("persistExpectedPayloadColumns", () => {
+  test("adds the field and preserves comments and other fields", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "# hand-authored config",
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: sftp.example.org # the drop",
+        "",
+      ].join("\n"),
+    );
+    persistExpectedPayloadColumns(configPath, ["diagnosis", "notes"]);
+    const raw = fs.readFileSync(configPath, "utf8");
+    // Operator comments and other fields survive the surgical write.
+    expect(raw).toContain("# hand-authored config");
+    expect(raw).toContain("host: sftp.example.org # the drop");
+    const parsed = YAML.parse(raw) as {
+      expected_payload_columns: string[];
+    };
+    expect(parsed.expected_payload_columns).toEqual(["diagnosis", "notes"]);
+  });
 
-test("persistExpectedPayloadColumns refreshes a stale value (the accept-reuse fix)", () => {
-  // A config with an OLD consented set, re-accepted over a changed disclosed
-  // subset: the field must be overwritten to the newly-consented set, never left
-  // stale (else the next recurring exchange false-aborts against a set the partner
-  // no longer discloses).
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: h",
-      "expected_payload_columns:",
-      "  - old_col",
-      "",
-    ].join("\n"),
-  );
-  persistExpectedPayloadColumns(configPath, ["new_col"]);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).not.toContain("old_col");
-  const parsed = YAML.parse(raw) as { expected_payload_columns: string[] };
-  expect(parsed.expected_payload_columns).toEqual(["new_col"]);
-});
+  test("refreshes a stale value (the accept-reuse fix)", () => {
+    // A config with an OLD consented set, re-accepted over a changed disclosed
+    // subset: the field must be overwritten to the newly-consented set, never left
+    // stale (else the next recurring exchange false-aborts against a set the partner
+    // no longer discloses).
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: h",
+        "expected_payload_columns:",
+        "  - old_col",
+        "",
+      ].join("\n"),
+    );
+    persistExpectedPayloadColumns(configPath, ["new_col"]);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("old_col");
+    const parsed = YAML.parse(raw) as { expected_payload_columns: string[] };
+    expect(parsed.expected_payload_columns).toEqual(["new_col"]);
+  });
 
-test("persistExpectedPayloadColumns removes the field when the consented set is undefined", () => {
-  // A re-accept whose invitation had no disclosed subset records no consented
-  // set, so a previously-recorded commitment must be cleared, not retained stale --
-  // the exchange then reconciles lazily.
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: h",
-      "expected_payload_columns:",
-      "  - old_col",
-      "",
-    ].join("\n"),
-  );
-  persistExpectedPayloadColumns(configPath, undefined);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).not.toContain("expected_payload_columns");
-  expect(raw).not.toContain("old_col");
-  // The rest of the config is intact.
-  const parsed = YAML.parse(raw) as {
-    connection: { channel: string };
-    expected_payload_columns?: string[];
-  };
-  expect(parsed.connection.channel).toBe("sftp");
-  expect(parsed.expected_payload_columns).toBeUndefined();
-});
+  test("removes the field when the consented set is undefined", () => {
+    // A re-accept whose invitation had no disclosed subset records no consented
+    // set, so a previously-recorded commitment must be cleared, not retained stale --
+    // the exchange then reconciles lazily.
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: h",
+        "expected_payload_columns:",
+        "  - old_col",
+        "",
+      ].join("\n"),
+    );
+    persistExpectedPayloadColumns(configPath, undefined);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("expected_payload_columns");
+    expect(raw).not.toContain("old_col");
+    // The rest of the config is intact.
+    const parsed = YAML.parse(raw) as {
+      connection: { channel: string };
+      expected_payload_columns?: string[];
+    };
+    expect(parsed.connection.channel).toBe("sftp");
+    expect(parsed.expected_payload_columns).toBeUndefined();
+  });
 
-test("persistExpectedPayloadColumns writes an empty array verbatim (strict receive-nothing)", () => {
-  // Empty is a real consent ("receive nothing"), distinct from absent; it must be
-  // written, not dropped.
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    "connection:\n  channel: sftp\n  server:\n    host: h\n",
-  );
-  persistExpectedPayloadColumns(configPath, []);
-  const raw = fs.readFileSync(configPath, "utf8");
-  const parsed = YAML.parse(raw) as { expected_payload_columns: string[] };
-  expect(parsed.expected_payload_columns).toEqual([]);
-});
-
-test.skipIf(process.platform === "win32")(
-  "persistExpectedPayloadColumns writes the config owner-read-only (0600)",
-  () => {
+  test("writes an empty array verbatim (strict receive-nothing)", () => {
+    // Empty is a real consent ("receive nothing"), distinct from absent; it must be
+    // written, not dropped.
     const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
       "connection:\n  channel: sftp\n  server:\n    host: h\n",
     );
-    persistExpectedPayloadColumns(configPath, ["diagnosis"]);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
-  },
-);
-
-test("persistExpectedPayloadColumns throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const original = "connection: [unbalanced\n";
-  fs.writeFileSync(configPath, original);
-  // Same chokepoint routing as persistDisclosedPayloadColumns: a local usage error
-  // (exit 64) rather than a bare Error, raised before the write so the file is
-  // left intact.
-  expect(() =>
-    persistExpectedPayloadColumns(configPath, ["diagnosis"]),
-  ).toThrow(UsageError);
-  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-});
-
-test("persistExpectedPayloadColumns refuses two non-snake_case spellings, naming both", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const original = configWithLinkageTerms({
-    connection: SFTP_CONNECTION_FIELDS,
-    expectedPayloadColumns: ["diagnosis"],
-    expected_payloadColumns: ["zip"],
+    persistExpectedPayloadColumns(configPath, []);
+    const raw = fs.readFileSync(configPath, "utf8");
+    const parsed = YAML.parse(raw) as { expected_payload_columns: string[] };
+    expect(parsed.expected_payload_columns).toEqual([]);
   });
-  fs.writeFileSync(configPath, original);
-  expect(() =>
-    persistExpectedPayloadColumns(configPath, ["diagnosis"]),
-  ).toThrow(
-    /has keys "expectedPayloadColumns" and "expected_payloadColumns", which are read as one setting/,
+
+  test.skipIf(process.platform === "win32")(
+    "writes the config owner-read-only (0600)",
+    () => {
+      const configPath = path.join(dir, "alcove.yaml");
+      fs.writeFileSync(
+        configPath,
+        "connection:\n  channel: sftp\n  server:\n    host: h\n",
+      );
+      persistExpectedPayloadColumns(configPath, ["diagnosis"]);
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    },
   );
-  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+
+  test("refuses two non-snake_case spellings, naming both", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const original = configWithLinkageTerms({
+      connection: SFTP_CONNECTION_FIELDS,
+      expectedPayloadColumns: ["diagnosis"],
+      expected_payloadColumns: ["zip"],
+    });
+    fs.writeFileSync(configPath, original);
+    expect(() =>
+      persistExpectedPayloadColumns(configPath, ["diagnosis"]),
+    ).toThrow(
+      /has keys "expectedPayloadColumns" and "expected_payloadColumns", which are read as one setting/,
+    );
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  });
 });
 
 // --- persistInvitationRelay ---------------------------------------------------
 
-test("persistInvitationRelay sets the relay and keeps the rest of the connection block", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "connection:",
-      "  channel: webrtc # the broker",
-      "  server:",
-      "    host: peer.example.org",
-      "  stun:",
-      "    - stun:own.example.org:3478",
-      "",
-    ].join("\n"),
-  );
-  expect(
-    persistInvitationRelay(configPath, {
-      turn: ["turns:relay.example.org:443"],
-    }),
-  ).toBe("set");
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).toContain("channel: webrtc # the broker");
-  expect(YAML.parse(raw).connection).toEqual({
-    channel: "webrtc",
-    server: { host: "peer.example.org" },
-    stun: ["stun:own.example.org:3478"],
-    invitation_relay: { turn: ["turns:relay.example.org:443"] },
-  });
-});
-
-test("persistInvitationRelay leaves a connection that is not webrtc as it is", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const original = [
-    "connection:",
-    "  channel: sftp",
-    "  server:",
-    "    host: h",
-    "",
-  ].join("\n");
-  fs.writeFileSync(configPath, original);
-  expect(
-    persistInvitationRelay(configPath, {
-      turn: ["turns:relay.example.org:443"],
-    }),
-  ).toBe("notWebrtc");
-  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-});
-
-function webrtcConfigWithCamelCaseRelay(): string {
-  return configWithLinkageTerms({
-    connection: {
+describe("persistInvitationRelay", () => {
+  test("sets the relay and keeps the rest of the connection block", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: webrtc # the broker",
+        "  server:",
+        "    host: peer.example.org",
+        "  stun:",
+        "    - stun:own.example.org:3478",
+        "",
+      ].join("\n"),
+    );
+    expect(
+      persistInvitationRelay(configPath, {
+        turn: ["turns:relay.example.org:443"],
+      }),
+    ).toBe("set");
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("channel: webrtc # the broker");
+    expect(YAML.parse(raw).connection).toEqual({
       channel: "webrtc",
       server: { host: "peer.example.org" },
-      invitationRelay: { turn: ["turns:old.example.org:443"] },
-    },
+      stun: ["stun:own.example.org:3478"],
+      invitation_relay: { turn: ["turns:relay.example.org:443"] },
+    });
   });
-}
 
-test("persistInvitationRelay replaces a camelCase relay under one snake_case spelling", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(configPath, webrtcConfigWithCamelCaseRelay());
-  expect(
-    persistInvitationRelay(configPath, {
-      turn: ["turns:relay.example.org:443"],
-    }),
-  ).toBe("set");
-  const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
-    connection: Record<string, unknown>;
-  };
-  expect(raw.connection).toEqual({
-    channel: "webrtc",
-    server: { host: "peer.example.org" },
-    invitation_relay: { turn: ["turns:relay.example.org:443"] },
-  });
-  expect(parseExchangeSpec(raw).connection).toMatchObject({
-    invitationRelay: { turn: ["turns:relay.example.org:443"] },
-  });
-});
-
-test("persistInvitationRelay removes a camelCase relay the invitation no longer names", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(configPath, webrtcConfigWithCamelCaseRelay());
-  expect(persistInvitationRelay(configPath, undefined)).toBe("removed");
-  const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
-    connection: Record<string, unknown>;
-  };
-  expect(raw.connection).toEqual({
-    channel: "webrtc",
-    server: { host: "peer.example.org" },
-  });
-  expect(parseExchangeSpec(raw).connection).not.toHaveProperty(
-    "invitationRelay",
-  );
-});
-
-// --- persistExpectedPartnerDeduplicate ---------------------------------------
-
-test("persistExpectedPartnerDeduplicate writes a boolean the spec schema reads back", () => {
-  // The surgical one-field write, driven end to end rather than reasoned about:
-  // the value must land as a YAML boolean the exchange-spec parse accepts, and
-  // the operator's comments and other fields must survive it.
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "# hand-authored config",
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: sftp.example.org # the drop",
-      "",
-    ].join("\n"),
-  );
-  persistExpectedPartnerDeduplicate(configPath, false);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).toContain("# hand-authored config");
-  expect(raw).toContain("host: sftp.example.org # the drop");
-  expect(YAML.parse(raw).expected_partner_deduplicate).toBe(false);
-  persistExpectedPartnerDeduplicate(configPath, true);
-  expect(
-    YAML.parse(fs.readFileSync(configPath, "utf8"))
-      .expected_partner_deduplicate,
-  ).toBe(true);
-});
-
-test("persistExpectedPartnerDeduplicate refreshes a stale declaration", () => {
-  // A config with a PRIOR acceptance's declaration, re-accepted over an
-  // invitation declaring the other value: the field is overwritten to what the
-  // operator has just consented to, never left stale (a stale `true` would refuse
-  // an honest partner now presenting `false`).
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
+  test("leaves a connection that is not webrtc as it is", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const original = [
       "connection:",
       "  channel: sftp",
       "  server:",
       "    host: h",
-      "expected_partner_deduplicate: true",
       "",
-    ].join("\n"),
-  );
-  persistExpectedPartnerDeduplicate(configPath, false);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(YAML.parse(raw).expected_partner_deduplicate).toBe(false);
+    ].join("\n");
+    fs.writeFileSync(configPath, original);
+    expect(
+      persistInvitationRelay(configPath, {
+        turn: ["turns:relay.example.org:443"],
+      }),
+    ).toBe("notWebrtc");
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  });
+
+  function webrtcConfigWithCamelCaseRelay(): string {
+    return configWithLinkageTerms({
+      connection: {
+        channel: "webrtc",
+        server: { host: "peer.example.org" },
+        invitationRelay: { turn: ["turns:old.example.org:443"] },
+      },
+    });
+  }
+
+  test("replaces a camelCase relay under one snake_case spelling", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(configPath, webrtcConfigWithCamelCaseRelay());
+    expect(
+      persistInvitationRelay(configPath, {
+        turn: ["turns:relay.example.org:443"],
+      }),
+    ).toBe("set");
+    const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      connection: Record<string, unknown>;
+    };
+    expect(raw.connection).toEqual({
+      channel: "webrtc",
+      server: { host: "peer.example.org" },
+      invitation_relay: { turn: ["turns:relay.example.org:443"] },
+    });
+    expect(parseExchangeSpec(raw).connection).toMatchObject({
+      invitationRelay: { turn: ["turns:relay.example.org:443"] },
+    });
+  });
+
+  test("removes a camelCase relay the invitation no longer names", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(configPath, webrtcConfigWithCamelCaseRelay());
+    expect(persistInvitationRelay(configPath, undefined)).toBe("removed");
+    const raw = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      connection: Record<string, unknown>;
+    };
+    expect(raw.connection).toEqual({
+      channel: "webrtc",
+      server: { host: "peer.example.org" },
+    });
+    expect(parseExchangeSpec(raw).connection).not.toHaveProperty(
+      "invitationRelay",
+    );
+  });
 });
 
-test.skipIf(process.platform === "win32")(
-  "persistExpectedPartnerDeduplicate writes the config owner-read-only (0600)",
-  () => {
+// --- persistExpectedPartnerDeduplicate ---------------------------------------
+
+describe("persistExpectedPartnerDeduplicate", () => {
+  test("writes a boolean the spec schema reads back", () => {
+    // The surgical one-field write, driven end to end rather than reasoned about:
+    // the value must land as a YAML boolean the exchange-spec parse accepts, and
+    // the operator's comments and other fields must survive it.
     const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
-      "connection:\n  channel: sftp\n  server:\n    host: h\n",
+      [
+        "# hand-authored config",
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: sftp.example.org # the drop",
+        "",
+      ].join("\n"),
     );
+    persistExpectedPartnerDeduplicate(configPath, false);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).toContain("# hand-authored config");
+    expect(raw).toContain("host: sftp.example.org # the drop");
+    expect(YAML.parse(raw).expected_partner_deduplicate).toBe(false);
     persistExpectedPartnerDeduplicate(configPath, true);
-    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    expect(
+      YAML.parse(fs.readFileSync(configPath, "utf8"))
+        .expected_partner_deduplicate,
+    ).toBe(true);
+  });
+
+  test("refreshes a stale declaration", () => {
+    // A config with a PRIOR acceptance's declaration, re-accepted over an
+    // invitation declaring the other value: the field is overwritten to what the
+    // operator has just consented to, never left stale (a stale `true` would refuse
+    // an honest partner now presenting `false`).
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: h",
+        "expected_partner_deduplicate: true",
+        "",
+      ].join("\n"),
+    );
+    persistExpectedPartnerDeduplicate(configPath, false);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(YAML.parse(raw).expected_partner_deduplicate).toBe(false);
+  });
+
+  test.skipIf(process.platform === "win32")(
+    "writes the config owner-read-only (0600)",
+    () => {
+      const configPath = path.join(dir, "alcove.yaml");
+      fs.writeFileSync(
+        configPath,
+        "connection:\n  channel: sftp\n  server:\n    host: h\n",
+      );
+      persistExpectedPartnerDeduplicate(configPath, true);
+      expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+    },
+  );
+});
+
+// The malformed content each case writes before calling its persist*
+// function: a block-mapping conflict under the key the function edits for
+// persistHostKeyFingerprint and persistPartnerFingerprint (each parses only
+// that nested path), and an unbalanced flow sequence -- caught earlier, by the
+// document-wide YAML parse -- for the other three.
+const MALFORMED_CONFIG_CASES: Array<
+  [
+    label: string,
+    malformed: string,
+    invoke: (configPath: string) => unknown,
+    checkPreserved: boolean,
+  ]
+> = [
+  [
+    "persistHostKeyFingerprint",
+    "connection:\n  - a\n  b: c\n",
+    (configPath) => persistHostKeyFingerprint(configPath, FP_A),
+    false,
+  ],
+  [
+    "persistPartnerFingerprint",
+    "signing:\n  - a\n  b: c\n",
+    (configPath) => persistPartnerFingerprint(configPath, PARTNER_FP_A),
+    false,
+  ],
+  [
+    "persistDisclosedPayloadColumns",
+    "connection: [unbalanced\n",
+    (configPath) => persistDisclosedPayloadColumns(configPath, ["notes"]),
+    true,
+  ],
+  [
+    "persistExpectedPayloadColumns",
+    "connection: [unbalanced\n",
+    (configPath) => persistExpectedPayloadColumns(configPath, ["diagnosis"]),
+    true,
+  ],
+  [
+    "persistExpectedPartnerDeduplicate",
+    "connection: [unbalanced\n",
+    (configPath) => persistExpectedPartnerDeduplicate(configPath, true),
+    true,
+  ],
+];
+
+test.each(MALFORMED_CONFIG_CASES)(
+  "%s throws (not silently) on a malformed config",
+  (_label, malformed, invoke, checkPreserved) => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(configPath, malformed);
+    expect(() => invoke(configPath)).toThrow(UsageError);
+    if (checkPreserved) {
+      expect(fs.readFileSync(configPath, "utf8")).toBe(malformed);
+    }
   },
 );
-
-test("persistExpectedPartnerDeduplicate throws (not silently) on a malformed config", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const original = "connection: [unbalanced\n";
-  fs.writeFileSync(configPath, original);
-  expect(() => persistExpectedPartnerDeduplicate(configPath, true)).toThrow(
-    UsageError,
-  );
-  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-});
 
 // --- diffLinkageTerms / formatReconcileDiffs ---------------------------------
 
@@ -1984,333 +2045,6 @@ function renderedAcceptReconcileError(
   );
 }
 
-test("diffLinkageTerms: identical terms have no conflicts and no warnings", () => {
-  const a = getDefaultLinkageTerms("Inviter Org");
-  const b = getDefaultLinkageTerms("Inviter Org");
-  const { conflicts, warnings } = diffLinkageTerms(a, b);
-  expect(conflicts).toEqual([]);
-  expect(warnings).toEqual([]);
-});
-
-test("diffLinkageTerms: a differing identity is NOT a conflict (party-specific)", () => {
-  const existing = getDefaultLinkageTerms("Acceptor Org");
-  const incoming = getDefaultLinkageTerms("Inviter Org");
-  // identity is the only field that differs; it is excluded from the comparison.
-  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toEqual([]);
-  expect(warnings).toEqual([]);
-});
-
-test("diffLinkageTerms: a differing date warns rather than conflicts (soft field)", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  existing.date = "2020-01-01";
-  incoming.date = "2024-06-09";
-  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toEqual([]);
-  expect(warnings).toHaveLength(1);
-  expect(warnings[0]).toContain("date");
-});
-
-test("diffLinkageTerms: an algorithm mismatch is a conflict naming the field", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  existing.algorithm = "psi-c";
-  incoming.algorithm = "psi";
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toHaveLength(1);
-  expect(conflicts[0].field).toBe("algorithm");
-  // Delimited, like every other value a conflict line names: the enum has no
-  // digit, so bareTermsValue's checked bare form declines it and it takes the quoted
-  // one, which costs the reading nothing.
-  expect(conflicts[0].existing).toBe('"psi-c"');
-  expect(conflicts[0].incoming).toBe('"psi"');
-});
-
-test("diffLinkageTerms: a linkage-strategy mismatch is a conflict naming the field", () => {
-  // linkageStrategy is mandatory-consistency like algorithm: a reused config whose
-  // strategy differs from the invitation must abort the reuse, not silently keep a
-  // config whose disclosure tradeoff differs from the one the acceptor was shown.
-  // Both directions, since either could persist a strategy the acceptor did not
-  // consent to (single-pass kept under a cascade invitation) or run a weaker one
-  // than consented (cascade kept under a single-pass invitation).
-  for (const [existingStrategy, incomingStrategy] of [
-    ["single-pass", "cascade"],
-    ["cascade", "single-pass"],
-  ] as const) {
-    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-    existing.linkageStrategy = existingStrategy;
-    incoming.linkageStrategy = incomingStrategy;
-    const { conflicts } = diffLinkageTerms(existing, incoming);
-    expect(conflicts).toHaveLength(1);
-    expect(conflicts[0].field).toBe("linkage_strategy");
-    expect(conflicts[0].existing).toBe(`"${existingStrategy}"`);
-    expect(conflicts[0].incoming).toBe(`"${incomingStrategy}"`);
-  }
-});
-
-test("diffLinkageTerms: a differing output policy is NOT a conflict (per-party)", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // output is a per-party preference the protocol checks as a complementary
-  // mirror at exchange time, so two valid parties differ here; reconciliation
-  // must not equality-compare it.
-  existing.output = { expectsOutput: false, shareWithPartner: true };
-  incoming.output = { expectsOutput: true, shareWithPartner: false };
-  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toEqual([]);
-  expect(warnings).toEqual([]);
-});
-
-test("diffLinkageTerms: a differing deduplicate flag is NOT a conflict (per-party)", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // deduplicate is per-party with no cross-party check; the acceptor's own value
-  // is legitimate. (Keep expectsOutput true to satisfy the intra-party rule that
-  // deduplicate requires it.)
-  existing.output = { expectsOutput: true, shareWithPartner: true };
-  incoming.output = { expectsOutput: true, shareWithPartner: true };
-  existing.deduplicate = true;
-  incoming.deduplicate = false;
-  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toEqual([]);
-  expect(warnings).toEqual([]);
-});
-
-test("diffLinkageTerms: a linkage-keys mismatch is a conflict naming the field", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // Drop a key from one side so the key sets differ.
-  incoming.linkageKeys = incoming.linkageKeys.slice(0, -1);
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts.map((c) => c.field)).toContain("linkage_keys");
-});
-
-test("diffLinkageTerms: a sub-field difference under matching key names renders the detail", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // Same key names on both sides, but one key's element is derived from a
-  // different field. A names-only render would print two identical lists; the
-  // detail fallback must instead show what actually differs.
-  incoming.linkageKeys[0].elements[0].field =
-    existing.linkageKeys[0].elements[0].field + "_x";
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  const keyConflict = conflicts.find((c) => c.field === "linkage_keys");
-  expect(keyConflict).toBeDefined();
-  expect(keyConflict?.existing).not.toBe(keyConflict?.incoming);
-  expect(keyConflict?.incoming).toContain("_x");
-});
-
-test("diffLinkageTerms: the rule-set citation follows core's both-sides-only rule", () => {
-  // All four citation shapes against one reconcile, held to the rule
-  // validateCompatibility applies: compared only where BOTH sides declare a
-  // citation, so a one-sided one reconciles cleanly and only a two-sided
-  // difference conflicts -- the case that would otherwise abort mid-run.
-  const foreign: LinkageRuleSetReference = {
-    fieldSet: { name: "county-pii", version: "3.1.0" },
-    keySet: { name: "county-keys", version: "3.1.0" },
-  };
-  const withCitation = (
-    citation: LinkageRuleSetReference | undefined,
-  ): LinkageTerms => {
-    const terms = cloneTerms(getDefaultLinkageTerms("Org"));
-    if (citation === undefined) delete terms.linkageRuleSet;
-    else terms.linkageRuleSet = citation;
-    return terms;
-  };
-  const shipped = DEFAULT_LINKAGE_RULE_SET.reference;
-
-  const neither = diffLinkageTerms(
-    withCitation(undefined),
-    withCitation(undefined),
-  );
-  expect(neither.conflicts).toEqual([]);
-  expect(neither.warnings).toEqual([]);
-
-  const configOnly = diffLinkageTerms(
-    withCitation(shipped),
-    withCitation(undefined),
-  );
-  expect(configOnly.conflicts).toEqual([]);
-  expect(configOnly.warnings).toEqual([]);
-
-  const invitationOnly = diffLinkageTerms(
-    withCitation(undefined),
-    withCitation(foreign),
-  );
-  expect(invitationOnly.conflicts).toEqual([]);
-  expect(invitationOnly.warnings).toEqual([]);
-
-  const agreeing = diffLinkageTerms(
-    withCitation(shipped),
-    withCitation({ fieldSet: shipped.fieldSet, keySet: shipped.keySet }),
-  );
-  expect(agreeing.conflicts).toEqual([]);
-  expect(agreeing.warnings).toEqual([]);
-
-  const differing = diffLinkageTerms(
-    withCitation(shipped),
-    withCitation(foreign),
-  );
-  expect(differing.conflicts).toHaveLength(1);
-  expect(differing.conflicts[0].field).toBe("linkage_rule_set");
-  // Keys first, the order core's mismatch message renders the pair in, and raw:
-  // the caller composes this into a UsageError escaped once where it is shown.
-  expect(differing.conflicts[0].existing).toBe(
-    `"${shipped.keySet.name}" ${shipped.keySet.version} over ` +
-      `"${shipped.fieldSet.name}" ${shipped.fieldSet.version}`,
-  );
-  expect(differing.conflicts[0].incoming).toBe(
-    '"county-keys" 3.1.0 over "county-pii" 3.1.0',
-  );
-});
-
-test("diffLinkageTerms: two citations differing only under NFC are a conflict", () => {
-  // The citation is compared by RAW canonical form, matching the predicate
-  // validateCompatibility applies to it: core holds two citations to byte-exact
-  // equality, so this pair aborts the exchange mid-run. Folding the two names
-  // together here would report the reuse clean and let the run reach that abort;
-  // the conflict at accept is the correct pre-emption of it.
-  const composed = "acc\u00e9s";
-  const decomposed = "acce\u0301s";
-  expect(composed).not.toBe(decomposed);
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  existing.linkageRuleSet = {
-    fieldSet: { name: `${composed}-pii`, version: "1.0.0" },
-    keySet: { name: `${composed}-keys`, version: "1.0.0" },
-  };
-  incoming.linkageRuleSet = {
-    fieldSet: { name: `${decomposed}-pii`, version: "1.0.0" },
-    keySet: { name: `${decomposed}-keys`, version: "1.0.0" },
-  };
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toHaveLength(1);
-  expect(conflicts[0].field).toBe("linkage_rule_set");
-  // The same pair through core's own comparison, so the parity this compare
-  // exists for is asserted against core rather than restated here.
-  expect(
-    validateCompatibility(existing, incoming).errors.some((e) =>
-      e.includes("linkage rule set mismatch"),
-    ),
-  ).toBe(true);
-  // The two clauses hold the same characters and would print alike on a
-  // terminal, which would leave the operator a conflict they cannot see. They
-  // are distinguishable because the display boundary escapes each non-ASCII code
-  // point, so the composed and decomposed spellings render differently.
-  const rendered = renderedAcceptReconcileError(conflicts);
-  expect(rendered).toContain("acc\\xe9s-keys");
-  expect(rendered).toContain("acce\\u0301s-keys");
-});
-
-test("diffLinkageTerms: a set name cannot forge the citation clause's own structure", () => {
-  // Both names are built to spell the clause the conflict line composes around
-  // them -- name, version, " over ", name, version -- which is printable ASCII
-  // throughout, so nothing at the display boundary rewrites it. The two
-  // citations are genuinely different and a plain quote would render them
-  // identically; quoteTermsValue's doubling grammar is what keeps each name inside one
-  // run, so the pair stays distinguishable and neither name displays as structure.
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  existing.linkageRuleSet = {
-    fieldSet: { name: 'a" 1.0.0 over "b', version: "1.0.0" },
-    keySet: { name: "k", version: "1.0.0" },
-  };
-  incoming.linkageRuleSet = {
-    fieldSet: { name: "b", version: "1.0.0" },
-    keySet: { name: 'k" 1.0.0 over "a', version: "1.0.0" },
-  };
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toHaveLength(1);
-  expect(conflicts[0].existing).not.toBe(conflicts[0].incoming);
-  // Each embedded delimiter is doubled, so the run it sits in cannot close on
-  // it, and the clause still has exactly one " over " per side.
-  expect(conflicts[0].existing).toBe(
-    '"k" 1.0.0 over "a"" 1.0.0 over ""b" 1.0.0',
-  );
-  expect(conflicts[0].incoming).toBe(
-    '"k"" 1.0.0 over ""a" 1.0.0 over "b" 1.0.0',
-  );
-  const rendered = renderedAcceptReconcileError(conflicts);
-  expect(rendered).toContain("then retry with the same invitation.");
-  // The clause's fit is a second account of the same composition, so a slot that
-  // can hold the clause whole must show exactly the clause: a fitted form that
-  // had drifted from the composed one fails here.
-  expect(conflictValues(rendered, "linkage_rule_set")).toEqual([
-    conflicts[0].existing,
-    conflicts[0].incoming,
-  ]);
-});
-
-test("diffLinkageTerms: the structural-list fallback treats the JSON it falls back to", () => {
-  // A sub-field difference under matching key names falls to the full JSON, and
-  // that JSON contains the same chosen bytes the name-only rendering withheld --
-  // a key element's transform params here -- so it takes the same treatment: a
-  // marker planted inside the structure is replaced, and the whole is one
-  // delimited run rather than loose text spelling the line's own clause.
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  incoming.linkageKeys[0].elements[0].transform = [
-    {
-      function: "noop",
-      params: {
-        note: "-----BEGIN OPENSSH PRIVATE KEY-----",
-        forged: 'x vs required "y',
-      },
-    },
-  ];
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  const keyConflict = conflicts.find((c) => c.field === "linkage_keys");
-  expect(keyConflict).toBeDefined();
-  expect(keyConflict?.incoming).toContain("elements");
-  expect(keyConflict?.incoming).not.toContain("BEGIN OPENSSH PRIVATE KEY");
-  expect(keyConflict?.incoming).toContain("[redacted private key]");
-  // The whole JSON is one run, so every delimiter inside it is doubled and none
-  // of it can close the run or spell the conflict line's own clause.
-  expect(keyConflict?.incoming.startsWith('"')).toBe(true);
-  expect(keyConflict?.incoming.endsWith('"')).toBe(true);
-  expect(keyConflict?.incoming).not.toContain('x vs required "y');
-});
-
-test("diffLinkageTerms: a private-key marker in a citation cannot truncate the accept error", () => {
-  // The display boundary's private-key rule is fail-closed past a BEGIN marker
-  // with no END: it replaces to the end of the link it appears in. The
-  // partner picks the invitation's set names, so a citation interpolated raw
-  // would let one of them consume every conflict line and the recovery step
-  // composed behind it -- the operator would see an abort with no diff and no
-  // way forward. Redacting the halves where they are interpolated bounds the
-  // rule to the fragment that had the marker.
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  existing.linkageRuleSet = {
-    fieldSet: { name: "baseline-pii", version: "1.0.0" },
-    keySet: { name: "hmis-keys", version: "1.0.0" },
-  };
-  incoming.linkageRuleSet = {
-    fieldSet: { name: "-----BEGIN OPENSSH PRIVATE KEY-----", version: "1.0.0" },
-    keySet: { name: "hmis-keys", version: "1.0.0" },
-  };
-  // A second conflict, so the message has a diff line AFTER the citation's.
-  incoming.legalAgreement = {
-    reference: "MOU-2025-0042",
-    purpose: "Audit and evaluation of the State tutoring program",
-    expirationDate: "2030-01-01",
-  };
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts.map((c) => c.field)).toEqual([
-    "linkage_rule_set",
-    "legal_agreement",
-  ]);
-
-  const rendered = renderedAcceptReconcileError(conflicts);
-  expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
-  expect(rendered).toContain("[redacted private key]");
-  expect(rendered).toContain("legal_agreement");
-  expect(rendered).toContain("MOU-2025-0042");
-  expect(rendered).toContain("then retry with the same invitation.");
-});
-
 // The two sides one field's conflict line renders, read out of the composed
 // refusal: what the operator is shown for that field once the fit has run. The
 // message is read AFTER the display boundary, which keeps the line breaks the
@@ -2324,42 +2058,456 @@ function conflictValues(rendered: string, field: string): string[] {
   return sides;
 }
 
-test("diffLinkageTerms: citation values at the schema's length cannot truncate the accept error", () => {
-  // Every value in a citation is text the partner chose, bounded by the schema
-  // in CODE POINTS, which is not a display bound: one code point escapes to as
-  // many as ten characters at the display boundary, so a name at the schema's
-  // maximum can render past the whole budget the renderer gives this one link --
-  // eating the conflict lines behind the citation's and the retry step the
-  // operator has to act on, with no marker or delimiter involved at all.
-  //
-  // Driven at that maximum on BOTH sides, over the widest-rendering shapes the
-  // schema admits, and in the two forms fitting the values can produce: a pair
-  // the fitted clauses still tell apart, and a pair differing only inside what
-  // the fit dropped.
-  const longSemver = `1.0.${"9".repeat(MAX_NAME_LENGTH - 4)}`;
-  expect(longSemver).toHaveLength(MAX_NAME_LENGTH);
-  const vectors = schemaMaximalNames();
-  const replacingFirst = (value: string): string =>
-    ["a", ...Array.from(value).slice(1)].join("");
-  const replacingLast = (value: string): string =>
-    [...Array.from(value).slice(0, -1), "a"].join("");
+describe("diffLinkageTerms", () => {
+  test("identical terms have no conflicts and no warnings", () => {
+    const a = getDefaultLinkageTerms("Inviter Org");
+    const b = getDefaultLinkageTerms("Inviter Org");
+    const { conflicts, warnings } = diffLinkageTerms(a, b);
+    expect(conflicts).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
 
-  for (const vector of vectors) {
-    for (const differing of [replacingFirst, replacingLast]) {
-      const citation = (name: string): LinkageRuleSetReference => ({
-        fieldSet: { name, version: longSemver },
-        keySet: { name, version: longSemver },
-      });
+  test("a differing identity is NOT a conflict (party-specific)", () => {
+    const existing = getDefaultLinkageTerms("Acceptor Org");
+    const incoming = getDefaultLinkageTerms("Inviter Org");
+    // identity is the only field that differs; it is excluded from the comparison.
+    const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+    expect(conflicts).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  test("a differing date warns rather than conflicts (soft field)", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.date = "2020-01-01";
+    incoming.date = "2024-06-09";
+    const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+    expect(conflicts).toEqual([]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("date");
+  });
+
+  test("an algorithm mismatch is a conflict naming the field", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.algorithm = "psi-c";
+    incoming.algorithm = "psi";
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].field).toBe("algorithm");
+    // Delimited, like every other value a conflict line names: the enum has no
+    // digit, so bareTermsValue's checked bare form declines it and it takes the quoted
+    // one, which costs the reading nothing.
+    expect(conflicts[0].existing).toBe('"psi-c"');
+    expect(conflicts[0].incoming).toBe('"psi"');
+  });
+
+  test("a linkage-strategy mismatch is a conflict naming the field", () => {
+    // linkageStrategy is mandatory-consistency like algorithm: a reused config whose
+    // strategy differs from the invitation must abort the reuse, not silently keep a
+    // config whose disclosure tradeoff differs from the one the acceptor was shown.
+    // Both directions, since either could persist a strategy the acceptor did not
+    // consent to (single-pass kept under a cascade invitation) or run a weaker one
+    // than consented (cascade kept under a single-pass invitation).
+    for (const [existingStrategy, incomingStrategy] of [
+      ["single-pass", "cascade"],
+      ["cascade", "single-pass"],
+    ] as const) {
       const existing = cloneTerms(getDefaultLinkageTerms("Org"));
       const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-      existing.linkageRuleSet = citation(vector);
-      incoming.linkageRuleSet = citation(differing(vector));
-      // A second conflict, so the message has a diff line AFTER the
-      // citation's, and the legal agreement is what an operator reads next.
-      incoming.legalAgreement = {
-        reference: "MOU-2025-0042",
+      existing.linkageStrategy = existingStrategy;
+      incoming.linkageStrategy = incomingStrategy;
+      const { conflicts } = diffLinkageTerms(existing, incoming);
+      expect(conflicts).toHaveLength(1);
+      expect(conflicts[0].field).toBe("linkage_strategy");
+      expect(conflicts[0].existing).toBe(`"${existingStrategy}"`);
+      expect(conflicts[0].incoming).toBe(`"${incomingStrategy}"`);
+    }
+  });
+
+  test("a differing output policy is NOT a conflict (per-party)", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    // output is a per-party preference the protocol checks as a complementary
+    // mirror at exchange time, so two valid parties differ here; reconciliation
+    // must not equality-compare it.
+    existing.output = { expectsOutput: false, shareWithPartner: true };
+    incoming.output = { expectsOutput: true, shareWithPartner: false };
+    const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+    expect(conflicts).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  test("a differing deduplicate flag is NOT a conflict (per-party)", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    // deduplicate is per-party with no cross-party check; the acceptor's own value
+    // is legitimate. (Keep expectsOutput true to satisfy the intra-party rule that
+    // deduplicate requires it.)
+    existing.output = { expectsOutput: true, shareWithPartner: true };
+    incoming.output = { expectsOutput: true, shareWithPartner: true };
+    existing.deduplicate = true;
+    incoming.deduplicate = false;
+    const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+    expect(conflicts).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  test("a linkage-keys mismatch is a conflict naming the field", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    // Drop a key from one side so the key sets differ.
+    incoming.linkageKeys = incoming.linkageKeys.slice(0, -1);
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts.map((c) => c.field)).toContain("linkage_keys");
+  });
+
+  test("a sub-field difference under matching key names renders the detail", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    // Same key names on both sides, but one key's element is derived from a
+    // different field. A names-only render would print two identical lists; the
+    // detail fallback must instead show what actually differs.
+    incoming.linkageKeys[0].elements[0].field =
+      existing.linkageKeys[0].elements[0].field + "_x";
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    const keyConflict = conflicts.find((c) => c.field === "linkage_keys");
+    expect(keyConflict).toBeDefined();
+    expect(keyConflict?.existing).not.toBe(keyConflict?.incoming);
+    expect(keyConflict?.incoming).toContain("_x");
+  });
+
+  test("the rule-set citation follows core's both-sides-only rule", () => {
+    // All four citation shapes against one reconcile, held to the rule
+    // validateCompatibility applies: compared only where BOTH sides declare a
+    // citation, so a one-sided one reconciles cleanly and only a two-sided
+    // difference conflicts -- the case that would otherwise abort mid-run.
+    const foreign: LinkageRuleSetReference = {
+      fieldSet: { name: "county-pii", version: "3.1.0" },
+      keySet: { name: "county-keys", version: "3.1.0" },
+    };
+    const withCitation = (
+      citation: LinkageRuleSetReference | undefined,
+    ): LinkageTerms => {
+      const terms = cloneTerms(getDefaultLinkageTerms("Org"));
+      if (citation === undefined) delete terms.linkageRuleSet;
+      else terms.linkageRuleSet = citation;
+      return terms;
+    };
+    const shipped = DEFAULT_LINKAGE_RULE_SET.reference;
+
+    const neither = diffLinkageTerms(
+      withCitation(undefined),
+      withCitation(undefined),
+    );
+    expect(neither.conflicts).toEqual([]);
+    expect(neither.warnings).toEqual([]);
+
+    const configOnly = diffLinkageTerms(
+      withCitation(shipped),
+      withCitation(undefined),
+    );
+    expect(configOnly.conflicts).toEqual([]);
+    expect(configOnly.warnings).toEqual([]);
+
+    const invitationOnly = diffLinkageTerms(
+      withCitation(undefined),
+      withCitation(foreign),
+    );
+    expect(invitationOnly.conflicts).toEqual([]);
+    expect(invitationOnly.warnings).toEqual([]);
+
+    const agreeing = diffLinkageTerms(
+      withCitation(shipped),
+      withCitation({ fieldSet: shipped.fieldSet, keySet: shipped.keySet }),
+    );
+    expect(agreeing.conflicts).toEqual([]);
+    expect(agreeing.warnings).toEqual([]);
+
+    const differing = diffLinkageTerms(
+      withCitation(shipped),
+      withCitation(foreign),
+    );
+    expect(differing.conflicts).toHaveLength(1);
+    expect(differing.conflicts[0].field).toBe("linkage_rule_set");
+    // Keys first, the order core's mismatch message renders the pair in, and raw:
+    // the caller composes this into a UsageError escaped once where it is shown.
+    expect(differing.conflicts[0].existing).toBe(
+      `"${shipped.keySet.name}" ${shipped.keySet.version} over ` +
+        `"${shipped.fieldSet.name}" ${shipped.fieldSet.version}`,
+    );
+    expect(differing.conflicts[0].incoming).toBe(
+      '"county-keys" 3.1.0 over "county-pii" 3.1.0',
+    );
+  });
+
+  test("two citations differing only under NFC are a conflict", () => {
+    // The citation is compared by RAW canonical form, matching the predicate
+    // validateCompatibility applies to it: core holds two citations to byte-exact
+    // equality, so this pair aborts the exchange mid-run. Folding the two names
+    // together here would report the reuse clean and let the run reach that abort;
+    // the conflict at accept is the correct pre-emption of it.
+    const composed = "acc\u00e9s";
+    const decomposed = "acce\u0301s";
+    expect(composed).not.toBe(decomposed);
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.linkageRuleSet = {
+      fieldSet: { name: `${composed}-pii`, version: "1.0.0" },
+      keySet: { name: `${composed}-keys`, version: "1.0.0" },
+    };
+    incoming.linkageRuleSet = {
+      fieldSet: { name: `${decomposed}-pii`, version: "1.0.0" },
+      keySet: { name: `${decomposed}-keys`, version: "1.0.0" },
+    };
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].field).toBe("linkage_rule_set");
+    // The same pair through core's own comparison, so the parity this compare
+    // exists for is asserted against core rather than restated here.
+    expect(
+      validateCompatibility(existing, incoming).errors.some((e) =>
+        e.includes("linkage rule set mismatch"),
+      ),
+    ).toBe(true);
+    // The two clauses hold the same characters and would print alike on a
+    // terminal, which would leave the operator a conflict they cannot see. They
+    // are distinguishable because the display boundary escapes each non-ASCII code
+    // point, so the composed and decomposed spellings render differently.
+    const rendered = renderedAcceptReconcileError(conflicts);
+    expect(rendered).toContain("acc\\xe9s-keys");
+    expect(rendered).toContain("acce\\u0301s-keys");
+  });
+
+  test("a set name cannot forge the citation clause's own structure", () => {
+    // Both names are built to spell the clause the conflict line composes around
+    // them -- name, version, " over ", name, version -- which is printable ASCII
+    // throughout, so nothing at the display boundary rewrites it. The two
+    // citations are genuinely different and a plain quote would render them
+    // identically; quoteTermsValue's doubling grammar is what keeps each name inside one
+    // run, so the pair stays distinguishable and neither name displays as structure.
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.linkageRuleSet = {
+      fieldSet: { name: 'a" 1.0.0 over "b', version: "1.0.0" },
+      keySet: { name: "k", version: "1.0.0" },
+    };
+    incoming.linkageRuleSet = {
+      fieldSet: { name: "b", version: "1.0.0" },
+      keySet: { name: 'k" 1.0.0 over "a', version: "1.0.0" },
+    };
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].existing).not.toBe(conflicts[0].incoming);
+    // Each embedded delimiter is doubled, so the run it sits in cannot close on
+    // it, and the clause still has exactly one " over " per side.
+    expect(conflicts[0].existing).toBe(
+      '"k" 1.0.0 over "a"" 1.0.0 over ""b" 1.0.0',
+    );
+    expect(conflicts[0].incoming).toBe(
+      '"k"" 1.0.0 over ""a" 1.0.0 over "b" 1.0.0',
+    );
+    const rendered = renderedAcceptReconcileError(conflicts);
+    expect(rendered).toContain("then retry with the same invitation.");
+    // The clause's fit is a second account of the same composition, so a slot that
+    // can hold the clause whole must show exactly the clause: a fitted form that
+    // had drifted from the composed one fails here.
+    expect(conflictValues(rendered, "linkage_rule_set")).toEqual([
+      conflicts[0].existing,
+      conflicts[0].incoming,
+    ]);
+  });
+
+  test("the structural-list fallback treats the JSON it falls back to", () => {
+    // A sub-field difference under matching key names falls to the full JSON, and
+    // that JSON contains the same chosen bytes the name-only rendering withheld --
+    // a key element's transform params here -- so it takes the same treatment: a
+    // marker planted inside the structure is replaced, and the whole is one
+    // delimited run rather than loose text spelling the line's own clause.
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    incoming.linkageKeys[0].elements[0].transform = [
+      {
+        function: "noop",
+        params: {
+          note: "-----BEGIN OPENSSH PRIVATE KEY-----",
+          forged: 'x vs required "y',
+        },
+      },
+    ];
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    const keyConflict = conflicts.find((c) => c.field === "linkage_keys");
+    expect(keyConflict).toBeDefined();
+    expect(keyConflict?.incoming).toContain("elements");
+    expect(keyConflict?.incoming).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(keyConflict?.incoming).toContain("[redacted private key]");
+    // The whole JSON is one run, so every delimiter inside it is doubled and none
+    // of it can close the run or spell the conflict line's own clause.
+    expect(keyConflict?.incoming.startsWith('"')).toBe(true);
+    expect(keyConflict?.incoming.endsWith('"')).toBe(true);
+    expect(keyConflict?.incoming).not.toContain('x vs required "y');
+  });
+
+  test("a private-key marker in a citation cannot truncate the accept error", () => {
+    // The display boundary's private-key rule is fail-closed past a BEGIN marker
+    // with no END: it replaces to the end of the link it appears in. The
+    // partner picks the invitation's set names, so a citation interpolated raw
+    // would let one of them consume every conflict line and the recovery step
+    // composed behind it -- the operator would see an abort with no diff and no
+    // way forward. Redacting the halves where they are interpolated bounds the
+    // rule to the fragment that had the marker.
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    existing.linkageRuleSet = {
+      fieldSet: { name: "baseline-pii", version: "1.0.0" },
+      keySet: { name: "hmis-keys", version: "1.0.0" },
+    };
+    incoming.linkageRuleSet = {
+      fieldSet: {
+        name: "-----BEGIN OPENSSH PRIVATE KEY-----",
+        version: "1.0.0",
+      },
+      keySet: { name: "hmis-keys", version: "1.0.0" },
+    };
+    // A second conflict, so the message has a diff line AFTER the citation's.
+    incoming.legalAgreement = {
+      reference: "MOU-2025-0042",
+      purpose: "Audit and evaluation of the State tutoring program",
+      expirationDate: "2030-01-01",
+    };
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts.map((c) => c.field)).toEqual([
+      "linkage_rule_set",
+      "legal_agreement",
+    ]);
+
+    const rendered = renderedAcceptReconcileError(conflicts);
+    expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(rendered).toContain("[redacted private key]");
+    expect(rendered).toContain("legal_agreement");
+    expect(rendered).toContain("MOU-2025-0042");
+    expect(rendered).toContain("then retry with the same invitation.");
+  });
+
+  test("citation values at the schema's length cannot truncate the accept error", () => {
+    // Every value in a citation is text the partner chose, bounded by the schema
+    // in CODE POINTS, which is not a display bound: one code point escapes to as
+    // many as ten characters at the display boundary, so a name at the schema's
+    // maximum can render past the whole budget the renderer gives this one link --
+    // eating the conflict lines behind the citation's and the retry step the
+    // operator has to act on, with no marker or delimiter involved at all.
+    //
+    // Driven at that maximum on BOTH sides, over the widest-rendering shapes the
+    // schema admits, and in the two forms fitting the values can produce: a pair
+    // the fitted clauses still tell apart, and a pair differing only inside what
+    // the fit dropped.
+    const longSemver = `1.0.${"9".repeat(MAX_NAME_LENGTH - 4)}`;
+    expect(longSemver).toHaveLength(MAX_NAME_LENGTH);
+    const vectors = schemaMaximalNames();
+    const replacingFirst = (value: string): string =>
+      ["a", ...Array.from(value).slice(1)].join("");
+    const replacingLast = (value: string): string =>
+      [...Array.from(value).slice(0, -1), "a"].join("");
+
+    for (const vector of vectors) {
+      for (const differing of [replacingFirst, replacingLast]) {
+        const citation = (name: string): LinkageRuleSetReference => ({
+          fieldSet: { name, version: longSemver },
+          keySet: { name, version: longSemver },
+        });
+        const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+        const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+        existing.linkageRuleSet = citation(vector);
+        incoming.linkageRuleSet = citation(differing(vector));
+        // A second conflict, so the message has a diff line AFTER the
+        // citation's, and the legal agreement is what an operator reads next.
+        incoming.legalAgreement = {
+          reference: "MOU-2025-0042",
+          purpose: "Audit and evaluation of the State tutoring program",
+          expirationDate: "2030-01-01",
+        };
+        const { conflicts } = diffLinkageTerms(existing, incoming);
+        expect(conflicts.map((c) => c.field)).toEqual([
+          "linkage_rule_set",
+          "legal_agreement",
+        ]);
+
+        const rendered = renderedAcceptReconcileError(conflicts);
+        // Under the renderer's own cap, which is what says nothing was cut: the
+        // boundary truncates a link that runs past it and appends the marker on
+        // top, so a message this length is one it delivered whole.
+        expect(rendered.length).toBeLessThanOrEqual(
+          COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+        );
+        expect(rendered).toContain("legal_agreement");
+        expect(rendered).toContain("MOU-2025-0042");
+        expect(rendered).toContain("then retry with the same invitation.");
+        // The values were fitted rather than dropped: the operator is told a
+        // citation value was cut, and the conflict line is still there.
+        expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+        expect(rendered).toContain("linkage_rule_set");
+        // The clause structure survives the fit on BOTH sides, driven at the
+        // schema's maximum on both: each side is still a key-set name and version,
+        // the connective, and the field-set name and version, however little of
+        // each value the share left. A slot spent left to right on the first value
+        // deletes everything behind it -- the version, the connective, and the
+        // whole field-set half -- and fails here.
+        const sides = conflictValues(rendered, "linkage_rule_set");
+        expect(sides).toHaveLength(2);
+        for (const side of sides) {
+          const halves = side.split(" over ");
+          expect(halves).toHaveLength(2);
+          for (const half of halves) {
+            const values = half.split(" ");
+            expect(values).toHaveLength(2);
+            // Each value opened a delimited run of its own rather than being cut
+            // away to the marker alone.
+            for (const value of values)
+              expect(value.startsWith('"')).toBe(true);
+          }
+        }
+        // A pair the fit cannot tell apart says so, rather than leaving the
+        // operator two sides that read alike with no account of why.
+        if (differing === replacingLast) {
+          expect(sides[0]).toBe(sides[1]);
+          expect(rendered).toContain(
+            "two sides that read alike differ only inside what this display withheld",
+          );
+        }
+      }
+    }
+  });
+
+  test("a legal-agreement reference at the schema's length keeps the expiry", () => {
+    // The reference is partner-chosen text the schema bounds in UTF-16 units,
+    // which is not a display bound, so a reference at that bound outspends the
+    // line's whole slot on its own. Spent left to right it takes all of it and
+    // what the clip deletes is the clause behind it: the operator is left a cut
+    // reference on a line whose two sides differ in the expiry it no longer
+    // names, and no reading of the difference at all. Driven at the bound on both
+    // sides, over every shape the schema admits.
+    for (const vector of schemaMaximalNames()) {
+      const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+      const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+      existing.legalAgreement = {
+        reference: vector,
         purpose: "Audit and evaluation of the State tutoring program",
         expirationDate: "2030-01-01",
+      };
+      incoming.legalAgreement = {
+        reference: vector,
+        purpose: "Audit and evaluation of the State tutoring program",
+        expirationDate: "2031-06-30",
+      };
+      // A citation at the same bound beside it, so the legal agreement is fitted
+      // against a line competing for the block rather than holding it alone.
+      existing.linkageRuleSet = {
+        fieldSet: { name: vector, version: "1.0.0" },
+        keySet: { name: vector, version: "1.0.0" },
+      };
+      incoming.linkageRuleSet = {
+        fieldSet: { name: vector, version: "2.0.0" },
+        keySet: { name: vector, version: "2.0.0" },
       };
       const { conflicts } = diffLinkageTerms(existing, incoming);
       expect(conflicts.map((c) => c.field)).toEqual([
@@ -2374,141 +2522,63 @@ test("diffLinkageTerms: citation values at the schema's length cannot truncate t
       expect(rendered.length).toBeLessThanOrEqual(
         COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
       );
-      expect(rendered).toContain("legal_agreement");
-      expect(rendered).toContain("MOU-2025-0042");
       expect(rendered).toContain("then retry with the same invitation.");
-      // The values were fitted rather than dropped: the operator is told a
-      // citation value was cut, and the conflict line is still there.
+      // The reference was fitted rather than dropped, and the expiry -- the half
+      // of this line the two sides actually differ in, and the half an operator
+      // can check against their own copy -- survives the fit on both sides.
       expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
-      expect(rendered).toContain("linkage_rule_set");
-      // The clause structure survives the fit on BOTH sides, driven at the
-      // schema's maximum on both: each side is still a key-set name and version,
-      // the connective, and the field-set name and version, however little of
-      // each value the share left. A slot spent left to right on the first value
-      // deletes everything behind it -- the version, the connective, and the
-      // whole field-set half -- and fails here.
-      const sides = conflictValues(rendered, "linkage_rule_set");
+      const sides = conflictValues(rendered, "legal_agreement");
       expect(sides).toHaveLength(2);
-      for (const side of sides) {
-        const halves = side.split(" over ");
-        expect(halves).toHaveLength(2);
-        for (const half of halves) {
-          const values = half.split(" ");
-          expect(values).toHaveLength(2);
-          // Each value opened a delimited run of its own rather than being cut
-          // away to the marker alone.
-          for (const value of values) expect(value.startsWith('"')).toBe(true);
-        }
-      }
-      // A pair the fit cannot tell apart says so, rather than leaving the
-      // operator two sides that read alike with no account of why.
-      if (differing === replacingLast) {
-        expect(sides[0]).toBe(sides[1]);
-        expect(rendered).toContain(
-          "two sides that read alike differ only inside what this display withheld",
-        );
-      }
+      expect(sides[0].endsWith("(expires 2030-01-01)")).toBe(true);
+      expect(sides[1].endsWith("(expires 2031-06-30)")).toBe(true);
+      // The reference opened a delimited run of its own rather than being cut
+      // away to the marker alone.
+      for (const side of sides) expect(side.startsWith('"')).toBe(true);
     }
-  }
-});
+  });
 
-test("diffLinkageTerms: a legal-agreement reference at the schema's length keeps the expiry", () => {
-  // The reference is partner-chosen text the schema bounds in UTF-16 units,
-  // which is not a display bound, so a reference at that bound outspends the
-  // line's whole slot on its own. Spent left to right it takes all of it and
-  // what the clip deletes is the clause behind it: the operator is left a cut
-  // reference on a line whose two sides differ in the expiry it no longer
-  // names, and no reading of the difference at all. Driven at the bound on both
-  // sides, over every shape the schema admits.
-  for (const vector of schemaMaximalNames()) {
+  test("a citation both sides redact away is reported as withheld", () => {
+    // Reaching this takes a marker on BOTH sides, so the config the operator holds
+    // has one too. The two names redact to the same replacement, the clause
+    // forms match, and the full-detail fallback -- built from those same redacted
+    // values -- matches as well: every byte that differs is a byte the display
+    // will not show. Saying so is the only accurate reading left.
     const existing = cloneTerms(getDefaultLinkageTerms("Org"));
     const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-    existing.legalAgreement = {
-      reference: vector,
-      purpose: "Audit and evaluation of the State tutoring program",
-      expirationDate: "2030-01-01",
-    };
-    incoming.legalAgreement = {
-      reference: vector,
-      purpose: "Audit and evaluation of the State tutoring program",
-      expirationDate: "2031-06-30",
-    };
-    // A citation at the same bound beside it, so the legal agreement is fitted
-    // against a line competing for the block rather than holding it alone.
     existing.linkageRuleSet = {
-      fieldSet: { name: vector, version: "1.0.0" },
-      keySet: { name: vector, version: "1.0.0" },
+      fieldSet: {
+        name: "-----BEGIN OPENSSH PRIVATE KEY-----",
+        version: "1.0.0",
+      },
+      keySet: { name: "hmis-keys", version: "1.0.0" },
     };
     incoming.linkageRuleSet = {
-      fieldSet: { name: vector, version: "2.0.0" },
-      keySet: { name: vector, version: "2.0.0" },
+      fieldSet: { name: "-----BEGIN RSA PRIVATE KEY-----", version: "1.0.0" },
+      keySet: { name: "hmis-keys", version: "1.0.0" },
     };
     const { conflicts } = diffLinkageTerms(existing, incoming);
-    expect(conflicts.map((c) => c.field)).toEqual([
-      "linkage_rule_set",
-      "legal_agreement",
-    ]);
+    expect(conflicts).toHaveLength(1);
+    // Both sides come out of the treatment byte-identical: the clause forms match
+    // once the names are replaced, and the full-detail fallback built from the
+    // same values matches too.
+    expect(conflicts[0].existing).toBe(conflicts[0].incoming);
 
     const rendered = renderedAcceptReconcileError(conflicts);
-    // Under the renderer's own cap, which is what says nothing was cut: the
-    // boundary truncates a link that runs past it and appends the marker on
-    // top, so a message this length is one it delivered whole.
-    expect(rendered.length).toBeLessThanOrEqual(
-      COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+    expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+    expect(rendered).not.toContain("BEGIN RSA PRIVATE KEY");
+    // Both sides are shown as they fitted, with one line for the block accounting
+    // for why they read alike: what the two share is everything the display can
+    // still tell the operator about the citation, so neither side is replaced.
+    const sides = conflictValues(rendered, "linkage_rule_set");
+    expect(sides[0]).toBe(sides[1]);
+    expect(sides[0]).toContain("[redacted private key]");
+    expect(sides[0]).toContain('"hmis-keys" 1.0.0 over ');
+    expect(rendered).toContain(
+      "two sides that read alike differ only inside what this display withheld",
     );
+    expect(rendered).toContain("redacted");
     expect(rendered).toContain("then retry with the same invitation.");
-    // The reference was fitted rather than dropped, and the expiry -- the half
-    // of this line the two sides actually differ in, and the half an operator
-    // can check against their own copy -- survives the fit on both sides.
-    expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
-    const sides = conflictValues(rendered, "legal_agreement");
-    expect(sides).toHaveLength(2);
-    expect(sides[0].endsWith("(expires 2030-01-01)")).toBe(true);
-    expect(sides[1].endsWith("(expires 2031-06-30)")).toBe(true);
-    // The reference opened a delimited run of its own rather than being cut
-    // away to the marker alone.
-    for (const side of sides) expect(side.startsWith('"')).toBe(true);
-  }
-});
-
-test("diffLinkageTerms: a citation both sides redact away is reported as withheld", () => {
-  // Reaching this takes a marker on BOTH sides, so the config the operator holds
-  // has one too. The two names redact to the same replacement, the clause
-  // forms match, and the full-detail fallback -- built from those same redacted
-  // values -- matches as well: every byte that differs is a byte the display
-  // will not show. Saying so is the only accurate reading left.
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  existing.linkageRuleSet = {
-    fieldSet: { name: "-----BEGIN OPENSSH PRIVATE KEY-----", version: "1.0.0" },
-    keySet: { name: "hmis-keys", version: "1.0.0" },
-  };
-  incoming.linkageRuleSet = {
-    fieldSet: { name: "-----BEGIN RSA PRIVATE KEY-----", version: "1.0.0" },
-    keySet: { name: "hmis-keys", version: "1.0.0" },
-  };
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toHaveLength(1);
-  // Both sides come out of the treatment byte-identical: the clause forms match
-  // once the names are replaced, and the full-detail fallback built from the
-  // same values matches too.
-  expect(conflicts[0].existing).toBe(conflicts[0].incoming);
-
-  const rendered = renderedAcceptReconcileError(conflicts);
-  expect(rendered).not.toContain("BEGIN OPENSSH PRIVATE KEY");
-  expect(rendered).not.toContain("BEGIN RSA PRIVATE KEY");
-  // Both sides are shown as they fitted, with one line for the block accounting
-  // for why they read alike: what the two share is everything the display can
-  // still tell the operator about the citation, so neither side is replaced.
-  const sides = conflictValues(rendered, "linkage_rule_set");
-  expect(sides[0]).toBe(sides[1]);
-  expect(sides[0]).toContain("[redacted private key]");
-  expect(sides[0]).toContain('"hmis-keys" 1.0.0 over ');
-  expect(rendered).toContain(
-    "two sides that read alike differ only inside what this display withheld",
-  );
-  expect(rendered).toContain("redacted");
-  expect(rendered).toContain("then retry with the same invitation.");
+  });
 });
 
 // The widest a schema-bounded value can render at the display boundary. The
@@ -3644,379 +3714,418 @@ test("a value's control characters cannot render as a line of the block's own", 
   expect(hostile).toContain("connection.server.host");
 });
 
-test("diffLinkageTerms: an un-encodable value does not throw and identical terms still reconcile", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // A transform param outside the JSON-safe integer range survives parsing
-  // (params is `z.unknown()`) but canonicalString rejects it. Both sides have
-  // the SAME value, so the terms are identical and must reconcile cleanly: the
-  // canonical throw must not escape and abort two identical configs.
-  existing.linkageKeys[0].elements[0].transform = [
-    { function: "noop", params: { big: 1e20 } },
-  ];
-  incoming.linkageKeys[0].elements[0].transform = [
-    { function: "noop", params: { big: 1e20 } },
-  ];
-  let result!: ReturnType<typeof diffLinkageTerms>;
-  expect(() => {
-    result = diffLinkageTerms(existing, incoming);
-  }).not.toThrow();
-  // No hard conflict (so the config is reused), with a warning that the field
-  // could not be compared here -- the exchange re-checks compatibility later.
-  expect(result.conflicts).toEqual([]);
-  expect(result.warnings.some((w) => w.includes("JSON-safe range"))).toBe(true);
-});
+describe("diffLinkageTerms", () => {
+  test("an un-encodable value does not throw and identical terms still reconcile", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    // A transform param outside the JSON-safe integer range survives parsing
+    // (params is `z.unknown()`) but canonicalString rejects it. Both sides have
+    // the SAME value, so the terms are identical and must reconcile cleanly: the
+    // canonical throw must not escape and abort two identical configs.
+    existing.linkageKeys[0].elements[0].transform = [
+      { function: "noop", params: { big: 1e20 } },
+    ];
+    incoming.linkageKeys[0].elements[0].transform = [
+      { function: "noop", params: { big: 1e20 } },
+    ];
+    let result!: ReturnType<typeof diffLinkageTerms>;
+    expect(() => {
+      result = diffLinkageTerms(existing, incoming);
+    }).not.toThrow();
+    // No hard conflict (so the config is reused), with a warning that the field
+    // could not be compared here -- the exchange re-checks compatibility later.
+    expect(result.conflicts).toEqual([]);
+    expect(result.warnings.some((w) => w.includes("JSON-safe range"))).toBe(
+      true,
+    );
+  });
 
-test("diffLinkageTerms: a pathologically deep transform.params is a clean bounded rejection, not a RangeError", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // The reconcile walk's own depth guard, exercised directly: a real
-  // invitation's deep params is normally rejected earlier at the decode
-  // chokepoint (see core's invitation.test.ts), so this builds the 3000-deep
-  // value straight into the reconcile input to pin the reconcile's own safety
-  // check as an independent recursion that must reject a deep value itself.
-  // Built iteratively so the test itself does not recurse.
-  let deep: Record<string, unknown> = { leaf: "x" };
-  for (let i = 0; i < 3000; i++) deep = { a: deep };
-  incoming.linkageKeys[0].elements[0].transform = [
-    { function: "noop", params: deep },
-  ];
-  // The depth guard fires as a clean NestingDepthExceededError (a UsageError ->
-  // CLI exit 64) at depth 256, before the walk overflows the call stack with an
-  // unguarded RangeError that would otherwise show up as a generic exit 69.
-  expect(() => diffLinkageTerms(existing, incoming)).toThrow(
-    NestingDepthExceededError,
-  );
-});
+  test("a pathologically deep transform.params is a clean bounded rejection, not a RangeError", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    // The reconcile walk's own depth guard, exercised directly: a real
+    // invitation's deep params is normally rejected earlier at the decode
+    // chokepoint (see core's invitation.test.ts), so this builds the 3000-deep
+    // value straight into the reconcile input to pin the reconcile's own safety
+    // check as an independent recursion that must reject a deep value itself.
+    // Built iteratively so the test itself does not recurse.
+    let deep: Record<string, unknown> = { leaf: "x" };
+    for (let i = 0; i < 3000; i++) deep = { a: deep };
+    incoming.linkageKeys[0].elements[0].transform = [
+      { function: "noop", params: deep },
+    ];
+    // The depth guard fires as a clean NestingDepthExceededError (a UsageError ->
+    // CLI exit 64) at depth 256, before the walk overflows the call stack with an
+    // unguarded RangeError that would otherwise show up as a generic exit 69.
+    expect(() => diffLinkageTerms(existing, incoming)).toThrow(
+      NestingDepthExceededError,
+    );
+  });
 
-test("diffLinkageTerms: a realistically nested transform.params reconciles unchanged", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // A nested params object at a depth a real config could plausibly use -- far
-  // above the one or two levels the bundled functions need, yet well within the
-  // bound -- present identically on both sides, so the terms stay equal and must
-  // reconcile with no conflict and no throw (the bound rejects no real token).
-  const nested = { table: { fields: { score: { weight: 3 } } } };
-  existing.linkageKeys[0].elements[0].transform = [
-    { function: "lookup", params: nested },
-  ];
-  incoming.linkageKeys[0].elements[0].transform = [
-    { function: "lookup", params: structuredClone(nested) },
-  ];
-  let result!: ReturnType<typeof diffLinkageTerms>;
-  expect(() => {
-    result = diffLinkageTerms(existing, incoming);
-  }).not.toThrow();
-  expect(result.conflicts).toEqual([]);
-  expect(result.warnings).toEqual([]);
-});
+  test("a realistically nested transform.params reconciles unchanged", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    // A nested params object at a depth a real config could plausibly use -- far
+    // above the one or two levels the bundled functions need, yet well within the
+    // bound -- present identically on both sides, so the terms stay equal and must
+    // reconcile with no conflict and no throw (the bound rejects no real token).
+    const nested = { table: { fields: { score: { weight: 3 } } } };
+    existing.linkageKeys[0].elements[0].transform = [
+      { function: "lookup", params: nested },
+    ];
+    incoming.linkageKeys[0].elements[0].transform = [
+      { function: "lookup", params: structuredClone(nested) },
+    ];
+    let result!: ReturnType<typeof diffLinkageTerms>;
+    expect(() => {
+      result = diffLinkageTerms(existing, incoming);
+    }).not.toThrow();
+    expect(result.conflicts).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
 
-test("diffLinkageTerms: a transform.params value difference is a conflict", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // The reconcile compares already-camelCase terms (the existing config camelized
-  // at load, the invitation's adopted terms camelized at the decode chokepoint), so
-  // this checks the substance: a different param VALUE under the same key diverges
-  // and is flagged as a linkage_keys conflict.
-  existing.linkageKeys[0].elements[0].transform = [
-    { function: "parse_date", params: { inputFormat: "MMDDYYYY" } },
-  ];
-  incoming.linkageKeys[0].elements[0].transform = [
-    { function: "parse_date", params: { inputFormat: "YYYYMMDD" } },
-  ];
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts.map((c) => c.field)).toContain("linkage_keys");
-});
+  test("a transform.params value difference is a conflict", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    // The reconcile compares already-camelCase terms (the existing config camelized
+    // at load, the invitation's adopted terms camelized at the decode chokepoint), so
+    // this checks the substance: a different param VALUE under the same key diverges
+    // and is flagged as a linkage_keys conflict.
+    existing.linkageKeys[0].elements[0].transform = [
+      { function: "parse_date", params: { inputFormat: "MMDDYYYY" } },
+    ];
+    incoming.linkageKeys[0].elements[0].transform = [
+      { function: "parse_date", params: { inputFormat: "YYYYMMDD" } },
+    ];
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts.map((c) => c.field)).toContain("linkage_keys");
+  });
 
-test("diffLinkageTerms: each name-holding field agrees, differs, and refuses a normalization twin", () => {
-  // One logical name in the two Unicode normalization forms -- NFC "e-acute"
-  // (U+00E9) against the NFD decomposition "e" + U+0301 -- run through each
-  // agreement-defining field that holds authored text (the rule-set citation,
-  // the fifth, has its own pair of tests above). Canonically equivalent and
-  // different bytes, which is the whole of the case: core compares each of these
-  // values byte-exact, so a twin pair aborts the exchange mid-run, and folding
-  // the two forms together here would report the reuse clean and let the run
-  // reach that abort with the partner keeping the invitation's spelling.
-  const composed = "acc\u00e9s";
-  const decomposed = "acce\u0301s";
-  expect(composed).not.toBe(decomposed);
+  test("each name-holding field agrees, differs, and refuses a normalization twin", () => {
+    // One logical name in the two Unicode normalization forms -- NFC "e-acute"
+    // (U+00E9) against the NFD decomposition "e" + U+0301 -- run through each
+    // agreement-defining field that holds authored text (the rule-set citation,
+    // the fifth, has its own pair of tests above). Canonically equivalent and
+    // different bytes, which is the whole of the case: core compares each of these
+    // values byte-exact, so a twin pair aborts the exchange mid-run, and folding
+    // the two forms together here would report the reuse clean and let the run
+    // reach that abort with the partner keeping the invitation's spelling.
+    const composed = "acc\u00e9s";
+    const decomposed = "acce\u0301s";
+    expect(composed).not.toBe(decomposed);
 
-  const vectors: ReadonlyArray<{
-    field: string;
-    coreError: string;
-    withName: (terms: LinkageTerms, value: string) => void;
-  }> = [
-    {
-      field: "linkage_fields",
-      coreError: "linkage fields do not match",
-      withName: (terms, value) => {
-        terms.linkageFields = [
-          ...terms.linkageFields,
-          { ...structuredClone(terms.linkageFields[0]), name: value },
-        ];
+    const vectors: ReadonlyArray<{
+      field: string;
+      coreError: string;
+      withName: (terms: LinkageTerms, value: string) => void;
+    }> = [
+      {
+        field: "linkage_fields",
+        coreError: "linkage fields do not match",
+        withName: (terms, value) => {
+          terms.linkageFields = [
+            ...terms.linkageFields,
+            { ...structuredClone(terms.linkageFields[0]), name: value },
+          ];
+        },
       },
-    },
-    {
-      field: "linkage_keys",
-      coreError: "linkage keys do not match",
-      withName: (terms, value) => {
-        terms.linkageKeys[0].name = value;
+      {
+        field: "linkage_keys",
+        coreError: "linkage keys do not match",
+        withName: (terms, value) => {
+          terms.linkageKeys[0].name = value;
+        },
       },
-    },
-    {
-      field: "legal_agreement",
-      coreError: "legal agreement reference mismatch",
-      withName: (terms, value) => {
-        terms.legalAgreement = {
-          reference: value,
-          purpose: "Audit and evaluation of the State tutoring program",
-          expirationDate: "2030-01-01",
-        };
+      {
+        field: "legal_agreement",
+        coreError: "legal agreement reference mismatch",
+        withName: (terms, value) => {
+          terms.legalAgreement = {
+            reference: value,
+            purpose: "Audit and evaluation of the State tutoring program",
+            expirationDate: "2030-01-01",
+          };
+        },
       },
-    },
-    {
-      field: "payload",
-      coreError: "payload mismatch",
-      withName: (terms, value) => {
-        terms.payload = { send: [{ name: value }], receive: [{ name: value }] };
+      {
+        field: "payload",
+        coreError: "payload mismatch",
+        withName: (terms, value) => {
+          terms.payload = {
+            send: [{ name: value }],
+            receive: [{ name: value }],
+          };
+        },
       },
-    },
-  ];
+    ];
 
-  for (const vector of vectors) {
-    const naming = (value: string): LinkageTerms => {
+    for (const vector of vectors) {
+      const naming = (value: string): LinkageTerms => {
+        const terms = cloneTerms(getDefaultLinkageTerms("Org"));
+        vector.withName(terms, value);
+        return terms;
+      };
+
+      const agreeing = diffLinkageTerms(naming(composed), naming(composed));
+      expect(agreeing.conflicts, vector.field).toEqual([]);
+      expect(agreeing.warnings, vector.field).toEqual([]);
+      // The shape the vector builds is compatible on its own, so a conflict below
+      // is the value the two sides have rather than the shape around it.
+      expect(
+        validateCompatibility(naming(composed), naming(composed)).errors,
+        vector.field,
+      ).toEqual([]);
+
+      const differing = diffLinkageTerms(
+        naming("alpha-set"),
+        naming("beta-set"),
+      );
+      expect(
+        differing.conflicts.map((c) => c.field),
+        vector.field,
+      ).toEqual([vector.field]);
+
+      const existing = naming(composed);
+      const incoming = naming(decomposed);
+      const twins = diffLinkageTerms(existing, incoming);
+      expect(
+        twins.conflicts.map((c) => c.field),
+        vector.field,
+      ).toEqual([vector.field]);
+      // The same pair through core's own comparison, so the parity this compare
+      // exists for is asserted against core rather than restated here.
+      expect(
+        validateCompatibility(existing, incoming).errors.some((e) =>
+          e.includes(vector.coreError),
+        ),
+        vector.field,
+      ).toBe(true);
+    }
+  });
+
+  test("a normalization twin is shown as the code points that differ", () => {
+    // A twin pair prints the same glyphs, so the two sides of its conflict line
+    // read alike as raw text. They are told apart at the boundary the accept error
+    // crosses, which escapes every code point outside printable ASCII: the
+    // renderers here compose RAW -- escaping belongs to the single sink that shows
+    // the message -- and what the operator reads names the differing code points.
+    const composed = "acc\u00e9s";
+    const decomposed = "acce\u0301s";
+
+    const namingField = (name: string): LinkageTerms => {
       const terms = cloneTerms(getDefaultLinkageTerms("Org"));
-      vector.withName(terms, value);
+      terms.linkageFields = [
+        ...terms.linkageFields,
+        { ...structuredClone(terms.linkageFields[0]), name },
+      ];
+      return terms;
+    };
+    const nameTwins = diffLinkageTerms(
+      namingField(composed),
+      namingField(decomposed),
+    );
+    expect(nameTwins.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
+    expect(nameTwins.conflicts[0].existing).toContain(composed);
+    expect(nameTwins.conflicts[0].existing).not.toBe(
+      nameTwins.conflicts[0].incoming,
+    );
+    const nameRendered = renderedAcceptReconcileError(nameTwins.conflicts);
+    expect(nameRendered).toContain("acc\\xe9s");
+    expect(nameRendered).toContain("acce\\u0301s");
+    expect(nameRendered).not.toContain(composed);
+    expect(nameRendered).not.toContain(decomposed);
+
+    // The same pair in a payload column's description, where both sides summarize
+    // to the same column names and the diff falls back to the full detail: the
+    // fallback passes the twins to that boundary too, rather than collapsing them.
+    const describing = (description: string): LinkageTerms => {
+      const terms = cloneTerms(getDefaultLinkageTerms("Org"));
+      terms.payload = { send: [{ name: "note", description }] };
+      return terms;
+    };
+    const detailTwins = diffLinkageTerms(
+      describing(composed),
+      describing(decomposed),
+    );
+    expect(detailTwins.conflicts.map((c) => c.field)).toEqual(["payload"]);
+    const detailRendered = renderedAcceptReconcileError(detailTwins.conflicts);
+    expect(detailRendered).toContain("acc\\xe9s");
+    expect(detailRendered).toContain("acce\\u0301s");
+    expect(detailRendered).not.toContain(composed);
+    expect(detailRendered).not.toContain(decomposed);
+
+    // A pair that already differs in printable ASCII is shown as it is stored, so
+    // the operator reads the value to edit rather than an escape of it.
+    const plain = diffLinkageTerms(
+      namingField("alpha_set"),
+      namingField("beta_set"),
+    );
+    expect(plain.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
+    const plainRendered = renderedAcceptReconcileError(plain.conflicts);
+    expect(plainRendered).toContain("alpha_set");
+    expect(plainRendered).toContain("beta_set");
+  });
+
+  test("each legal-agreement field is a conflict core refuses too", () => {
+    // The agreement is compared here as a whole object and cross-checked field by
+    // field in core, which is what makes the two equally strict on it. The vectors
+    // are keyed by the agreement's own fields, so a field added to it fails to
+    // compile here until that parity is established for it.
+    const agreement = {
+      reference: "MOU-2025-0042",
+      purpose: "Audit and evaluation of the State tutoring program",
+      expirationDate: "2030-01-01",
+    };
+    const vectors: Record<
+      keyof NonNullable<LinkageTerms["legalAgreement"]>,
+      { value: string; coreError: string }
+    > = {
+      reference: {
+        value: "MOU-2025-0043",
+        coreError: "legal agreement reference mismatch",
+      },
+      purpose: {
+        value: "Verification of program enrollment",
+        coreError: "legal agreement purpose mismatch",
+      },
+      expirationDate: {
+        value: "2031-02-02",
+        coreError: "legal agreement expiration date mismatch",
+      },
+    };
+
+    for (const [field, vector] of Object.entries(vectors)) {
+      const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+      const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+      existing.legalAgreement = { ...agreement };
+      incoming.legalAgreement = { ...agreement, [field]: vector.value };
+      expect(
+        diffLinkageTerms(existing, incoming).conflicts.map((c) => c.field),
+        field,
+      ).toEqual(["legal_agreement"]);
+      expect(
+        validateCompatibility(existing, incoming).errors.some((e) =>
+          e.includes(vector.coreError),
+        ),
+        field,
+      ).toBe(true);
+    }
+  });
+
+  test("linkage fields are sorted under core's own comparator", () => {
+    // Two fields whose normalization form changes their sort order: NFC "\u00c5"
+    // (U+00C5) sorts after "B", but its NFD form "A\u030a" begins with "A" and
+    // sorts before "B". The pre-sort exists so a field set's array order is not
+    // significant, and it sorts on the raw name -- the key core sorts by -- so the
+    // two sides reach the byte-exact compare ordered as validateCompatibility
+    // orders them.
+    const base = getDefaultLinkageTerms("Org");
+    const field = base.linkageFields[0];
+    const named = (...names: string[]): LinkageTerms => {
+      const terms = cloneTerms(base);
+      terms.linkageFields = names.map((name) => ({
+        ...structuredClone(field),
+        name,
+      }));
       return terms;
     };
 
-    const agreeing = diffLinkageTerms(naming(composed), naming(composed));
-    expect(agreeing.conflicts, vector.field).toEqual([]);
-    expect(agreeing.warnings, vector.field).toEqual([]);
-    // The shape the vector builds is compatible on its own, so a conflict below
-    // is the value the two sides have rather than the shape around it.
-    expect(
-      validateCompatibility(naming(composed), naming(composed)).errors,
-      vector.field,
-    ).toEqual([]);
+    // The same two names in either array order reconcile clean: the pre-sort is
+    // what makes that order insignificant, and this is a pair whose ordering
+    // depends on which spelling the comparator reads -- the raw "A\u030a" before
+    // "B", the NFC fold's "\u00c5" after it.
+    const reordered = diffLinkageTerms(
+      named("B", "A\u030a"),
+      named("A\u030a", "B"),
+    );
+    expect(reordered.conflicts).toEqual([]);
+    expect(reordered.warnings).toEqual([]);
 
-    const differing = diffLinkageTerms(naming("alpha-set"), naming("beta-set"));
-    expect(
-      differing.conflicts.map((c) => c.field),
-      vector.field,
-    ).toEqual([vector.field]);
-
-    const existing = naming(composed);
-    const incoming = naming(decomposed);
+    // The same names in different normalization forms are a conflict, and core
+    // reaches that verdict on the same pair -- the run would otherwise abort on it
+    // after the reconcile had reported the config as matching.
+    const existing = named("B", "\u00c5");
+    const incoming = named("B", "A\u030a");
     const twins = diffLinkageTerms(existing, incoming);
-    expect(
-      twins.conflicts.map((c) => c.field),
-      vector.field,
-    ).toEqual([vector.field]);
-    // The same pair through core's own comparison, so the parity this compare
-    // exists for is asserted against core rather than restated here.
+    expect(twins.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
     expect(
       validateCompatibility(existing, incoming).errors.some((e) =>
-        e.includes(vector.coreError),
+        e.includes("linkage fields do not match"),
       ),
-      vector.field,
     ).toBe(true);
-  }
-});
+  });
 
-test("diffLinkageTerms: a normalization twin is shown as the code points that differ", () => {
-  // A twin pair prints the same glyphs, so the two sides of its conflict line
-  // read alike as raw text. They are told apart at the boundary the accept error
-  // crosses, which escapes every code point outside printable ASCII: the
-  // renderers here compose RAW -- escaping belongs to the single sink that shows
-  // the message -- and what the operator reads names the differing code points.
-  const composed = "acc\u00e9s";
-  const decomposed = "acce\u0301s";
-
-  const namingField = (name: string): LinkageTerms => {
-    const terms = cloneTerms(getDefaultLinkageTerms("Org"));
-    terms.linkageFields = [
-      ...terms.linkageFields,
-      { ...structuredClone(terms.linkageFields[0]), name },
-    ];
-    return terms;
-  };
-  const nameTwins = diffLinkageTerms(
-    namingField(composed),
-    namingField(decomposed),
-  );
-  expect(nameTwins.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
-  expect(nameTwins.conflicts[0].existing).toContain(composed);
-  expect(nameTwins.conflicts[0].existing).not.toBe(
-    nameTwins.conflicts[0].incoming,
-  );
-  const nameRendered = renderedAcceptReconcileError(nameTwins.conflicts);
-  expect(nameRendered).toContain("acc\\xe9s");
-  expect(nameRendered).toContain("acce\\u0301s");
-  expect(nameRendered).not.toContain(composed);
-  expect(nameRendered).not.toContain(decomposed);
-
-  // The same pair in a payload column's description, where both sides summarize
-  // to the same column names and the diff falls back to the full detail: the
-  // fallback passes the twins to that boundary too, rather than collapsing them.
-  const describing = (description: string): LinkageTerms => {
-    const terms = cloneTerms(getDefaultLinkageTerms("Org"));
-    terms.payload = { send: [{ name: "note", description }] };
-    return terms;
-  };
-  const detailTwins = diffLinkageTerms(
-    describing(composed),
-    describing(decomposed),
-  );
-  expect(detailTwins.conflicts.map((c) => c.field)).toEqual(["payload"]);
-  const detailRendered = renderedAcceptReconcileError(detailTwins.conflicts);
-  expect(detailRendered).toContain("acc\\xe9s");
-  expect(detailRendered).toContain("acce\\u0301s");
-  expect(detailRendered).not.toContain(composed);
-  expect(detailRendered).not.toContain(decomposed);
-
-  // A pair that already differs in printable ASCII is shown as it is stored, so
-  // the operator reads the value to edit rather than an escape of it.
-  const plain = diffLinkageTerms(
-    namingField("alpha_set"),
-    namingField("beta_set"),
-  );
-  expect(plain.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
-  const plainRendered = renderedAcceptReconcileError(plain.conflicts);
-  expect(plainRendered).toContain("alpha_set");
-  expect(plainRendered).toContain("beta_set");
-});
-
-test("diffLinkageTerms: each legal-agreement field is a conflict core refuses too", () => {
-  // The agreement is compared here as a whole object and cross-checked field by
-  // field in core, which is what makes the two equally strict on it. The vectors
-  // are keyed by the agreement's own fields, so a field added to it fails to
-  // compile here until that parity is established for it.
-  const agreement = {
-    reference: "MOU-2025-0042",
-    purpose: "Audit and evaluation of the State tutoring program",
-    expirationDate: "2030-01-01",
-  };
-  const vectors: Record<
-    keyof NonNullable<LinkageTerms["legalAgreement"]>,
-    { value: string; coreError: string }
-  > = {
-    reference: {
-      value: "MOU-2025-0043",
-      coreError: "legal agreement reference mismatch",
-    },
-    purpose: {
-      value: "Verification of program enrollment",
-      coreError: "legal agreement purpose mismatch",
-    },
-    expirationDate: {
-      value: "2031-02-02",
-      coreError: "legal agreement expiration date mismatch",
-    },
-  };
-
-  for (const [field, vector] of Object.entries(vectors)) {
+  test("an explicitly-undefined optional is treated as absent", () => {
     const existing = cloneTerms(getDefaultLinkageTerms("Org"));
     const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-    existing.legalAgreement = { ...agreement };
-    incoming.legalAgreement = { ...agreement, [field]: vector.value };
-    expect(
-      diffLinkageTerms(existing, incoming).conflicts.map((c) => c.field),
-      field,
-    ).toEqual(["legal_agreement"]);
-    expect(
-      validateCompatibility(existing, incoming).errors.some((e) =>
-        e.includes(vector.coreError),
-      ),
-      field,
-    ).toBe(true);
-  }
+    // An in-process object (unlike a Zod-parsed one) can have an explicit
+    // `undefined` optional. The reconcile walk must drop it rather than feed it to
+    // canonicalString (which rejects undefined); it must still compare equal to the
+    // side that simply omits `swap`, and reach that verdict as a comparison rather
+    // than as the un-encodable-value warning a rejection would soften to.
+    existing.linkageKeys[0].swap = undefined;
+    expect(() => diffLinkageTerms(existing, incoming)).not.toThrow();
+    const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
+    expect(conflicts).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  test("a payload mismatch is a conflict", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    incoming.payload = { send: [{ name: "extra_col" }] };
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    expect(conflicts.map((c) => c.field)).toContain("payload");
+  });
+
+  test("a payload sub-field difference under matching names renders the detail", () => {
+    const existing = cloneTerms(getDefaultLinkageTerms("Org"));
+    const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
+    // Same column name on both sides, differing only in description: a names-only
+    // render would print identical send=/receive= summaries, so the detail
+    // fallback must show what actually differs.
+    existing.payload = { send: [{ name: "note", description: "old" }] };
+    incoming.payload = { send: [{ name: "note", description: "new" }] };
+    const { conflicts } = diffLinkageTerms(existing, incoming);
+    const payloadConflict = conflicts.find((c) => c.field === "payload");
+    expect(payloadConflict).toBeDefined();
+    expect(payloadConflict?.existing).not.toBe(payloadConflict?.incoming);
+    expect(payloadConflict?.incoming).toContain("new");
+  });
 });
 
-test("diffLinkageTerms: linkage fields are sorted under core's own comparator", () => {
-  // Two fields whose normalization form changes their sort order: NFC "\u00c5"
-  // (U+00C5) sorts after "B", but its NFD form "A\u030a" begins with "A" and
-  // sorts before "B". The pre-sort exists so a field set's array order is not
-  // significant, and it sorts on the raw name -- the key core sorts by -- so the
-  // two sides reach the byte-exact compare ordered as validateCompatibility
-  // orders them.
-  const base = getDefaultLinkageTerms("Org");
-  const field = base.linkageFields[0];
-  const named = (...names: string[]): LinkageTerms => {
-    const terms = cloneTerms(base);
-    terms.linkageFields = names.map((name) => ({
-      ...structuredClone(field),
-      name,
-    }));
-    return terms;
-  };
-
-  // The same two names in either array order reconcile clean: the pre-sort is
-  // what makes that order insignificant, and this is a pair whose ordering
-  // depends on which spelling the comparator reads -- the raw "A\u030a" before
-  // "B", the NFC fold's "\u00c5" after it.
-  const reordered = diffLinkageTerms(
-    named("B", "A\u030a"),
-    named("A\u030a", "B"),
-  );
-  expect(reordered.conflicts).toEqual([]);
-  expect(reordered.warnings).toEqual([]);
-
-  // The same names in different normalization forms are a conflict, and core
-  // reaches that verdict on the same pair -- the run would otherwise abort on it
-  // after the reconcile had reported the config as matching.
-  const existing = named("B", "\u00c5");
-  const incoming = named("B", "A\u030a");
-  const twins = diffLinkageTerms(existing, incoming);
-  expect(twins.conflicts.map((c) => c.field)).toEqual(["linkage_fields"]);
-  expect(
-    validateCompatibility(existing, incoming).errors.some((e) =>
-      e.includes("linkage fields do not match"),
-    ),
-  ).toBe(true);
+describe("formatReconcileDiffs", () => {
+  test("renders each field with its existing and required values", () => {
+    const rendered = formatReconcileDiffs(
+      [
+        {
+          field: "algorithm",
+          existing: reconcileDiffValue("psi-c"),
+          incoming: reconcileDiffValue("psi"),
+        },
+        {
+          field: "connection.server.host",
+          existing: reconcileDiffValue("old-host"),
+          incoming: reconcileDiffValue("host"),
+        },
+      ],
+      COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+    );
+    expect(rendered).toContain("algorithm");
+    expect(rendered).toContain("psi-c");
+    expect(rendered).toContain("connection.server.host");
+    expect(rendered).toContain("old-host");
+    // One line per diff.
+    expect(rendered.split("\n")).toHaveLength(2);
+  });
 });
 
-test("diffLinkageTerms: an explicitly-undefined optional is treated as absent", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // An in-process object (unlike a Zod-parsed one) can have an explicit
-  // `undefined` optional. The reconcile walk must drop it rather than feed it to
-  // canonicalString (which rejects undefined); it must still compare equal to the
-  // side that simply omits `swap`, and reach that verdict as a comparison rather
-  // than as the un-encodable-value warning a rejection would soften to.
-  existing.linkageKeys[0].swap = undefined;
-  expect(() => diffLinkageTerms(existing, incoming)).not.toThrow();
-  const { conflicts, warnings } = diffLinkageTerms(existing, incoming);
-  expect(conflicts).toEqual([]);
-  expect(warnings).toEqual([]);
-});
-
-test("diffLinkageTerms: a payload mismatch is a conflict", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  incoming.payload = { send: [{ name: "extra_col" }] };
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  expect(conflicts.map((c) => c.field)).toContain("payload");
-});
-
-test("diffLinkageTerms: a payload sub-field difference under matching names renders the detail", () => {
-  const existing = cloneTerms(getDefaultLinkageTerms("Org"));
-  const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // Same column name on both sides, differing only in description: a names-only
-  // render would print identical send=/receive= summaries, so the detail
-  // fallback must show what actually differs.
-  existing.payload = { send: [{ name: "note", description: "old" }] };
-  incoming.payload = { send: [{ name: "note", description: "new" }] };
-  const { conflicts } = diffLinkageTerms(existing, incoming);
-  const payloadConflict = conflicts.find((c) => c.field === "payload");
-  expect(payloadConflict).toBeDefined();
-  expect(payloadConflict?.existing).not.toBe(payloadConflict?.incoming);
-  expect(payloadConflict?.incoming).toContain("new");
-});
-
-test("formatReconcileDiffs: renders each field with its existing and required values", () => {
-  const rendered = formatReconcileDiffs(
-    [
+describe("reconcileConflictError", () => {
+  test("the operator meets the block on its own lines", () => {
+    // The whole refusal at the boundary the CLI renders it at: what the operator
+    // reads is the head with its recovery step, then one line per disagreeing
+    // field, rather than all of it run together on one physical line.
+    const rendered = renderedAcceptReconcileError([
       {
         field: "algorithm",
         existing: reconcileDiffValue("psi-c"),
@@ -4025,212 +4134,195 @@ test("formatReconcileDiffs: renders each field with its existing and required va
       {
         field: "connection.server.host",
         existing: reconcileDiffValue("old-host"),
-        incoming: reconcileDiffValue("host"),
+        incoming: reconcileDiffValue("host\nRESOLVED: nothing left to do."),
       },
-    ],
-    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
-  );
-  expect(rendered).toContain("algorithm");
-  expect(rendered).toContain("psi-c");
-  expect(rendered).toContain("connection.server.host");
-  expect(rendered).toContain("old-host");
-  // One line per diff.
-  expect(rendered.split("\n")).toHaveLength(2);
+    ]);
+    const lines = rendered.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain("then retry with the same invitation.");
+    expect(lines[1]).toBe('  - algorithm: existing "psi-c" vs required "psi"');
+    // The value's own line break opens no line: it is replaced where the value
+    // is composed, so the breaks the operator reads are the block's alone.
+    expect(lines[2]).toContain(controlCharacterMarker(0x0a));
+    expect(lines[2].startsWith("  - connection.server.host: ")).toBe(true);
+  });
+
+  test("the fit spends a break at what a break renders as", () => {
+    // The block's breaks reach the operator as breaks, so the budget has to be
+    // fitted in the same unit: charging a break the four characters of the
+    // escape's `\x0a` leaves three per line of the cap unspendable, and what
+    // goes unspent is a field's values. Eight fields whose values are all too
+    // wide to show whole is where that difference is a field: fitted in the
+    // boundary's own unit this shape keeps six of the eight, fitted in the
+    // escape's it keeps five.
+    const all: ReconcileDiff[] = [
+      "version",
+      "algorithm",
+      "linkage_strategy",
+      "linkage_fields",
+      "linkage_keys",
+      "linkage_rule_set",
+      "legal_agreement",
+      "payload",
+    ].map((field, index) => ({
+      field,
+      existing: reconcileDiffValue(`/saved/${"s".repeat(60)}${index}`),
+      incoming: reconcileDiffValue(`/required/${"r".repeat(60)}${index}`),
+    }));
+
+    const rendered = renderedAcceptReconcileError(all);
+    expect(rendered.length).toBeLessThanOrEqual(
+      COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+    );
+    const lines = rendered.split("\n").filter((l) => l.startsWith("  - "));
+    expect(lines).toHaveLength(all.length);
+    expect(
+      lines.filter((l) => l.includes(": existing ")).length,
+    ).toBeGreaterThanOrEqual(6);
+  });
 });
 
-test("reconcileConflictError: the operator meets the block on its own lines", () => {
-  // The whole refusal at the boundary the CLI renders it at: what the operator
-  // reads is the head with its recovery step, then one line per disagreeing
-  // field, rather than all of it run together on one physical line.
-  const rendered = renderedAcceptReconcileError([
-    {
-      field: "algorithm",
-      existing: reconcileDiffValue("psi-c"),
-      incoming: reconcileDiffValue("psi"),
-    },
-    {
-      field: "connection.server.host",
-      existing: reconcileDiffValue("old-host"),
-      incoming: reconcileDiffValue("host\nRESOLVED: nothing left to do."),
-    },
-  ]);
-  const lines = rendered.split("\n");
-  expect(lines).toHaveLength(3);
-  expect(lines[0]).toContain("then retry with the same invitation.");
-  expect(lines[1]).toBe('  - algorithm: existing "psi-c" vs required "psi"');
-  // The value's own line break opens no line: it is replaced where the value
-  // is composed, so the breaks the operator reads are the block's alone.
-  expect(lines[2]).toContain(controlCharacterMarker(0x0a));
-  expect(lines[2].startsWith("  - connection.server.host: ")).toBe(true);
-});
-
-test("reconcileConflictError: the fit spends a break at what a break renders as", () => {
-  // The block's breaks reach the operator as breaks, so the budget has to be
-  // fitted in the same unit: charging a break the four characters of the
-  // escape's `\x0a` leaves three per line of the cap unspendable, and what
-  // goes unspent is a field's values. Eight fields whose values are all too
-  // wide to show whole is where that difference is a field: fitted in the
-  // boundary's own unit this shape keeps six of the eight, fitted in the
-  // escape's it keeps five.
-  const all: ReconcileDiff[] = [
-    "version",
-    "algorithm",
-    "linkage_strategy",
-    "linkage_fields",
-    "linkage_keys",
-    "linkage_rule_set",
-    "legal_agreement",
-    "payload",
-  ].map((field, index) => ({
-    field,
-    existing: reconcileDiffValue(`/saved/${"s".repeat(60)}${index}`),
-    incoming: reconcileDiffValue(`/required/${"r".repeat(60)}${index}`),
-  }));
-
-  const rendered = renderedAcceptReconcileError(all);
-  expect(rendered.length).toBeLessThanOrEqual(
-    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
-  );
-  const lines = rendered.split("\n").filter((l) => l.startsWith("  - "));
-  expect(lines).toHaveLength(all.length);
-  expect(
-    lines.filter((l) => l.includes(": existing ")).length,
-  ).toBeGreaterThanOrEqual(6);
-});
-
-test("formatReconcileDiffs: neutralizes partner-controlled values against terminal injection", () => {
-  // The incoming side can be a partner-controlled string (a linkage key name, or
-  // an inviter's split inbound_path/outbound_path from the connection endpoint),
-  // rendered to the acceptor's terminal before acceptance. A control/ANSI
-  // sequence in it must be neutralized, not passed through. The block is composed
-  // into a UsageError by its only caller, so this asserts at that error's rendered
-  // boundary rather than on the raw block.
-  const rendered = sanitizeErrorForDisplay(
-    new Error(
-      formatReconcileDiffs(
-        [
-          {
-            field: "connection.server.inbound_path",
-            existing: reconcileDiffValue("/safe/in"),
-            incoming: reconcileDiffValue("/drop\x1b[2J\x1b[31m"),
-          },
-        ],
-        COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+describe("formatReconcileDiffs", () => {
+  test("neutralizes partner-controlled values against terminal injection", () => {
+    // The incoming side can be a partner-controlled string (a linkage key name, or
+    // an inviter's split inbound_path/outbound_path from the connection endpoint),
+    // rendered to the acceptor's terminal before acceptance. A control/ANSI
+    // sequence in it must be neutralized, not passed through. The block is composed
+    // into a UsageError by its only caller, so this asserts at that error's rendered
+    // boundary rather than on the raw block.
+    const rendered = sanitizeErrorForDisplay(
+      new Error(
+        formatReconcileDiffs(
+          [
+            {
+              field: "connection.server.inbound_path",
+              existing: reconcileDiffValue("/safe/in"),
+              incoming: reconcileDiffValue("/drop\x1b[2J\x1b[31m"),
+            },
+          ],
+          COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+        ),
       ),
-    ),
-  );
-  // Gone from the terminal, and gone in controlCharacterMarker's visible marker
-  // rather than in the escape's `\xHH`: a control character a value holds is
-  // shown as text, while the block's own line breaks reach the operator as line
-  // breaks, so no value can spell what the block builds its structure from.
-  expect(rendered).not.toContain("\x1b");
-  expect(rendered).not.toContain("\\x1b");
-  expect(rendered).toContain(controlCharacterMarker(0x1b));
+    );
+    // Gone from the terminal, and gone in controlCharacterMarker's visible marker
+    // rather than in the escape's `\xHH`: a control character a value holds is
+    // shown as text, while the block's own line breaks reach the operator as line
+    // breaks, so no value can spell what the block builds its structure from.
+    expect(rendered).not.toContain("\x1b");
+    expect(rendered).not.toContain("\\x1b");
+    expect(rendered).toContain(controlCharacterMarker(0x1b));
+  });
 });
 
 // --- loadConfigLinkageSource -------------------------------------------------
 
-test("loadConfigLinkageSource returns undefined when no file exists", () => {
-  expect(
-    loadConfigLinkageSource(path.join(dir, "absent.yaml")),
-  ).toBeUndefined();
-});
-
-test("loadConfigLinkageSource round-trips an explicit standardization block", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = getDefaultLinkageTerms("Agency A");
-  const standardization = [
-    {
-      output: "ssn",
-      input: "tax_id",
-      steps: [{ function: "trim_whitespace" }],
-    },
-  ];
-  saveConfig(configPath, {
-    connection: { channel: "filedrop", path: "/mnt/share" },
-    linkageTerms: terms,
-    standardization,
+describe("loadConfigLinkageSource", () => {
+  test("returns undefined when no file exists", () => {
+    expect(
+      loadConfigLinkageSource(path.join(dir, "absent.yaml")),
+    ).toBeUndefined();
   });
-  expect(loadConfigLinkageSource(configPath)?.standardization).toEqual(
-    standardization,
-  );
-});
 
-test("loadConfigLinkageSource round-trips an explicit metadata block", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = getDefaultLinkageTerms("Agency A");
-  const metadata = [
-    {
-      name: "tax_id",
-      type: "ssn" as const,
-      role: "linkage" as const,
-      isPayload: false,
-    },
-  ];
-  saveConfig(configPath, {
-    connection: { channel: "filedrop", path: "/mnt/share" },
-    linkageTerms: terms,
-    metadata,
+  test("round-trips an explicit standardization block", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    const standardization = [
+      {
+        output: "ssn",
+        input: "tax_id",
+        steps: [{ function: "trim_whitespace" }],
+      },
+    ];
+    saveConfig(configPath, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: terms,
+      standardization,
+    });
+    expect(loadConfigLinkageSource(configPath)?.standardization).toEqual(
+      standardization,
+    );
   });
-  // saveConfig writes is_payload; loadConfigLinkageSource camelizes it back.
-  expect(loadConfigLinkageSource(configPath)?.metadata).toEqual(metadata);
-});
 
-test("loadConfigLinkageSource rejects a config with an invalid metadata block", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  // Valid linkage_terms (so the metadata branch is reached) plus a metadata
-  // entry with an unknown semantic type.
-  const yaml = YAML.stringify({
-    linkageTerms: getDefaultLinkageTerms("Agency A"),
-    metadata: [
-      { name: "X", type: "not_a_type", role: "linkage", isPayload: false },
-    ],
+  test("round-trips an explicit metadata block", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    const metadata = [
+      {
+        name: "tax_id",
+        type: "ssn" as const,
+        role: "linkage" as const,
+        isPayload: false,
+      },
+    ];
+    saveConfig(configPath, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: terms,
+      metadata,
+    });
+    // saveConfig writes is_payload; loadConfigLinkageSource camelizes it back.
+    expect(loadConfigLinkageSource(configPath)?.metadata).toEqual(metadata);
   });
-  fs.writeFileSync(configPath, yaml);
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => loadConfigLinkageSource(configPath)).toThrow("invalid metadata");
-});
 
-test("loadConfigLinkageSource refuses an unread key the run path refuses", () => {
-  // invite reads the file through here and mints an invitation from what it
-  // returns, while exchange reads the same file through parseExchangeSpec. A
-  // key this read stripped would put the operator's own narrowed terms on an
-  // invitation, over a file the next exchange refuses.
-  const configPath = path.join(dir, "alcove.yaml");
-  const document = {
-    connection: { channel: "filedrop", path: "/mnt/share" },
-    linkage_terms: {
-      ...(snakeizeKeys(getDefaultLinkageTerms("Agency A")) as object),
-      zz_probe_key: "held",
-    },
-  };
-  fs.writeFileSync(configPath, YAML.stringify(document));
-  let runPath = "";
-  try {
-    parseExchangeSpec(document);
-  } catch (err) {
-    runPath = describeConfigSchemaError(err);
-  }
-  expect(runPath).toContain('Unrecognized key: "zz_probe_key"');
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  let inviteRead = "";
-  try {
-    loadConfigLinkageSource(configPath);
-  } catch (err) {
-    inviteRead = (err as Error).message;
-  }
-  expect(inviteRead).toContain("has invalid linkage_terms");
-  expect(inviteRead).toContain('Unrecognized key: "zz_probe_key"');
-});
+  test("rejects a config with an invalid metadata block", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    // Valid linkage_terms (so the metadata branch is reached) plus a metadata
+    // entry with an unknown semantic type.
+    const yaml = YAML.stringify({
+      linkageTerms: getDefaultLinkageTerms("Agency A"),
+      metadata: [
+        { name: "X", type: "not_a_type", role: "linkage", isPayload: false },
+      ],
+    });
+    fs.writeFileSync(configPath, yaml);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "invalid metadata",
+    );
+  });
 
-test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    "connection:\n  channel: filedrop\n  path: /x\n",
-  );
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => loadConfigLinkageSource(configPath)).toThrow("no linkage_terms");
+  test("refuses an unread key the run path refuses", () => {
+    // invite reads the file through here and mints an invitation from what it
+    // returns, while exchange reads the same file through parseExchangeSpec. A
+    // key this read stripped would put the operator's own narrowed terms on an
+    // invitation, over a file the next exchange refuses.
+    const configPath = path.join(dir, "alcove.yaml");
+    const document = {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkage_terms: {
+        ...(snakeizeKeys(getDefaultLinkageTerms("Agency A")) as object),
+        zz_probe_key: "held",
+      },
+    };
+    fs.writeFileSync(configPath, YAML.stringify(document));
+    let runPath = "";
+    try {
+      parseExchangeSpec(document);
+    } catch (err) {
+      runPath = describeConfigSchemaError(err);
+    }
+    expect(runPath).toContain('Unrecognized key: "zz_probe_key"');
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    let inviteRead = "";
+    try {
+      loadConfigLinkageSource(configPath);
+    } catch (err) {
+      inviteRead = (err as Error).message;
+    }
+    expect(inviteRead).toContain("has invalid linkage_terms");
+    expect(inviteRead).toContain('Unrecognized key: "zz_probe_key"');
+  });
+
+  test("rejects a config with no linkage_terms", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      "connection:\n  channel: filedrop\n  path: /x\n",
+    );
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "no linkage_terms",
+    );
+  });
 });
 
 // The two absences loadConfigLinkageSource folds into one `undefined` and one
@@ -4238,200 +4330,202 @@ test("loadConfigLinkageSource rejects a config with no linkage_terms", () => {
 // for another purpose (verify-receipt reads it for signing.partner_fingerprint)
 // attributes each in its own terms rather than reporting a broken invitation
 // source.
-test("readConfigLinkageSource tells a missing file from a config with no terms", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(configPath, "signing:\n  mode: certificate\n");
-  expect(readConfigLinkageSource(path.join(dir, "absent.yaml"))).toEqual({
-    status: "no-config-file",
+describe("readConfigLinkageSource", () => {
+  test("tells a missing file from a config with no terms", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(configPath, "signing:\n  mode: certificate\n");
+    expect(readConfigLinkageSource(path.join(dir, "absent.yaml"))).toEqual({
+      status: "no-config-file",
+    });
+    expect(readConfigLinkageSource(configPath)).toEqual({
+      status: "no-linkage-terms",
+    });
   });
-  expect(readConfigLinkageSource(configPath)).toEqual({
-    status: "no-linkage-terms",
-  });
-});
 
-test("readConfigLinkageSource returns the source a config defines", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = getDefaultLinkageTerms("Agency A");
-  saveConfig(configPath, {
-    connection: { channel: "filedrop", path: "/mnt/share" },
-    linkageTerms: terms,
-  });
-  const result = readConfigLinkageSource(configPath);
-  expect(result).toEqual({
-    status: "loaded",
-    source: {
-      linkageTerms: terms,
-      standardization: undefined,
-      metadata: undefined,
-      retainsFiles: false,
-      linkageTermsStanding: "held-alone",
-    },
-  });
-});
-
-// The delimiter the exchange this config governs reads and writes by, lifted so
-// a command grading an input against this config reads the file the same way.
-// The spellings and the accepted set are core's own, shared with the schema the
-// run path parses the same key through.
-test("readConfigLinkageSource reads the config's csv_delimiter, tab and detect spellings and all", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = getDefaultLinkageTerms("Agency A");
-  for (const [written, resolved] of [
-    ["|", "|"],
-    ["tab", "\t"],
-    ["\\t", "\t"],
-    ["detect", "detect"],
-    ["DETECT", "detect"],
-  ]) {
+  test("returns the source a config defines", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
     saveConfig(configPath, {
       connection: { channel: "filedrop", path: "/mnt/share" },
       linkageTerms: terms,
-      csvDelimiter: written,
     });
-    expect(readConfigLinkageSource(configPath)).toMatchObject({
+    const result = readConfigLinkageSource(configPath);
+    expect(result).toEqual({
       status: "loaded",
-      source: { csvDelimiter: resolved },
+      source: {
+        linkageTerms: terms,
+        standardization: undefined,
+        metadata: undefined,
+        retainsFiles: false,
+        linkageTermsStanding: "held-alone",
+      },
     });
-  }
-});
+  });
 
-// Refused here rather than read past: a command that graded the operator's
-// input by a delimiter no run of this config will ever use would report a
-// verdict about a file nobody reads that way.
-test("readConfigLinkageSource refuses a csv_delimiter outside the accepted set", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  for (const written of ["::", '"', 9]) {
+  // The delimiter the exchange this config governs reads and writes by, lifted so
+  // a command grading an input against this config reads the file the same way.
+  // The spellings and the accepted set are core's own, shared with the schema the
+  // run path parses the same key through.
+  test("reads the config's csv_delimiter, tab and detect spellings and all", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    for (const [written, resolved] of [
+      ["|", "|"],
+      ["tab", "\t"],
+      ["\\t", "\t"],
+      ["detect", "detect"],
+      ["DETECT", "detect"],
+    ]) {
+      saveConfig(configPath, {
+        connection: { channel: "filedrop", path: "/mnt/share" },
+        linkageTerms: terms,
+        csvDelimiter: written,
+      });
+      expect(readConfigLinkageSource(configPath)).toMatchObject({
+        status: "loaded",
+        source: { csvDelimiter: resolved },
+      });
+    }
+  });
+
+  // Refused here rather than read past: a command that graded the operator's
+  // input by a delimiter no run of this config will ever use would report a
+  // verdict about a file nobody reads that way.
+  test("refuses a csv_delimiter outside the accepted set", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    for (const written of ["::", '"', 9]) {
+      fs.writeFileSync(
+        configPath,
+        YAML.stringify({
+          connection: { channel: "filedrop", path: "/mnt/share" },
+          linkage_terms: snakeizeKeys(getDefaultLinkageTerms("Agency A")),
+          csv_delimiter: written,
+        }),
+      );
+      expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
+      expect(() => readConfigLinkageSource(configPath)).toThrow(
+        "invalid csv_delimiter",
+      );
+    }
+  });
+
+  // A config writes its params in snake_case and the function library reads them
+  // in camelCase, so the block is camelized on the way in, as the `alcove
+  // exchange` run path's own read of it (`parseExchangeSpec`) does. Without that
+  // a declared `input_format` reaches no factory at all and the step runs as its
+  // default: a date the operator wrote a day-first format for, read month-first.
+  test("runs a snake_case standardization param as declared", () => {
+    const configPath = path.join(dir, "alcove.yaml");
     fs.writeFileSync(
       configPath,
-      YAML.stringify({
-        connection: { channel: "filedrop", path: "/mnt/share" },
-        linkage_terms: snakeizeKeys(getDefaultLinkageTerms("Agency A")),
-        csv_delimiter: written,
+      [
+        "standardization:",
+        "  - output: dob",
+        "    input: DOB",
+        "    steps:",
+        "      - function: parse_date",
+        "        params:",
+        "          input_format: DD/MM/YYYY",
+        "          output_format: YYYY-MM-DD",
+        "  - output: last_name",
+        "    input: LN",
+        "    steps:",
+        "      - function: split_on",
+        "        params:",
+        "          delimiter: '-'",
+        "          include_original: true",
+        YAML.stringify({ linkage_terms: getDefaultLinkageTerms("Agency A") }),
+      ].join("\n"),
+    );
+    const result = readConfigLinkageSource(configPath);
+    if (result.status !== "loaded") throw new Error(result.status);
+    const stepsFor = (output: string) =>
+      result.source.standardization?.find((t) => t.output === output)?.steps ??
+      [];
+    // 5 March 1990 under the declared day-first format. Read as the parse_date
+    // default (MM/DD/YYYY) the same cell would render 1990-05-03.
+    expect(
+      new StandardizedField("dob", "DOB", stepsFor("dob"), []).evaluateRow({
+        DOB: "05/03/1990",
       }),
+    ).toEqual(["1990-03-05"]);
+    // include_original keeps the unsplit value beside the parts; the default (and
+    // an include_original that reached no factory) drops it.
+    expect(
+      new StandardizedField("last_name", "LN", stepsFor("last_name"), [])
+        .evaluateRow({ LN: "SMITH-JONES" })
+        .sort(),
+    ).toEqual(["JONES", "SMITH", "SMITH-JONES"]);
+  });
+
+  // The other half of reading the param: a type the function cannot read is
+  // refused where the config is decoded, naming the param and what it got, rather
+  // than running as the default.
+  test("refuses a snake_case param the config mistyped", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "standardization:",
+        "  - output: dob",
+        "    input: DOB",
+        "    steps:",
+        "      - function: parse_date",
+        "        params:",
+        "          input_format: 007",
+        YAML.stringify({ linkage_terms: getDefaultLinkageTerms("Agency A") }),
+      ].join("\n"),
     );
     expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
     expect(() => readConfigLinkageSource(configPath)).toThrow(
-      "invalid csv_delimiter",
+      `config file ${configPath} has invalid standardization: ` +
+        "0.steps.0.params: parse_date input_format must be text, not a number; " +
+        "quote the value, or omit the key to leave the param unset",
     );
-  }
-});
-
-// A config writes its params in snake_case and the function library reads them
-// in camelCase, so the block is camelized on the way in, as the `alcove
-// exchange` run path's own read of it (`parseExchangeSpec`) does. Without that
-// a declared `input_format` reaches no factory at all and the step runs as its
-// default: a date the operator wrote a day-first format for, read month-first.
-test("readConfigLinkageSource runs a snake_case standardization param as declared", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "standardization:",
-      "  - output: dob",
-      "    input: DOB",
-      "    steps:",
-      "      - function: parse_date",
-      "        params:",
-      "          input_format: DD/MM/YYYY",
-      "          output_format: YYYY-MM-DD",
-      "  - output: last_name",
-      "    input: LN",
-      "    steps:",
-      "      - function: split_on",
-      "        params:",
-      "          delimiter: '-'",
-      "          include_original: true",
-      YAML.stringify({ linkage_terms: getDefaultLinkageTerms("Agency A") }),
-    ].join("\n"),
-  );
-  const result = readConfigLinkageSource(configPath);
-  if (result.status !== "loaded") throw new Error(result.status);
-  const stepsFor = (output: string) =>
-    result.source.standardization?.find((t) => t.output === output)?.steps ??
-    [];
-  // 5 March 1990 under the declared day-first format. Read as the parse_date
-  // default (MM/DD/YYYY) the same cell would render 1990-05-03.
-  expect(
-    new StandardizedField("dob", "DOB", stepsFor("dob"), []).evaluateRow({
-      DOB: "05/03/1990",
-    }),
-  ).toEqual(["1990-03-05"]);
-  // include_original keeps the unsplit value beside the parts; the default (and
-  // an include_original that reached no factory) drops it.
-  expect(
-    new StandardizedField("last_name", "LN", stepsFor("last_name"), [])
-      .evaluateRow({ LN: "SMITH-JONES" })
-      .sort(),
-  ).toEqual(["JONES", "SMITH", "SMITH-JONES"]);
-});
-
-// The other half of reading the param: a type the function cannot read is
-// refused where the config is decoded, naming the param and what it got, rather
-// than running as the default.
-test("readConfigLinkageSource refuses a snake_case param the config mistyped", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "standardization:",
-      "  - output: dob",
-      "    input: DOB",
-      "    steps:",
-      "      - function: parse_date",
-      "        params:",
-      "          input_format: 007",
-      YAML.stringify({ linkage_terms: getDefaultLinkageTerms("Agency A") }),
-    ].join("\n"),
-  );
-  expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => readConfigLinkageSource(configPath)).toThrow(
-    `config file ${configPath} has invalid standardization: ` +
-      "0.steps.0.params: parse_date input_format must be text, not a number; " +
-      "quote the value, or omit the key to leave the param unset",
-  );
-});
-
-// The remedy follows the AUDIENCE, not the schema: this block is the operator's
-// own file, open to them, so the same declared-type refusal the partner-token
-// decode states bare names the remedy here. The bare wording is pinned on the
-// decode side (packages/core/test/config/linkageTermsSchema.test.ts).
-test("readConfigLinkageSource names the remedy for a mistyped linkage_terms param", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = structuredClone(getDefaultLinkageTerms("Agency A"));
-  terms.linkageKeys[0].elements[0].transform = [
-    { function: "pad_left", params: { length: 9, char: 0 } },
-  ];
-  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
-  expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => readConfigLinkageSource(configPath)).toThrow(
-    "pad_left char must be text, not a number; quote the value, or omit " +
-      "the key to leave the param unset",
-  );
-});
-
-// The one connection fact the reader lifts out, for the invitation's retain
-// declaration. A `true` at the fixed path is read; nothing else about the block
-// is parsed, which is what keeps a still-placeholder connection from blocking an
-// invitation.
-test("readConfigLinkageSource reads retain mode off the connection block", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = getDefaultLinkageTerms("Agency A");
-  saveConfig(configPath, {
-    connection: {
-      channel: "filedrop",
-      path: "/mnt/share",
-      options: {
-        retainFiles: true,
-        locklessRendezvous: true,
-        timestampInFilename: true,
-      },
-    },
-    linkageTerms: terms,
   });
-  const result = readConfigLinkageSource(configPath);
-  expect(result).toMatchObject({
-    status: "loaded",
-    source: { retainsFiles: true },
+
+  // The remedy follows the AUDIENCE, not the schema: this block is the operator's
+  // own file, open to them, so the same declared-type refusal the partner-token
+  // decode states bare names the remedy here. The bare wording is pinned on the
+  // decode side (packages/core/test/config/linkageTermsSchema.test.ts).
+  test("names the remedy for a mistyped linkage_terms param", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = structuredClone(getDefaultLinkageTerms("Agency A"));
+    terms.linkageKeys[0].elements[0].transform = [
+      { function: "pad_left", params: { length: 9, char: 0 } },
+    ];
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+    expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => readConfigLinkageSource(configPath)).toThrow(
+      "pad_left char must be text, not a number; quote the value, or omit " +
+        "the key to leave the param unset",
+    );
+  });
+
+  // The one connection fact the reader lifts out, for the invitation's retain
+  // declaration. A `true` at the fixed path is read; nothing else about the block
+  // is parsed, which is what keeps a still-placeholder connection from blocking an
+  // invitation.
+  test("reads retain mode off the connection block", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    saveConfig(configPath, {
+      connection: {
+        channel: "filedrop",
+        path: "/mnt/share",
+        options: {
+          retainFiles: true,
+          locklessRendezvous: true,
+          timestampInFilename: true,
+        },
+      },
+      linkageTerms: terms,
+    });
+    const result = readConfigLinkageSource(configPath);
+    expect(result).toMatchObject({
+      status: "loaded",
+      source: { retainsFiles: true },
+    });
   });
 });
 
@@ -4447,49 +4541,56 @@ test("readConfigLinkageSource reads retain mode off the connection block", () =>
 // `options: {retain_files: true}` would mint a token for a mode no run of it
 // could be in -- ConnectionConfigSchema does not catch it either, since
 // SharedOptionsSchema has no retainFiles field and silently drops the value.
-test.each([
-  ["no options block", "connection:\n  channel: sftp\n"],
-  [
-    "retain_files absent",
-    "connection:\n  options:\n    poll_interval_ms: 500\n",
-  ],
-  ["retain_files false", "connection:\n  options:\n    retain_files: false\n"],
-  [
-    "retain_files a string",
-    "connection:\n  options:\n    retain_files: 'true'\n",
-  ],
-  ["options a scalar", "connection:\n  options: yes\n"],
-  ["connection a scalar", "connection: sftp\n"],
-  ["no connection block", ""],
-  [
-    "retain_files on a webrtc connection",
-    "connection:\n  channel: webrtc\n  options:\n    retain_files: true\n",
-  ],
-])("readConfigLinkageSource declares no retain mode: %s", (_label, block) => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = getDefaultLinkageTerms("Agency A");
-  // The nested keys stay camelCase: safeParseLinkageTerms camelizes on the way
-  // in, so either spelling parses and the block under test is the connection.
-  fs.writeFileSync(
-    configPath,
-    `${block}${YAML.stringify({ linkage_terms: terms })}`,
-  );
-  const result = readConfigLinkageSource(configPath);
-  expect(result).toMatchObject({
-    status: "loaded",
-    source: { retainsFiles: false },
+describe("readConfigLinkageSource", () => {
+  test.each([
+    ["no options block", "connection:\n  channel: sftp\n"],
+    [
+      "retain_files absent",
+      "connection:\n  options:\n    poll_interval_ms: 500\n",
+    ],
+    [
+      "retain_files false",
+      "connection:\n  options:\n    retain_files: false\n",
+    ],
+    [
+      "retain_files a string",
+      "connection:\n  options:\n    retain_files: 'true'\n",
+    ],
+    ["options a scalar", "connection:\n  options: yes\n"],
+    ["connection a scalar", "connection: sftp\n"],
+    ["no connection block", ""],
+    [
+      "retain_files on a webrtc connection",
+      "connection:\n  channel: webrtc\n  options:\n    retain_files: true\n",
+    ],
+  ])("declares no retain mode: %s", (_label, block) => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    // The nested keys stay camelCase: safeParseLinkageTerms camelizes on the way
+    // in, so either spelling parses and the block under test is the connection.
+    fs.writeFileSync(
+      configPath,
+      `${block}${YAML.stringify({ linkage_terms: terms })}`,
+    );
+    const result = readConfigLinkageSource(configPath);
+    expect(result).toMatchObject({
+      status: "loaded",
+      source: { retainsFiles: false },
+    });
   });
 });
 
 // A defect in one of the blocks it does parse is still a refusal, not a status:
 // only the two absences are outcomes the caller decides.
-test("readConfigLinkageSource still refuses invalid linkage_terms", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(configPath, "linkage_terms:\n  identity: Agency A\n");
-  expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => readConfigLinkageSource(configPath)).toThrow(
-    "invalid linkage_terms",
-  );
+describe("readConfigLinkageSource", () => {
+  test("still refuses invalid linkage_terms", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(configPath, "linkage_terms:\n  identity: Agency A\n");
+    expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => readConfigLinkageSource(configPath)).toThrow(
+      "invalid linkage_terms",
+    );
+  });
 });
 
 // A local config whose linkage_terms trips a camelizeKeys structural bound (here
@@ -4498,197 +4599,204 @@ test("readConfigLinkageSource still refuses invalid linkage_terms", () => {
 // text -- safeParseLinkageTerms is non-throwing for the bound, so the
 // if(!result.success) branch produces the helpful message rather than the throw
 // skipping straight past it. Still a UsageError (CLI exit 64).
-test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  // Nest one level past the depth bound so camelizeKeys rejects before Zod.
-  let deepTerms: unknown = { identity: "Agency A" };
-  for (let i = 0; i < MAX_NESTING_DEPTH; i++) deepTerms = { nested: deepTerms };
-  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: deepTerms }));
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  // The file-named wrap, with the bound's fixed message (no input bytes),
-  // not the raw NestingDepthExceededError text that the pre-fix throw produced.
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(
-    `config file ${configPath} has invalid linkage_terms: input nesting ` +
-      `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
-  );
-});
+describe("loadConfigLinkageSource", () => {
+  test("file-names a linkage_terms camelize-bound trip", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    // Nest one level past the depth bound so camelizeKeys rejects before Zod.
+    let deepTerms: unknown = { identity: "Agency A" };
+    for (let i = 0; i < MAX_NESTING_DEPTH; i++)
+      deepTerms = { nested: deepTerms };
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: deepTerms }));
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    // The file-named wrap, with the bound's fixed message (no input bytes),
+    // not the raw NestingDepthExceededError text that the pre-fix throw produced.
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      `config file ${configPath} has invalid linkage_terms: input nesting ` +
+        `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
+    );
+  });
 
-// The same for the metadata branch: a valid linkage_terms reaches it, then a
-// camelize-bound-tripping metadata block shows the file-named "invalid
-// metadata" wrap rather than throwing the raw bound error.
-test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  let deepMetadata: unknown = { name: "X" };
-  for (let i = 0; i < MAX_NESTING_DEPTH; i++)
-    deepMetadata = { nested: deepMetadata };
-  fs.writeFileSync(
-    configPath,
-    YAML.stringify({
-      linkage_terms: getDefaultLinkageTerms("Agency A"),
-      metadata: deepMetadata,
-    }),
-  );
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(
-    `config file ${configPath} has invalid metadata: input nesting ` +
-      `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
-  );
-});
+  // The same for the metadata branch: a valid linkage_terms reaches it, then a
+  // camelize-bound-tripping metadata block shows the file-named "invalid
+  // metadata" wrap rather than throwing the raw bound error.
+  test("file-names a metadata camelize-bound trip", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    let deepMetadata: unknown = { name: "X" };
+    for (let i = 0; i < MAX_NESTING_DEPTH; i++)
+      deepMetadata = { nested: deepMetadata };
+    fs.writeFileSync(
+      configPath,
+      YAML.stringify({
+        linkage_terms: getDefaultLinkageTerms("Agency A"),
+        metadata: deepMetadata,
+      }),
+    );
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      `config file ${configPath} has invalid metadata: input nesting ` +
+        `exceeds the maximum depth of ${MAX_NESTING_DEPTH}`,
+    );
+  });
 
-// The gate that keeps a declared column name free of the class the CSV read
-// strips from a header: a config naming a column as the header was typed is
-// refused where it is loaded, so no such name reaches matching, the disclosed
-// payload column list, or a record. U+0007 BEL, written as an escape so a
-// fixture about invisible characters is readable.
-test("loadConfigLinkageSource refuses a control character in a metadata name", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    YAML.stringify({
-      linkage_terms: getDefaultLinkageTerms("Agency A"),
-      metadata: [
-        {
-          name: "client\u0007id",
-          type: "identifier",
-          role: "identifier",
-          is_payload: true,
-        },
-      ],
-    }),
-  );
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  // The field path, and none of the offending name.
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(
-    `config file ${configPath} has invalid metadata: 0.name: a metadata ` +
-      "column name must not contain a control or text-direction character",
-  );
-  // And the remedy for the configuration that reaches this refusal: the name
-  // was written as the header was typed, so it names no column of the read file.
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(
-    "re-run alcove init over the input file, or delete the character from " +
-      "the name",
-  );
-});
+  // The gate that keeps a declared column name free of the class the CSV read
+  // strips from a header: a config naming a column as the header was typed is
+  // refused where it is loaded, so no such name reaches matching, the disclosed
+  // payload column list, or a record. U+0007 BEL, written as an escape so a
+  // fixture about invisible characters is readable.
+  test("refuses a control character in a metadata name", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      YAML.stringify({
+        linkage_terms: getDefaultLinkageTerms("Agency A"),
+        metadata: [
+          {
+            name: "client\u0007id",
+            type: "identifier",
+            role: "identifier",
+            is_payload: true,
+          },
+        ],
+      }),
+    );
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    // The field path, and none of the offending name.
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      `config file ${configPath} has invalid metadata: 0.name: a metadata ` +
+        "column name must not contain a control or text-direction character",
+    );
+    // And the remedy for the configuration that reaches this refusal: the name
+    // was written as the header was typed, so it names no column of the read file.
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "re-run alcove init over the input file, or delete the character from " +
+        "the name",
+    );
+  });
 
-// A camelized issue path names each segment in the spelling the file writes,
-// which works only for keys the camelize pass itself built. The one exception
-// is a transform `params` record key -- the schema's only free-form record --
-// so a path there stops at `params` instead: `_evil_key` and `EvilKey` both
-// camelize to `EvilKey`, so naming either would misname a key one of those
-// files does not contain.
-test("loadConfigLinkageSource stops a linkage_terms issue path at the params block", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
-  // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
-  // must exceed MAX_NAME_LENGTH so the record-key schema rejects it and Zod
-  // shows the offending key in the issue path.
-  const badKey = "\x1b[31m\u202eevil" + "x".repeat(MAX_NAME_LENGTH + 10);
-  terms.linkageKeys[0].elements[0].transform = [
-    { function: "noop", params: { [badKey]: 1 } },
-  ];
-  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
-  let caught: unknown;
-  try {
-    loadConfigLinkageSource(configPath);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  const rendered = sanitizeErrorForDisplay(caught);
-  expect(rendered).toContain("invalid linkage_terms");
-  // Every segment before the block still locates the problem, and it is fixed
-  // schema structure the whole way.
-  expect(rendered).toContain("linkage_keys.0.elements.0.transform.0.params: ");
-  // The key itself reaches the operator in no form: not raw, which the display
-  // boundary would have had to escape, and not as the escape either.
-  expect(rendered).not.toContain("\x1b");
-  expect(rendered).not.toContain("\u202e");
-  expect(rendered).not.toContain("\\x1b");
-  expect(rendered).not.toContain("\\u202e");
-});
+  // A camelized issue path names each segment in the spelling the file writes,
+  // which works only for keys the camelize pass itself built. The one exception
+  // is a transform `params` record key -- the schema's only free-form record --
+  // so a path there stops at `params` instead: `_evil_key` and `EvilKey` both
+  // camelize to `EvilKey`, so naming either would misname a key one of those
+  // files does not contain.
+  test("stops a linkage_terms issue path at the params block", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+    // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
+    // must exceed MAX_NAME_LENGTH so the record-key schema rejects it and Zod
+    // shows the offending key in the issue path.
+    const badKey = "\x1b[31m\u202eevil" + "x".repeat(MAX_NAME_LENGTH + 10);
+    terms.linkageKeys[0].elements[0].transform = [
+      { function: "noop", params: { [badKey]: 1 } },
+    ];
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+    let caught: unknown;
+    try {
+      loadConfigLinkageSource(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(caught);
+    expect(rendered).toContain("invalid linkage_terms");
+    // Every segment before the block still locates the problem, and it is fixed
+    // schema structure the whole way.
+    expect(rendered).toContain(
+      "linkage_keys.0.elements.0.transform.0.params: ",
+    );
+    // The key itself reaches the operator in no form: not raw, which the display
+    // boundary would have had to escape, and not as the escape either.
+    expect(rendered).not.toContain("\x1b");
+    expect(rendered).not.toContain("\u202e");
+    expect(rendered).not.toContain("\\x1b");
+    expect(rendered).not.toContain("\\u202e");
+  });
 
-// The name shape is what refuses this key, not its length: it sits well inside
-// MAX_NAME_LENGTH, which a length bound alone admits.
-test("loadConfigLinkageSource refuses a params key holding a control character", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
-  const badKey = "de\x1b[31m\u202elimiter-unrepeatable-key";
-  expect(badKey.length).toBeLessThan(MAX_NAME_LENGTH);
-  terms.linkageKeys[0].elements[0].transform = [
-    { function: "split_on", params: { [badKey]: "," } },
-  ];
-  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
-  let caught: unknown;
-  try {
-    loadConfigLinkageSource(configPath);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  const rendered = sanitizeErrorForDisplay(caught);
-  expect(rendered).toContain("invalid linkage_terms");
-  expect(rendered).toContain("linkage_keys.0.elements.0.transform.0.params: ");
-  // The reason the operator reads is the schema's own, not the wrapper Zod puts
-  // over a refused record key -- with the path cut at the block, the reason is
-  // the only part left that says what is wrong. It trails no remedy where the
-  // metadata refusal beside it does: that remedy comes from the metadata
-  // message's own text, which is about a name declared against a header the CSV
-  // read strips, and a params key is not declared against anything.
-  expect(rendered).toContain(NAME_SHAPE_MESSAGE);
-  expect(rendered).not.toContain("Invalid key in record");
-  // The block is named and the key is not, in any form.
-  expect(rendered).not.toContain("unrepeatable-key");
-  expect(rendered).not.toContain("\x1b");
-  expect(rendered).not.toContain("\u202e");
-  expect(rendered).not.toContain("\\x1b");
-  expect(rendered).not.toContain("\\u202e");
-});
+  // The name shape is what refuses this key, not its length: it sits well inside
+  // MAX_NAME_LENGTH, which a length bound alone admits.
+  test("refuses a params key holding a control character", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+    const badKey = "de\x1b[31m\u202elimiter-unrepeatable-key";
+    expect(badKey.length).toBeLessThan(MAX_NAME_LENGTH);
+    terms.linkageKeys[0].elements[0].transform = [
+      { function: "split_on", params: { [badKey]: "," } },
+    ];
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+    let caught: unknown;
+    try {
+      loadConfigLinkageSource(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(caught);
+    expect(rendered).toContain("invalid linkage_terms");
+    expect(rendered).toContain(
+      "linkage_keys.0.elements.0.transform.0.params: ",
+    );
+    // The reason the operator reads is the schema's own, not the wrapper Zod puts
+    // over a refused record key -- with the path cut at the block, the reason is
+    // the only part left that says what is wrong. It trails no remedy where the
+    // metadata refusal beside it does: that remedy comes from the metadata
+    // message's own text, which is about a name declared against a header the CSV
+    // read strips, and a params key is not declared against anything.
+    expect(rendered).toContain(NAME_SHAPE_MESSAGE);
+    expect(rendered).not.toContain("Invalid key in record");
+    // The block is named and the key is not, in any form.
+    expect(rendered).not.toContain("unrepeatable-key");
+    expect(rendered).not.toContain("\x1b");
+    expect(rendered).not.toContain("\u202e");
+    expect(rendered).not.toContain("\\x1b");
+    expect(rendered).not.toContain("\\u202e");
+  });
 
-test("loadConfigLinkageSource names no spelling of a params key it cannot invert", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
-  // Capitals the camelize pass leaves untouched, so the segment reaching the
-  // formatter is the file's own spelling -- and is equally the spelling a file
-  // writing `_evil_key` would have arrived as. Over MAX_NAME_LENGTH so the key
-  // reaches the issue path at all.
-  const authorKey = "EvilKey" + "x".repeat(MAX_NAME_LENGTH);
-  terms.linkageKeys[0].elements[0].transform = [
-    { function: "noop", params: { [authorKey]: 1 } },
-  ];
-  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
-  let caught: unknown;
-  try {
-    loadConfigLinkageSource(configPath);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  const message = (caught as Error).message;
-  expect(message).toContain("linkage_keys.0.elements.0.transform.0.params: ");
-  // Neither the rewrite the schema-fixed segments take, which would name
-  // `_evil_key...` -- a key this file does not contain -- nor the raw segment,
-  // which would name it for this file while mis-naming the other one.
-  expect(message).not.toContain("_evil_key");
-  expect(message).not.toContain(authorKey);
-});
+  test("names no spelling of a params key it cannot invert", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+    // Capitals the camelize pass leaves untouched, so the segment reaching the
+    // formatter is the file's own spelling -- and is equally the spelling a file
+    // writing `_evil_key` would have arrived as. Over MAX_NAME_LENGTH so the key
+    // reaches the issue path at all.
+    const authorKey = "EvilKey" + "x".repeat(MAX_NAME_LENGTH);
+    terms.linkageKeys[0].elements[0].transform = [
+      { function: "noop", params: { [authorKey]: 1 } },
+    ];
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+    let caught: unknown;
+    try {
+      loadConfigLinkageSource(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    const message = (caught as Error).message;
+    expect(message).toContain("linkage_keys.0.elements.0.transform.0.params: ");
+    // Neither the rewrite the schema-fixed segments take, which would name
+    // `_evil_key...` -- a key this file does not contain -- nor the raw segment,
+    // which would name it for this file while mis-naming the other one.
+    expect(message).not.toContain("_evil_key");
+    expect(message).not.toContain(authorKey);
+  });
 
-test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path unescaped", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
-  // An empty name fails the linkage-key `name` min-length, locating the issue
-  // at the schema-fixed path linkage_keys.0.name (field names + a numeric index).
-  terms.linkageKeys[0].name = "";
-  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
-  let caught: unknown;
-  try {
-    loadConfigLinkageSource(configPath);
-  } catch (err) {
-    caught = err;
-  }
-  expect(caught).toBeInstanceOf(UsageError);
-  // Ordinary path components survive untouched: the `.` separators and the
-  // numeric index are not over-escaped.
-  expect((caught as Error).message).toContain("linkage_keys.0.name");
+  test("leaves a schema-fixed linkage_terms issue path unescaped", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+    // An empty name fails the linkage-key `name` min-length, locating the issue
+    // at the schema-fixed path linkage_keys.0.name (field names + a numeric index).
+    terms.linkageKeys[0].name = "";
+    fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+    let caught: unknown;
+    try {
+      loadConfigLinkageSource(configPath);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    // Ordinary path components survive untouched: the `.` separators and the
+    // numeric index are not over-escaped.
+    expect((caught as Error).message).toContain("linkage_keys.0.name");
+  });
 });
 
 // Validation runs on the camelized shape, so a Zod issue names its field in
@@ -4753,36 +4861,38 @@ test("a nested metadata schema error names its key as the file writes it", () =>
   expect(fs.readFileSync(configPath, "utf8")).toContain("is_payload");
 });
 
-test("loadConfigLinkageSource rejects an invalid standardization block", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  const terms = getDefaultLinkageTerms("Agency A");
-  // Valid linkage_terms but a standardization entry missing its required input.
-  saveConfig(configPath, {
-    connection: { channel: "filedrop", path: "/mnt/share" },
-    linkageTerms: terms,
+describe("loadConfigLinkageSource", () => {
+  test("rejects an invalid standardization block", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    const terms = getDefaultLinkageTerms("Agency A");
+    // Valid linkage_terms but a standardization entry missing its required input.
+    saveConfig(configPath, {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkageTerms: terms,
+    });
+    fs.appendFileSync(
+      configPath,
+      "standardization:\n  - output: ssn\n    steps: []\n",
+    );
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "invalid standardization",
+    );
   });
-  fs.appendFileSync(
-    configPath,
-    "standardization:\n  - output: ssn\n    steps: []\n",
-  );
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(
-    "invalid standardization",
-  );
-});
 
-test("loadConfigLinkageSource rejects malformed YAML", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(configPath, "linkage_terms: [unclosed\n");
-  // The path-only message only the sensitive-parse chokepoint produces, so this is
-  // also what pins that this reader routes through it rather than a raw parser --
-  // and so inherits the source-bearing channels it closes (both of them exercised
-  // with a credential in place against the same chokepoint's other CLI caller, in
-  // exchange.test.ts).
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(
-    "could not be parsed as YAML",
-  );
+  test("rejects malformed YAML", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(configPath, "linkage_terms: [unclosed\n");
+    // The path-only message only the sensitive-parse chokepoint produces, so this is
+    // also what pins that this reader routes through it rather than a raw parser --
+    // and so inherits the source-bearing channels it closes (both of them exercised
+    // with a credential in place against the same chokepoint's other CLI caller, in
+    // exchange.test.ts).
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "could not be parsed as YAML",
+    );
+  });
 });
 
 // The schema-validation error branches (linkage_terms / standardization /
@@ -4791,56 +4901,60 @@ test("loadConfigLinkageSource rejects malformed YAML", () => {
 // leak it). The sensitive-parse chokepoint does not cover this branch, so
 // this pins it directly: embedding a secret as an invalid enum value must
 // never reach the message, and a future Zod that re-embeds it turns this red.
-test.each([
-  [
-    "metadata type enum",
-    (s: string) =>
-      YAML.stringify({
-        linkageTerms: getDefaultLinkageTerms("Agency A"),
-        metadata: [{ name: "X", type: s, role: "linkage", isPayload: false }],
-      }),
-    "invalid metadata",
-    "0.type",
-  ],
-  [
-    "linkage_terms algorithm enum",
-    (s: string) =>
-      YAML.stringify({
-        linkageTerms: { ...getDefaultLinkageTerms("Agency A"), algorithm: s },
-      }),
-    "invalid linkage_terms",
-    "algorithm",
-  ],
-])(
-  "loadConfigLinkageSource does not echo a secret in a schema error: %s",
-  (_, mk, expectedFragment, expectedPath) => {
-    const SECRET = "S3cr3tSFTPPassw0rd";
-    const configPath = path.join(dir, "alcove.yaml");
-    fs.writeFileSync(configPath, mk(SECRET));
-    let caught: unknown;
-    try {
-      loadConfigLinkageSource(configPath);
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(UsageError);
-    expect((caught as Error).message).toContain(expectedFragment);
-    // The targeted enum field is the one that rejected -- proves the secret was
-    // the rejected value, so not.toContain below is non-vacuous.
-    expect((caught as Error).message).toContain(expectedPath);
-    expect((caught as Error).message).not.toContain(SECRET);
-  },
-);
-
-test("loadConfigLinkageSource rejects a non-mapping top-level value", () => {
-  const configPath = path.join(dir, "alcove.yaml");
-  // A top-level YAML array parses as an object in JS; it must be reported as a
-  // malformed config, not misattributed to a missing linkage_terms block.
-  fs.writeFileSync(configPath, "- a\n- b\n");
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  expect(() => loadConfigLinkageSource(configPath)).toThrow(
-    "not a valid configuration object",
+describe("loadConfigLinkageSource", () => {
+  test.each([
+    [
+      "metadata type enum",
+      (s: string) =>
+        YAML.stringify({
+          linkageTerms: getDefaultLinkageTerms("Agency A"),
+          metadata: [{ name: "X", type: s, role: "linkage", isPayload: false }],
+        }),
+      "invalid metadata",
+      "0.type",
+    ],
+    [
+      "linkage_terms algorithm enum",
+      (s: string) =>
+        YAML.stringify({
+          linkageTerms: { ...getDefaultLinkageTerms("Agency A"), algorithm: s },
+        }),
+      "invalid linkage_terms",
+      "algorithm",
+    ],
+  ])(
+    "does not echo a secret in a schema error: %s",
+    (_, mk, expectedFragment, expectedPath) => {
+      const SECRET = "S3cr3tSFTPPassw0rd";
+      const configPath = path.join(dir, "alcove.yaml");
+      fs.writeFileSync(configPath, mk(SECRET));
+      let caught: unknown;
+      try {
+        loadConfigLinkageSource(configPath);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(UsageError);
+      expect((caught as Error).message).toContain(expectedFragment);
+      // The targeted enum field is the one that rejected -- proves the secret was
+      // the rejected value, so not.toContain below is non-vacuous.
+      expect((caught as Error).message).toContain(expectedPath);
+      expect((caught as Error).message).not.toContain(SECRET);
+    },
   );
+});
+
+describe("loadConfigLinkageSource", () => {
+  test("rejects a non-mapping top-level value", () => {
+    const configPath = path.join(dir, "alcove.yaml");
+    // A top-level YAML array parses as an object in JS; it must be reported as a
+    // malformed config, not misattributed to a missing linkage_terms block.
+    fs.writeFileSync(configPath, "- a\n- b\n");
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+    expect(() => loadConfigLinkageSource(configPath)).toThrow(
+      "not a valid configuration object",
+    );
+  });
 });
 
 // --- A configuration is portable ---------------------------------------------
@@ -4971,68 +5085,72 @@ test("connection.options.sweep_exchange_files is not a persistable config field 
   expect(() => parseExchangeSpec(raw)).toThrow("force_retain_sweep");
 });
 
-test("assertRetainSweepGuard: --force-retain-sweep alone is a UsageError; other combinations pass", () => {
-  expect(() => assertRetainSweepGuard(false, true)).toThrow(UsageError);
-  expect(() => assertRetainSweepGuard(false, true)).toThrow(
-    "--force-retain-sweep requires --sweep-exchange-files",
-  );
-  expect(() => assertRetainSweepGuard(true, true)).not.toThrow();
-  expect(() => assertRetainSweepGuard(true, false)).not.toThrow();
-  expect(() => assertRetainSweepGuard(false, false)).not.toThrow();
+describe("assertRetainSweepGuard", () => {
+  test("--force-retain-sweep alone is a UsageError; other combinations pass", () => {
+    expect(() => assertRetainSweepGuard(false, true)).toThrow(UsageError);
+    expect(() => assertRetainSweepGuard(false, true)).toThrow(
+      "--force-retain-sweep requires --sweep-exchange-files",
+    );
+    expect(() => assertRetainSweepGuard(true, true)).not.toThrow();
+    expect(() => assertRetainSweepGuard(true, false)).not.toThrow();
+    expect(() => assertRetainSweepGuard(false, false)).not.toThrow();
+  });
 });
 
 // --- persistOutboundPayloadConsent: removal and empty-set shapes -------------
 
-test("persistOutboundPayloadConsent removes the record on undefined, and no-ops when absent", () => {
-  // The removal branch is what the accept-reuse and mint paths lean on: a record
-  // that should not stand is deleted, never left stale -- and removing from a
-  // config that has none must not rewrite the operator's file.
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    [
-      "connection:",
-      "  channel: sftp",
-      "  server:",
-      "    host: h",
-      "outbound_payload_consent:",
-      "  status: confirmed",
-      "  columns:",
-      "    - old_col",
-      "",
-    ].join("\n"),
-  );
-  persistOutboundPayloadConsent(configPath, undefined);
-  const raw = fs.readFileSync(configPath, "utf8");
-  expect(raw).not.toContain("outbound_payload_consent");
-  expect(raw).not.toContain("old_col");
-  const parsed = YAML.parse(raw) as { connection: { channel: string } };
-  expect(parsed.connection.channel).toBe("sftp");
-  persistOutboundPayloadConsent(configPath, undefined);
-  expect(fs.readFileSync(configPath, "utf8")).toBe(raw);
-});
-
-test("persistOutboundPayloadConsent writes a confirmed-empty set verbatim", () => {
-  // An empty confirmed set is a real confirmation that nothing is disclosed, not
-  // an absence: it must survive to disk as `columns: []` and parse back as an
-  // empty array, so a later run enforcing it refuses any disclosure at all.
-  const configPath = path.join(dir, "alcove.yaml");
-  fs.writeFileSync(
-    configPath,
-    ["connection:", "  channel: sftp", "  server:", "    host: h", ""].join(
-      "\n",
-    ),
-  );
-  persistOutboundPayloadConsent(configPath, {
-    status: "confirmed",
-    columns: [],
+describe("persistOutboundPayloadConsent", () => {
+  test("removes the record on undefined, and no-ops when absent", () => {
+    // The removal branch is what the accept-reuse and mint paths lean on: a record
+    // that should not stand is deleted, never left stale -- and removing from a
+    // config that has none must not rewrite the operator's file.
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "connection:",
+        "  channel: sftp",
+        "  server:",
+        "    host: h",
+        "outbound_payload_consent:",
+        "  status: confirmed",
+        "  columns:",
+        "    - old_col",
+        "",
+      ].join("\n"),
+    );
+    persistOutboundPayloadConsent(configPath, undefined);
+    const raw = fs.readFileSync(configPath, "utf8");
+    expect(raw).not.toContain("outbound_payload_consent");
+    expect(raw).not.toContain("old_col");
+    const parsed = YAML.parse(raw) as { connection: { channel: string } };
+    expect(parsed.connection.channel).toBe("sftp");
+    persistOutboundPayloadConsent(configPath, undefined);
+    expect(fs.readFileSync(configPath, "utf8")).toBe(raw);
   });
-  const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
-    outbound_payload_consent?: { status: string; columns?: string[] };
-  };
-  expect(parsed.outbound_payload_consent).toEqual({
-    status: "confirmed",
-    columns: [],
+
+  test("writes a confirmed-empty set verbatim", () => {
+    // An empty confirmed set is a real confirmation that nothing is disclosed, not
+    // an absence: it must survive to disk as `columns: []` and parse back as an
+    // empty array, so a later run enforcing it refuses any disclosure at all.
+    const configPath = path.join(dir, "alcove.yaml");
+    fs.writeFileSync(
+      configPath,
+      ["connection:", "  channel: sftp", "  server:", "    host: h", ""].join(
+        "\n",
+      ),
+    );
+    persistOutboundPayloadConsent(configPath, {
+      status: "confirmed",
+      columns: [],
+    });
+    const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+      outbound_payload_consent?: { status: string; columns?: string[] };
+    };
+    expect(parsed.outbound_payload_consent).toEqual({
+      status: "confirmed",
+      columns: [],
+    });
   });
 });
 
@@ -5274,21 +5392,23 @@ test("a citation written in some other shape is left for the schema", () => {
   );
 });
 
-test("configWithNamedRuleSetRules fills the terms and leaves the rest", () => {
-  const raw = {
-    connection: { channel: "filedrop", path: "/mnt/share" },
-    linkage_terms: namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
-  };
-  const filled = configWithNamedRuleSetRules(raw, "alcove.yaml") as {
-    connection: unknown;
-    linkage_terms: { linkageKeys: unknown };
-  };
-  expect(filled.connection).toBe(raw.connection);
-  expect(filled.linkage_terms.linkageKeys).toEqual(
-    DEFAULT_LINKAGE_RULE_SET.linkageKeys,
-  );
-  // The caller's own value is left as it read it.
-  expect(raw.linkage_terms).not.toHaveProperty("linkageKeys");
+describe("configWithNamedRuleSetRules", () => {
+  test("fills the terms and leaves the rest", () => {
+    const raw = {
+      connection: { channel: "filedrop", path: "/mnt/share" },
+      linkage_terms: namedRuleSetTerms(DEFAULT_LINKAGE_RULE_SET.reference),
+    };
+    const filled = configWithNamedRuleSetRules(raw, "alcove.yaml") as {
+      connection: unknown;
+      linkage_terms: { linkageKeys: unknown };
+    };
+    expect(filled.connection).toBe(raw.connection);
+    expect(filled.linkage_terms.linkageKeys).toEqual(
+      DEFAULT_LINKAGE_RULE_SET.linkageKeys,
+    );
+    // The caller's own value is left as it read it.
+    expect(raw.linkage_terms).not.toHaveProperty("linkageKeys");
+  });
 });
 
 test("a config with no linkage terms passes through untouched", () => {
@@ -5824,28 +5944,32 @@ test("the partner-deduplicate record is what marks an accepted config", () => {
   );
 });
 
-test("readConfigLinkageSource reads the terms' standing off the loaded file", () => {
-  const write = (
-    name: string,
-    extra: Partial<ExchangeSpec>,
-  ): ConfigLinkageSource => {
-    const configPath = path.join(dir, name);
-    saveConfig(configPath, {
-      connection: { channel: "filedrop", path: "/mnt/share" },
-      linkageTerms: getDefaultLinkageTerms("Agency A"),
-      ...extra,
-    });
-    const result = readConfigLinkageSource(configPath);
-    if (result.status !== "loaded")
-      throw new Error(`expected ${name} to load, got ${result.status}`);
-    return result.source;
-  };
-  expect(write("held-alone.yaml", {}).linkageTermsStanding).toBe("held-alone");
-  // The record in the snake_case spelling saveConfig serializes it to.
-  expect(
-    write("accepted.yaml", { expectedPartnerDeduplicate: false })
-      .linkageTermsStanding,
-  ).toBe("accepted-with-partner");
+describe("readConfigLinkageSource", () => {
+  test("reads the terms' standing off the loaded file", () => {
+    const write = (
+      name: string,
+      extra: Partial<ExchangeSpec>,
+    ): ConfigLinkageSource => {
+      const configPath = path.join(dir, name);
+      saveConfig(configPath, {
+        connection: { channel: "filedrop", path: "/mnt/share" },
+        linkageTerms: getDefaultLinkageTerms("Agency A"),
+        ...extra,
+      });
+      const result = readConfigLinkageSource(configPath);
+      if (result.status !== "loaded")
+        throw new Error(`expected ${name} to load, got ${result.status}`);
+      return result.source;
+    };
+    expect(write("held-alone.yaml", {}).linkageTermsStanding).toBe(
+      "held-alone",
+    );
+    // The record in the snake_case spelling saveConfig serializes it to.
+    expect(
+      write("accepted.yaml", { expectedPartnerDeduplicate: false })
+        .linkageTermsStanding,
+    ).toBe("accepted-with-partner");
+  });
 });
 
 // Both spellings are read, and the record's PRESENCE is what marks an
@@ -5854,13 +5978,12 @@ test("readConfigLinkageSource reads the terms' standing off the loaded file", ()
 // is treated as an acceptance rather than as an error here (the commands that build
 // an exchange from the file refuse the value through core's schema). A key
 // with no value at all is YAML's null, which is no record.
-test.each([
-  ["a camelCase spelling", "expectedPartnerDeduplicate: true\n", true],
-  ["a key with no value", "expected_partner_deduplicate:\n", false],
-  ["a non-boolean value", "expected_partner_deduplicate: 'true'\n", true],
-])(
-  "readConfigLinkageSource reads an acceptance from %s: %j",
-  (_label, block, accepted) => {
+describe("readConfigLinkageSource", () => {
+  test.each([
+    ["a camelCase spelling", "expectedPartnerDeduplicate: true\n", true],
+    ["a key with no value", "expected_partner_deduplicate:\n", false],
+    ["a non-boolean value", "expected_partner_deduplicate: 'true'\n", true],
+  ])("reads an acceptance from %s: %j", (_label, block, accepted) => {
     const configPath = path.join(dir, "alcove.yaml");
     const terms = getDefaultLinkageTerms("Agency A");
     fs.writeFileSync(
@@ -5873,8 +5996,8 @@ test.each([
         linkageTermsStanding: accepted ? "accepted-with-partner" : "held-alone",
       },
     });
-  },
-);
+  });
+});
 
 test("the record persistExpectedPartnerDeduplicate writes marks a reused config", () => {
   // The accept-reuse path leaves the operator's own terms on disk and writes
