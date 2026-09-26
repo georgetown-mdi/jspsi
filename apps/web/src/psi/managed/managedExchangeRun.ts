@@ -114,6 +114,23 @@ export class ManagedExchangeCustodyUnreadableError extends Error {
   }
 }
 
+/**
+ * Raised when the record a run reads inside the run+rotate lock is gone,
+ * does not validate, or holds a configuration only. Raised before the input
+ * is read and before any connection, so it rotates nothing; the runner
+ * records it under the `custody-unreadable` kind rather than the retryable
+ * `transport` tier, since the same stored record refuses identically at the
+ * next run.
+ */
+export class ManagedExchangeNotRunnableError extends Error {
+  constructor(id: string, cause: unknown) {
+    super(`managed exchange ${id} has no stored copy this device can run`, {
+      cause,
+    });
+    this.name = "ManagedExchangeNotRunnableError";
+  }
+}
+
 /** The input, handshake, and data-exchange phases the runner supplies to
  * {@link runManagedExchange}. The persist and lock are this module's; the runner
  * cannot reach the data exchange before the persist resolves, nor the handshake
@@ -211,8 +228,9 @@ export interface ManagedExchangeRunResult<TExchange> {
  * @throws {ManagedExchangeCustodyUnreadableError} if the sibling entry
  *   holding that state cannot be read; the `custody-unreadable` `lastRun` is
  *   recorded best-effort first, on the same no-input, no-connection terms.
- * @throws {Error} if the record is gone or holds a configuration only when
- *   the lock is granted; no input was read and no connection made.
+ * @throws {ManagedExchangeNotRunnableError} if the record is gone, does not
+ *   validate, or holds a configuration only when the lock is granted; no
+ *   input was read and no connection made.
  * @throws {ManagedInputError} if the input guard rejects (a missing file, a
  *   gone permission, or an unsatisfiable column shape); the benign `lastRun`
  *   is recorded best-effort first, and no connection was made.
@@ -352,17 +370,20 @@ async function refuseHandedOffCopy(
  * Read the record this run uses, inside the lock and after the hand-off
  * refusal.
  *
- * @throws {Error} if no record with `id` exists, or it holds a configuration
- *   only.
- * @throws {ZodError} if the stored value is not a valid record.
+ * @throws {ManagedExchangeNotRunnableError} if no record with `id` exists,
+ *   the stored value is not a valid record, or it holds a configuration only.
  */
 async function readRecordToRun(
   id: string,
 ): Promise<RunnableManagedExchangeRecord> {
-  const stored = await getManagedExchange(id);
-  if (stored === undefined)
-    throw new Error(`no managed exchange with id ${id}`);
-  return runnableManagedExchangeOrRefuse(stored);
+  try {
+    const stored = await getManagedExchange(id);
+    if (stored === undefined)
+      throw new Error(`no managed exchange with id ${id}`);
+    return runnableManagedExchangeOrRefuse(stored);
+  } catch (error) {
+    throw new ManagedExchangeNotRunnableError(id, error);
+  }
 }
 
 /** Record a refusal's own bookkeeping, best-effort for the reason

@@ -63,6 +63,7 @@ import {
 } from "../transport/waitForConnection";
 import {
   ManagedExchangeCustodyUnreadableError,
+  ManagedExchangeNotRunnableError,
   ManagedExchangeSpentError,
 } from "./managedExchangeRun";
 import {
@@ -730,6 +731,7 @@ function managedScheduleWindowVerdict(
     error instanceof ManagedExchangeExpiredError ||
     error instanceof ManagedExchangeSpentError ||
     error instanceof ManagedExchangeCustodyUnreadableError ||
+    error instanceof ManagedExchangeNotRunnableError ||
     error instanceof ManagedInputError ||
     error instanceof LinkageTermsUnsatisfiableError ||
     error instanceof OutboundDisclosureRefusalError
