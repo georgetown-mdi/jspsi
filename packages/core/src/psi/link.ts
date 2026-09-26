@@ -62,7 +62,11 @@ import {
   COUNT_ONLY_SHAPE_REFUSALS,
   manyToManyIsImplementedForStrategy,
 } from "../linkageTermsPolicy";
-import { InternalConsistencyError, UsageError } from "../errors";
+import {
+  InternalConsistencyError,
+  RoundSetLimitError,
+  UsageError,
+} from "../errors";
 import { receivePsiBinaryFrame } from "./psiBinaryFrame";
 import { receiveCountReport, sendCountReport } from "../protocolSetup";
 
@@ -179,6 +183,25 @@ function forEachCandidate(
 }
 
 /**
+ * The most distinct values one linkage key round holds. The round's
+ * deduplication keeps one `Map` entry per distinct value, and a V8 `Map`
+ * holds at most 2^24 entries (docs/spec/FILE_SYNC.md, Round set size limits).
+ */
+export const MAX_ROUND_DISTINCT_VALUES = 2 ** 24;
+
+/** @internal */
+export function roundDistinctValueLimitRefusal(
+  limit: number,
+): RoundSetLimitError {
+  return new RoundSetLimitError(
+    `A linkage key gives this party more than ${limit} distinct values in ` +
+      "one round, the most one round can hold. Split the input into smaller " +
+      "files and run one exchange for each.",
+    { distinctValueLimit: limit },
+  );
+}
+
+/**
  * The round's candidate list for a party that DROPS its within-round
  * duplicates: each value exactly one of this party's candidate records holds,
  * against that record.
@@ -192,20 +215,26 @@ function forEachCandidate(
  * which is the row-major order.
  *
  * `permutation` maps a survivor's index back to its original row when the
- * input is a carried-forward subset of a later round.
+ * input is a carried-forward subset of a later round. A value past
+ * `maxDistinctValues` distinct ones is refused with a
+ * {@link RoundSetLimitError}; tests lower the bound.
  *
  * @internal
  */
 export function removeDuplicatesAndUndefineds(
   dataWithDuplicatesAndUndefineds: ReadonlyArray<KeyCandidates>,
   permutation?: Array<number>,
+  maxDistinctValues: number = MAX_ROUND_DISTINCT_VALUES,
 ): [Array<string>, Array<number>] {
   const firstRow = new Map<string, number>();
   const recurring = new Set<string>();
   forEachCandidate(dataWithDuplicatesAndUndefineds, (row, value) => {
     const first = firstRow.get(value);
-    if (first === undefined) firstRow.set(value, row);
-    else if (first !== row) recurring.add(value);
+    if (first === undefined) {
+      if (firstRow.size === maxDistinctValues)
+        throw roundDistinctValueLimitRefusal(maxDistinctValues);
+      firstRow.set(value, row);
+    } else if (first !== row) recurring.add(value);
   });
   for (const value of recurring) firstRow.delete(value);
   const data: Array<string> = [];
@@ -218,15 +247,22 @@ export function removeDuplicatesAndUndefineds(
 }
 
 /**
- * How many values a round over `keyData` sends under the rule that drops a
- * value several of this party's records hold: the set
- * {@link removeDuplicatesAndUndefineds} builds, counted. A party that keeps
- * those values sends each once instead, so this is the fewest values the
- * round sends whichever cardinality the terms resolve. A record holding a
- * candidate set contributes each candidate, as the round's own set does.
+ * How many values a round over `keyData` sends under this party's own
+ * within-round rule: every distinct value when it keeps a value several of
+ * its records hold (`keepsDuplicates`, its `deduplicate` term), the set
+ * {@link groupDuplicatesAndRemoveUndefineds} builds, and otherwise only the
+ * values exactly one record holds, the set
+ * {@link removeDuplicatesAndUndefineds} builds. A record holding a candidate
+ * set contributes each candidate, as the round's own set does.
  */
-export function droppingRoundSetSize(keyData: Iterable<KeyCandidates>): number {
-  return removeDuplicatesAndUndefineds(Array.from(keyData))[0].length;
+export function sentRoundSetSize(
+  keyData: Iterable<KeyCandidates>,
+  keepsDuplicates: boolean,
+): number {
+  const candidates = Array.from(keyData);
+  return keepsDuplicates
+    ? groupDuplicatesAndRemoveUndefineds(candidates)[0].length
+    : removeDuplicatesAndUndefineds(candidates)[0].length;
 }
 
 /**
@@ -239,13 +275,15 @@ export function droppingRoundSetSize(keyData: Iterable<KeyCandidates>): number {
  * multiplicity is re-expanded locally when a match comes back
  * (docs/spec/PROTOCOL.md, The per-side rules). Values appear in
  * first-occurrence order and each group's rows ascend, which is what makes
- * the expansion ordering reproducible on both parties.
+ * the expansion ordering reproducible on both parties. The distinct-value
+ * bound is {@link removeDuplicatesAndUndefineds}'s.
  *
  * @internal exported for the round-construction tests.
  */
 export function groupDuplicatesAndRemoveUndefineds(
   dataWithDuplicatesAndUndefineds: ReadonlyArray<KeyCandidates>,
   permutation?: Array<number>,
+  maxDistinctValues: number = MAX_ROUND_DISTINCT_VALUES,
 ): [Array<string>, RoundCandidates] {
   const positionOf = new Map<string, number>();
   const data: Array<string> = [];
@@ -253,6 +291,8 @@ export function groupDuplicatesAndRemoveUndefineds(
   forEachCandidate(dataWithDuplicatesAndUndefineds, (i, value) => {
     let position = positionOf.get(value);
     if (position === undefined) {
+      if (positionOf.size === maxDistinctValues)
+        throw roundDistinctValueLimitRefusal(maxDistinctValues);
       position = data.length;
       positionOf.set(value, position);
       data.push(value);

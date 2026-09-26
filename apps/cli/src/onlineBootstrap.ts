@@ -43,6 +43,7 @@ import type {
 
 import { applyConnectionOverrides, saveConfig } from "./config";
 import { detectFileConflicts, FileExistsError } from "./fileUtils";
+import { assertFileSyncFirstRoundFits } from "./fileSyncFirstRound";
 import { openEventStream, reportPersistenceLoss } from "./eventStream";
 import { writeAcceptanceRecordReportingLoss } from "./acceptedTermsRecords";
 import {
@@ -966,6 +967,8 @@ export async function runOnlineBootstrap(params: {
   // host-key step below, whose first-use probe opens a real transport to the
   // server.
   const credentials = readConnectionCredentials(params.connection);
+  // Decided from the input alone, so settled before the host-key step too.
+  assertFileSyncFirstRoundFits(params.connection, params.prepared);
 
   // Establish first-use SSH host-key trust before connecting, on the ORIGINAL
   // params.connection so the pin reaches both the live connect (via the clone

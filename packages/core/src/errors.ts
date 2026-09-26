@@ -212,6 +212,50 @@ export class WebRtcFrameLimitError extends UsageError {
 }
 
 /**
+ * A linkage key round whose set of values is larger than one round can hold on
+ * any channel: more distinct values than the round's deduplication holds, or,
+ * on SFTP or a synced folder, more values than one message file holds
+ * (docs/spec/FILE_SYNC.md, "Round set size limits"). The message names the
+ * count, the bound, and the remedy, and is composed only from counts and
+ * fixed constants. Holds `alcoveRecoveryHintEmitted`: a retry refuses
+ * identically, so the CLI's generic retry advisory is suppressed.
+ *
+ * `setOwner` is always `"local"`: every raising site sizes this party's own
+ * set. `distinctValueLimit` is the deduplication bound the set passed, when
+ * that is what refused it. {@link isSetTooLargeError} classifies it with
+ * {@link WebRtcFrameLimitError}.
+ */
+export class RoundSetLimitError extends UsageError {
+  readonly alcoveRecoveryHintEmitted = true;
+  readonly setOwner = "local" as const;
+  readonly distinctValueLimit: number | undefined;
+
+  constructor(
+    message: string,
+    options?: ErrorOptions & { distinctValueLimit?: number },
+  ) {
+    super(message, options);
+    this.name = "RoundSetLimitError";
+    this.distinctValueLimit = options?.distinctValueLimit;
+  }
+}
+
+/**
+ * Whether `error` refuses a PSI set as too large to send: a
+ * {@link WebRtcFrameLimitError} or a {@link RoundSetLimitError}. Both refuse
+ * identically on every retry and at every window, and both name whose set it
+ * was in `setOwner`.
+ */
+export function isSetTooLargeError(
+  error: unknown,
+): error is WebRtcFrameLimitError | RoundSetLimitError {
+  return (
+    error instanceof WebRtcFrameLimitError ||
+    error instanceof RoundSetLimitError
+  );
+}
+
+/**
  * The family of refusals raised, before any credential, terms, or data are
  * sent, when this party can no longer make the outbound disclosure it
  * recorded agreeing to. The two send-side gates raise it from

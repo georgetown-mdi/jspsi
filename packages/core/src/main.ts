@@ -19,6 +19,7 @@ export {
   OperatorConfigError,
   OutboundDisclosureRefusalError,
   PeerAbortError,
+  RoundSetLimitError,
   StandardizationTermsError,
   TransportOperationStalledError,
   TransportPublishIndeterminateError,
@@ -28,6 +29,7 @@ export {
   causeChainSome,
   chainDetailCauses,
   isPeerWaitTimeout,
+  isSetTooLargeError,
 } from "./errors";
 export { PSIParticipant, ProcessState } from "./psi/participant";
 export type {
@@ -625,6 +627,7 @@ export {
   InvitationTermDivergenceError,
   PARTNER_CERTIFICATE_REFUSAL_MESSAGES,
   assertAlgorithmImplemented,
+  assertFirstRoundFitsFileSyncFrame,
   assertFirstRoundFitsWebRtcFrame,
   assertLocalCertificateAuthorizesAgreedIdentity,
   assertSigningModeImplemented,

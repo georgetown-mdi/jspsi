@@ -247,6 +247,9 @@ vi.mock("@alcove/core", async (importActual) => {
     exchangeRecordOwedButUnbuilt: vi.fn().mockReturnValue(false),
     describeExchangeStages: vi.fn().mockReturnValue([]),
     buildOutputTable: vi.fn().mockReturnValue({ headers: [], rows: [] }),
+    assertFirstRoundFitsFileSyncFrame: vi.fn(
+      actual.assertFirstRoundFitsFileSyncFrame,
+    ),
   };
 });
 
@@ -339,6 +342,9 @@ import {
   operatorSuppliedSpans,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   describeExchangeStages,
+  assertFirstRoundFitsFileSyncFrame,
+  prepareForExchange,
+  RoundSetLimitError,
 } from "@alcove/core";
 import {
   AEAD_ENVELOPE_VERSION,
@@ -544,6 +550,57 @@ test("rejects before opening a connection when keyFilePath is whitespace-only", 
       loggerName: "test",
     }),
   ).rejects.toThrow("key file path is empty");
+});
+
+test("a first round too large for one message file is refused before any file is written", async () => {
+  // 301 values held once each, checked against a bound under 300 values' file,
+  // stand in for one past the real bound: the check's arithmetic at that bound
+  // is core's to pin, and what the dispatch decides is that the refusal comes
+  // before the transport is built and exits 64.
+  const names = Array.from(
+    { length: 301 },
+    (_unused, i) =>
+      `zq${String.fromCharCode(97 + Math.floor(i / 26))}` +
+      String.fromCharCode(97 + (i % 26)),
+  );
+  const prepared = prepareForExchange(
+    {
+      linkageTerms: {
+        ...getDefaultLinkageTerms("Inviter"),
+        linkageFields: [{ name: "firstName", type: "first_name" }],
+        linkageKeys: [
+          { name: "firstName", elements: [{ field: "firstName" }] },
+        ],
+      },
+    },
+    "Inviter",
+    names.map((name) => ({ first_name: name })),
+    ["first_name"],
+  );
+  const check = vi.mocked(assertFirstRoundFitsFileSyncFrame);
+  const actual = check.getMockImplementation()!;
+  check.mockImplementationOnce((checked) =>
+    actual(checked, MESSAGE_HEADER_BYTES + 300 * 35),
+  );
+  const error = await runProtocol({
+    connection: { channel: "filedrop", path: dropDir },
+    auth: null,
+    prepared,
+    output: path.join(tmpDir, "out.csv"),
+    verbosity: -1,
+    loggerName: "test",
+  }).then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(check).toHaveBeenCalledWith(prepared);
+  expect(error).toBeInstanceOf(RoundSetLimitError);
+  expect((error as Error).message).toMatch(
+    /at least 301 values to send, over the \d+ one message file holds/,
+  );
+  expect(exitCodeForError(error)).toBe(64);
+  expect(fs.readdirSync(dropDir)).toEqual([]);
+  expect(vi.mocked(runExchange)).not.toHaveBeenCalled();
 });
 
 test("rejects before opening a connection when saveIntent is passed on an authenticated exchange", async () => {

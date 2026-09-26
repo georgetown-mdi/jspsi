@@ -49,7 +49,8 @@ import {
 } from "./protocolSetup.js";
 import { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
 import {
-  droppingRoundSetSize,
+  MAX_ROUND_DISTINCT_VALUES,
+  sentRoundSetSize,
   requireSingleCandidate,
   linkViaCountOnlyPSI,
   linkViaPSI,
@@ -62,6 +63,7 @@ import type { ResolvedRunShape } from "./pairTableProjection.js";
 import type { ResolvedMatching } from "./linkageTermsPolicy.js";
 import { InProcessPsiEngine } from "./psi/psiEngine.js";
 import {
+  MAX_FRAME_SIZE_BYTES,
   partyFansOut,
   psiElementBounds,
   SINGLE_PASS_LOCAL_REMEDY,
@@ -90,13 +92,18 @@ import {
 } from "./records/signedReceipt.js";
 import {
   OperatorConfigError,
+  RoundSetLimitError,
   UsageError,
   WebRtcFrameLimitError,
   causeChainSome,
 } from "./errors.js";
 import { MAX_WEBRTC_FRAME_BYTES } from "./connection/binaryPackBounds.js";
+import { AEAD_ENVELOPE_OVERHEAD_BYTES } from "./connection/encryptedMessageConnection.js";
+import { MESSAGE_HEADER_BYTES } from "./connection/fileSyncFraming.js";
 import {
   minimumPsiSetFrameBytes,
+  PSI_ENCODED_ELEMENT_BYTES,
+  PSI_SET_MAX_FRAMING_BYTES,
   ROUND_ONE_SET_UNCOUNTED_MESSAGE,
   roundOneSetTooLargeMessage,
   webrtcFrameExceedsBound,
@@ -1399,16 +1406,20 @@ export function prepareForExchange(
  * message, before anything is sent: a {@link WebRtcFrameLimitError} naming
  * the size, the bound, and the remedy. Call it at the start of a WebRTC
  * exchange, once {@link prepareForExchange} has returned and before the
- * connection opens; any other channel has no such bound.
+ * connection opens; {@link assertFirstRoundFitsFileSyncFrame} is the SFTP and
+ * synced-folder counterpart.
  *
- * It counts the values the first cascade or count-only round sends under the
- * rule that drops a value several records hold ({@link droppingRoundSetSize}),
- * the fewest that round sends whatever cardinality the terms resolve, taken in
- * both PSI roles, since which one this party plays is not yet known. It
+ * It counts the values the first cascade or count-only round sends under this
+ * party's own within-round rule ({@link sentRoundSetSize}): every distinct
+ * value when its terms set `deduplicate` on a cascade, else only the values
+ * exactly one record holds. The count is taken in both PSI roles, since which
+ * one this party plays is not yet known. It
  * refuses on a count over the bound in both roles, and on any failure to
  * count, with the failure as the refusal's cause. A {@link UsageError} the
  * round would raise in one role is left to the round when the other role
- * fits. Every later round, and a frame this bound cannot size from a count,
+ * fits; raised in both, it is thrown as it is, except that the count passing
+ * the round's distinct-value bound raises this refusal with its message.
+ * Every later round, and a frame this bound cannot size from a count,
  * is checked on the frame the round builds (`PSIParticipant`). Where the
  * round reads one candidate per record, a record holding a candidate set
  * raises the round's own fan-out refusal rather than this one. A single-pass
@@ -1422,15 +1433,140 @@ export function assertFirstRoundFitsWebRtcFrame(
   prepared: PreparedExchange,
   maxFrameBytes: number = MAX_WEBRTC_FRAME_BYTES,
 ): void {
+  assertFirstRoundFits(prepared, {
+    exceeds: (elementCount) =>
+      webrtcFrameExceedsBound(
+        minimumPsiSetFrameBytes(elementCount),
+        maxFrameBytes,
+      ),
+    tooLarge: (fewest) =>
+      new WebRtcFrameLimitError(
+        roundOneSetTooLargeMessage(fewest, maxFrameBytes),
+        "local",
+      ),
+    tooManyDistinct: (refusal) =>
+      new WebRtcFrameLimitError(refusal.message, refusal.setOwner),
+    uncounted: (failure) =>
+      new WebRtcFrameLimitError(ROUND_ONE_SET_UNCOUNTED_MESSAGE, "local", {
+        cause: failure,
+      }),
+  });
+}
+
+/**
+ * The most values one PSI set in an SFTP or synced-folder message file can
+ * hold under a frame bound of `maxFrameBytes`, so that the file stays within
+ * the bound whichever first-round message holds the set.
+ */
+export function fileSyncMaxRoundSetValues(
+  maxFrameBytes: number = MAX_FRAME_SIZE_BYTES,
+): number {
+  // File header 10 + AEAD envelope 30 + setup framing 6, then 35 per value.
+  const perFileBytes =
+    MESSAGE_HEADER_BYTES +
+    AEAD_ENVELOPE_OVERHEAD_BYTES +
+    PSI_SET_MAX_FRAMING_BYTES;
+  return Math.floor((maxFrameBytes - perFileBytes) / PSI_ENCODED_ELEMENT_BYTES);
+}
+
+const SPLIT_INPUT_REMEDY =
+  "Split the input into smaller files and run one exchange for each.";
+
+/**
+ * The refusal an SFTP or synced-folder exchange raises at its start when this
+ * party's first round alone cannot fit one message file: `elementCount` is the
+ * fewest values that round sends, `maxValues` what one file holds.
+ */
+export function fileSyncRoundOneSetTooLargeMessage(
+  elementCount: number,
+  maxValues: number = fileSyncMaxRoundSetValues(),
+): string {
+  return (
+    "Too large for SFTP or a synced folder: the first linkage key gives " +
+    `this party at least ${elementCount} values to send, over the ` +
+    `${maxValues} one message file holds. Nothing was sent. ` +
+    SPLIT_INPUT_REMEDY
+  );
+}
+
+/**
+ * The refusal an SFTP or synced-folder exchange raises at its start when this
+ * party's first round holds more than `limit` distinct values, the most one
+ * round's deduplication holds. The count stops at the bound, so the message
+ * names the bound rather than a count.
+ */
+export function fileSyncRoundOneTooManyDistinctMessage(limit: number): string {
+  return (
+    "Too large for SFTP or a synced folder: the first linkage key gives " +
+    `this party more than ${limit} distinct values, the most one round ` +
+    `can hold. Nothing was sent. ${SPLIT_INPUT_REMEDY}`
+  );
+}
+
+/**
+ * Refuse an SFTP or synced-folder exchange whose first round alone cannot fit
+ * one message file, before anything is written for the partner: a
+ * {@link RoundSetLimitError} naming the count, the bound, and the remedy, or,
+ * where the count stopped at the deduplication bound, that bound and the
+ * remedy. Call it at the start of such an exchange, once {@link prepareForExchange}
+ * has returned and before the connection opens.
+ *
+ * It counts as {@link assertFirstRoundFitsWebRtcFrame} does, against the
+ * inbound frame bound every file-sync receiver applies
+ * (`MAX_FRAME_SIZE_BYTES`), so it also refuses a first round with more
+ * distinct values than `MAX_ROUND_DISTINCT_VALUES` (`psi/link.ts`), which the count
+ * itself raises. A later round is not checked here: its set is known only
+ * once the earlier rounds have matched (docs/spec/FILE_SYNC.md, "Round set
+ * size limits").
+ *
+ * @param maxFrameBytes - The receiver's bound; lowered only by tests.
+ */
+export function assertFirstRoundFitsFileSyncFrame(
+  prepared: PreparedExchange,
+  maxFrameBytes: number = MAX_FRAME_SIZE_BYTES,
+): void {
+  const maxValues = fileSyncMaxRoundSetValues(maxFrameBytes);
+  assertFirstRoundFits(prepared, {
+    exceeds: (elementCount) => elementCount > maxValues,
+    tooLarge: (fewest) =>
+      new RoundSetLimitError(
+        fileSyncRoundOneSetTooLargeMessage(fewest, maxValues),
+      ),
+    tooManyDistinct: (refusal) =>
+      new RoundSetLimitError(
+        fileSyncRoundOneTooManyDistinctMessage(
+          refusal.distinctValueLimit ?? MAX_ROUND_DISTINCT_VALUES,
+        ),
+        { distinctValueLimit: refusal.distinctValueLimit },
+      ),
+    uncounted: (failure) =>
+      new RoundSetLimitError(
+        "This party could not count the values the first linkage key gives " +
+          "it to send, so it cannot confirm the set fits one message file. " +
+          `Nothing was sent. ${SPLIT_INPUT_REMEDY}`,
+        { cause: failure },
+      ),
+  });
+}
+
+// The first-round count both channel checks above share. `exceeds` is the
+// channel's bound on a set of that many values, `tooLarge` its refusal on the
+// fewest values the round sends in either role, `tooManyDistinct` its refusal
+// when the count passes the round's distinct-value bound, which the round
+// itself would refuse, `uncounted` its refusal when the count fails otherwise.
+function assertFirstRoundFits(
+  prepared: PreparedExchange,
+  bound: {
+    exceeds: (elementCount: number) => boolean;
+    tooLarge: (fewest: number) => Error;
+    tooManyDistinct: (refusal: RoundSetLimitError) => Error;
+    uncounted: (failure: unknown) => Error;
+  },
+): void {
   const { linkageTerms, dataset, rowCount } = prepared;
   if (linkageTerms.linkageStrategy === "single-pass") return;
   const key = linkageTerms.linkageKeys[0];
   if (key === undefined) return;
-  const exceeds = (elementCount: number): boolean =>
-    webrtcFrameExceedsBound(
-      minimumPsiSetFrameBytes(elementCount),
-      maxFrameBytes,
-    );
   // Every row contributes at most the key's declared width of candidates, so
   // a dataset whose rows cannot reach the count is not read at all. Were a
   // row to exceed it, the round's own frame check still refuses.
@@ -1438,13 +1574,17 @@ export function assertFirstRoundFitsWebRtcFrame(
     rowCount *
     declaredKeyWidth(key, 0) *
     localFanOutFactor(dataset.declaresFanOut);
-  if (!exceeds(candidateCeiling)) return;
+  if (!bound.exceeds(candidateCeiling)) return;
   // The round's single-candidate rule, applied here so a candidate set the
   // round would refuse raises the round's refusal, which names the cause,
   // rather than this check's.
   const readsSingleCandidate =
     linkageTerms.algorithm === "psi-c" ||
     !candidateSetIsImplementedForStrategy(linkageTerms.linkageStrategy);
+  // This party's own term decides whether it keeps a value several of its
+  // records hold; a count-only round never does.
+  const keepsDuplicates =
+    linkageTerms.deduplicate && linkageTerms.algorithm !== "psi-c";
   // A refusal the round would raise is a refusal in that role, left to the
   // round when the other role fits, since this party may not play it. Any
   // other failure to count, a resource limit among them, refuses at once.
@@ -1460,31 +1600,28 @@ export function assertFirstRoundFitsWebRtcFrame(
           false,
         ),
       );
-      return droppingRoundSetSize(
+      return sentRoundSetSize(
         readsSingleCandidate ? values.map(requireSingleCandidate) : values,
+        keepsDuplicates,
       );
     } catch (failure) {
       if (failure instanceof UsageError) return failure;
-      throw new WebRtcFrameLimitError(
-        ROUND_ONE_SET_UNCOUNTED_MESSAGE,
-        "local",
-        { cause: failure },
-      );
+      throw bound.uncounted(failure);
     }
   };
   const refusedInRole = (size: number | UsageError): boolean =>
-    typeof size !== "number" || exceeds(size);
+    typeof size !== "number" || bound.exceeds(size);
   const asSender = roundSetSize(false);
   if (!refusedInRole(asSender)) return;
   const asReceiver = roundSetSize(true);
   if (!refusedInRole(asReceiver)) return;
-  if (typeof asSender !== "number") throw asSender;
-  if (typeof asReceiver !== "number") throw asReceiver;
-  const fewest = Math.min(asSender, asReceiver);
-  throw new WebRtcFrameLimitError(
-    roundOneSetTooLargeMessage(fewest, maxFrameBytes),
-    "local",
-  );
+  const refusal = (roundRefusal: UsageError): Error =>
+    roundRefusal instanceof RoundSetLimitError
+      ? bound.tooManyDistinct(roundRefusal)
+      : roundRefusal;
+  if (typeof asSender !== "number") throw refusal(asSender);
+  if (typeof asReceiver !== "number") throw refusal(asReceiver);
+  throw bound.tooLarge(Math.min(asSender, asReceiver));
 }
 
 // --- Exchange execution ------------------------------------------------------

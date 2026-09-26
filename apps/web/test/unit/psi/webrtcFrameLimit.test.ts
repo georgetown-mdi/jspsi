@@ -10,6 +10,7 @@ import {
   MAX_WEBRTC_FRAME_BYTES,
   PEERJS_CHUNK_MTU,
   PSIParticipant,
+  RoundSetLimitError,
   WebRtcFrameLimitError,
 } from "@alcove/core";
 import {
@@ -145,6 +146,21 @@ test("the refusal is shown as its own alert, with no retry", () => {
   expect(partner.title).toBe(
     "Your partner's file is too large for a browser exchange",
   );
+});
+
+test("a round's distinct-value refusal is shown as the same alert, with no retry", () => {
+  const failure = failureFor(
+    "exchange",
+    new RoundSetLimitError(
+      "A linkage key gives this party more than 16777216 distinct values in " +
+        "one round, the most one round can hold. Split the input into smaller " +
+        "files and run one exchange for each.",
+    ),
+  );
+  expect(failure.category).toBe("config");
+  expect(failure.title).toBe("Your file is too large for a browser exchange");
+  expect(failure.message).toContain("more than 16777216 distinct values");
+  expect(failure.reportedCause).toBeUndefined();
 });
 
 test("a first round the check cannot count is shown as its own alert, with no retry", () => {

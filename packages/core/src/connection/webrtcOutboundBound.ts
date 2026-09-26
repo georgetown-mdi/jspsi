@@ -40,6 +40,15 @@ const MAX_PEERJS_CHUNK_ENVELOPE_BYTES = 1 + 11 + 2 + 5 + 6 + 3 * 9 + 3;
 export const PSI_ENCODED_ELEMENT_BYTES = 35;
 
 /**
+ * The most bytes a serialized PSI set adds to {@link PSI_ENCODED_ELEMENT_BYTES}
+ * per element, reached by a server setup: the tag and length of its element
+ * list, a varint of at most 5 bytes under any bound below 2^35 bytes. Measured
+ * on the vendored library: a setup of 10^6 values adds 5 and one of 7,669,585
+ * or more adds 6, a request adds 2, a response none.
+ */
+export const PSI_SET_MAX_FRAMING_BYTES = 6;
+
+/**
  * Length of the BinaryPack frame a byte array of `payloadBytes` bytes packs
  * to: the payload plus the `fixraw`, `bin16`, or `bin32` header its length
  * selects -- the frame a PSI set, a single-pass reply, or any other binary
