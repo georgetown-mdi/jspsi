@@ -648,9 +648,10 @@ export class FileSyncRendezvous {
   async run(scope: RendezvousScope): Promise<void> {
     const { deps } = this;
 
-    // Scan and classify the entry directory (sweep orphaned temps and leftover
-    // abort markers, snapshot foreign files, then sweep-or-reject unexpected
-    // protocol files). Yields the at-most-one tolerated peer hello.
+    // Scan and classify the entry directory (recognize orphaned temps and
+    // leftover abort markers, snapshot foreign files, sweep-or-reject
+    // unexpected protocol files, then delete the recognized leftovers once
+    // entry is accepted). Yields the at-most-one tolerated peer hello.
     const peerHellos = await this.scanEntryDirectory(scope);
 
     // This party's own hello is a self-write, so it goes to the outbound
@@ -913,10 +914,12 @@ export class FileSyncRendezvous {
       );
   }
 
-  // Scans and classifies the entry directory before rendezvous: sweeps orphaned
-  // in-flight temp writes and leftover abort markers, snapshots foreign files,
-  // and either sweeps every protocol file (--sweep-exchange-files) or rejects
-  // any unexpected protocol file. Returns the at-most-one tolerated peer hello.
+  // Scans and classifies the entry directory before rendezvous: recognizes
+  // orphaned in-flight temp writes and leftover abort markers, snapshots
+  // foreign files, and either sweeps every protocol file
+  // (--sweep-exchange-files) or rejects any unexpected protocol file. The
+  // recognized leftovers are deleted only after that, so an entry it refuses
+  // deletes nothing. Returns the at-most-one tolerated peer hello.
   private async scanEntryDirectory(
     scope: RendezvousScope,
   ): Promise<Array<FileInfo>> {
@@ -971,11 +974,11 @@ export class FileSyncRendezvous {
     // in-flight temp-*.tmp, left by a write hard-killed between the temp
     // put() and the rename to its final name. Both temp shapes land in
     // `ignored` and never abort entry, but a message/ack temp
-    // (temp-<uuid>.tmp) is swept while a hello temp (temp-hello-<uuid>.tmp)
-    // is left alone (see the two blocks below). `ignored` is the extension
-    // point for kinds that may legitimately pre-exist as the protocol
-    // grows; the foreign-file snapshot is a sibling tolerance mechanism for
-    // grammar-failing names.
+    // (temp-<uuid>.tmp) is swept once entry is accepted while a hello temp
+    // (temp-hello-<uuid>.tmp) is left alone (see the two blocks below).
+    // `ignored` is the extension point for kinds that may legitimately
+    // pre-exist as the protocol grows; the foreign-file snapshot is a sibling
+    // tolerance mechanism for grammar-failing names.
     //
     // A peer hello is `<peerId>-hello.json` with a non-empty id that is not
     // our own (isPeerHelloName). A bare `-hello.json` slices to an empty id
@@ -987,49 +990,23 @@ export class FileSyncRendezvous {
     // injection is rejected too.
     const ignored = new Set<string>();
 
-    // Sweep orphaned in-flight temp writes left by a prior crashed exchange:
-    // match only the protocol's own message/ack temp shape,
+    // Recognize orphaned in-flight temp writes left by a prior crashed
+    // exchange: only the protocol's own message/ack temp shape,
     // temp-<uuidv4()>.tmp (isProtocolTempName minus isHelloTempName), which
-    // send()/writeAck() produce -- never a final <id>.json message, and
-    // never a foreign temp-*.tmp whose stem is not a v4 UUID (which falls
-    // through to the foreign-file snapshot and is tolerated). Delete each
-    // with the non-throwing safeDelete, then add its name to `ignored` so
-    // the already-taken `files` snapshot does not re-trip the guard below.
+    // send()/writeAck() produce -- never a final <id>.json message, and never
+    // a foreign temp-*.tmp whose stem is not a v4 UUID (which falls through to
+    // the foreign-file snapshot and is tolerated). Adding each to `ignored`
+    // keeps the guard below from rejecting it; the delete itself waits until
+    // entry is accepted (sweepOrphanedTemps), so a refused entry deletes none.
     //
-    // Sweeping unconditionally is safe because both shapes are orphaned by
-    // construction: writing either requires having already seen this
-    // party's hello, published only after this scan (the ordering is
-    // pinned by a test), so no live in-flight write can race this delete.
-    //
-    // Best-effort: a safeDelete that silently fails leaves the temp on
-    // disk, but entry proceeds past it and the next exchange's entry
-    // re-runs this same sweep, so the litter is self-healing. Tracking the
-    // orphan in `responsibleFiles` would not help, since its writer already
-    // died and that process's cleanup() never runs -- the reason this sweep
-    // exists.
+    // Deleting either shape is safe because both are orphaned by construction:
+    // writing one requires having already seen this party's hello, published
+    // only after this scan (the ordering is pinned by a test), so no live
+    // in-flight write can race the delete.
     const orphanedTempFiles = files.filter(
       (file) => isProtocolTempName(file.name) && !isHelloTempName(file.name),
     );
-    if (orphanedTempFiles.length > 0) {
-      // Single breadcrumb: a process died mid-write here. Entry is not
-      // aborted on its account, but the prior crash should still show in
-      // the log.
-      deps
-        .log()
-        .info(
-          `[${deps.id()}] sweeping ${orphanedTempFiles.length} orphaned temp ` +
-            "file(s) left by a prior crashed exchange: " +
-            `${orphanedTempFiles
-              .map((f) => redactAndSanitizeForDisplay(f.name))
-              .join(", ")}`,
-        );
-      await Promise.all(
-        orphanedTempFiles.map((file) =>
-          deps.client().safeDelete(`${inboundPath}/${file.name}`),
-        ),
-      );
-      orphanedTempFiles.forEach((file) => ignored.add(file.name));
-    }
+    orphanedTempFiles.forEach((file) => ignored.add(file.name));
 
     // A hello temp is tolerated in place, never swept: a peer that started
     // at the same instant can have one in flight in this listing, and
@@ -1150,35 +1127,19 @@ export class FileSyncRendezvous {
     // halves. Peer files never land in outbound (the peer writes to its
     // own outbound, which is this party's inbound), so every
     // protocol-grammar file here is this party's own leftover: an orphaned
-    // temp is swept, a foreign file is tolerated, and any other protocol
-    // file is collected as unexpected, exactly as on the inbound side. That
-    // same routing rule is why the sweep covers both temp shapes here while
-    // the inbound side exempts the hello shape: a hello temp in this
-    // directory can only be this party's own.
+    // temp is swept once entry is accepted, a foreign file is tolerated, and
+    // any other protocol file is collected as unexpected, exactly as on the
+    // inbound side. That same routing rule is why the sweep covers both temp
+    // shapes here while the inbound side exempts the hello shape: a hello
+    // temp in this directory can only be this party's own.
+    let outOrphans: FileInfo[] = [];
     if (split) {
       const outFiles = await deps.client().list(outboundPath);
-      const outOrphans = outFiles.filter((file) =>
-        isProtocolTempName(file.name),
-      );
-      if (outOrphans.length > 0) {
-        deps
-          .log()
-          .info(
-            `[${deps.id()}] sweeping ${outOrphans.length} orphaned temp file(s) ` +
-              "left by a prior crashed exchange in the outbound directory " +
-              `${redactAndSanitizeForDisplay(outboundPath)}: ` +
-              `${outOrphans.map((f) => redactAndSanitizeForDisplay(f.name)).join(", ")}`,
-          );
-        await Promise.all(
-          outOrphans.map((file) =>
-            deps.client().safeDelete(`${outboundPath}/${file.name}`),
-          ),
-        );
-      }
-      const sweptOut = new Set(outOrphans.map((file) => file.name));
+      outOrphans = outFiles.filter((file) => isProtocolTempName(file.name));
+      const outOrphanNames = new Set(outOrphans.map((file) => file.name));
       const outForeign: FileInfo[] = [];
       for (const file of outFiles) {
-        if (sweptOut.has(file.name)) continue;
+        if (outOrphanNames.has(file.name)) continue;
         if (!isProtocolGrammarName(file.name)) {
           deps.foreignFileSnapshot.add(file.name);
           outForeign.push(file);
@@ -1255,7 +1216,38 @@ export class FileSyncRendezvous {
       }
     }
 
+    await this.sweepOrphanedTemps(inboundPath, orphanedTempFiles, "");
+    await this.sweepOrphanedTemps(
+      outboundPath,
+      outOrphans,
+      " in the outbound directory " + redactAndSanitizeForDisplay(outboundPath),
+    );
+
     return peerHellos;
+  }
+
+  // Deletes the orphaned temps the entry scan recognized, once entry is
+  // accepted. Best-effort (safeDelete): a temp that fails to delete stays on
+  // disk and entry proceeds past it, and the next entry recognizes it again.
+  // Tracking it in `responsibleFiles` would not help, since its writer already
+  // died and that process's cleanup() never runs.
+  private async sweepOrphanedTemps(
+    dir: string,
+    orphans: Array<FileInfo>,
+    whereDisplay: string,
+  ): Promise<void> {
+    if (orphans.length === 0) return;
+    const { deps } = this;
+    deps
+      .log()
+      .info(
+        `[${deps.id()}] sweeping ${orphans.length} orphaned temp file(s) ` +
+          `left by a prior crashed exchange${whereDisplay}: ` +
+          `${orphans.map((f) => redactAndSanitizeForDisplay(f.name)).join(", ")}`,
+      );
+    await Promise.all(
+      orphans.map((file) => deps.client().safeDelete(`${dir}/${file.name}`)),
+    );
   }
 
   // Publishes this party's hello on the lock joiner's refusal path so the

@@ -2473,6 +2473,100 @@ test("synchronize() sweeps multiple orphaned temp files at the entry guard", asy
   }
 });
 
+const ORPHAN_TEMP_NAME = "temp-66666666-6666-4666-8666-666666666666.tmp";
+
+// Each case is an entry the guard refuses; an orphaned temp beside it must
+// survive, since a refused entry deletes nothing.
+const refusedEntryCases: Array<{
+  name: string;
+  sweepExchangeFiles: boolean;
+  plant: (files: Map<string, Buffer>, path: string) => void;
+}> = [
+  {
+    name: "an unexpected protocol file (no sweep flag)",
+    sweepExchangeFiles: false,
+    plant: (files, path) =>
+      files.set(`${path}/aaaa-bbbb-lock.json`, Buffer.alloc(0)),
+  },
+  {
+    name: "two peer hellos (no sweep flag)",
+    sweepExchangeFiles: false,
+    plant: (files, path) => {
+      files.set(`${path}/aaaa-hello.json`, LOCK_HELLO_BODY);
+      files.set(`${path}/bbbb-hello.json`, LOCK_HELLO_BODY);
+    },
+  },
+  {
+    name: "a retain-mode peer hello (sweep flag)",
+    sweepExchangeFiles: true,
+    plant: (files, path) =>
+      files.set(`${path}/aaaa-hello.json`, RETAIN_HELLO_BODY),
+  },
+];
+
+for (const refused of refusedEntryCases) {
+  test(`synchronize() keeps an orphaned temp when entry is refused for ${refused.name}`, async () => {
+    const { client, files } = makeMockClient();
+    const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
+    conn.options.sweepExchangeFiles = refused.sweepExchangeFiles;
+    const tempPath = `/test/${ORPHAN_TEMP_NAME}`;
+    files.set(tempPath, Buffer.alloc(0));
+    refused.plant(files, "/test");
+
+    const deleted: string[] = [];
+    const origSafeDelete = client.safeDelete.bind(client);
+    client.safeDelete = async (p) => {
+      deleted.push(p);
+      return origSafeDelete(p);
+    };
+    const origDelete = client.delete.bind(client);
+    client.delete = async (p: string) => {
+      deleted.push(p);
+      return origDelete(p);
+    };
+
+    await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+    expect(deleted).not.toContain(tempPath);
+    expect(files.has(tempPath)).toBe(true);
+  });
+}
+
+test("synchronize() --sweep-exchange-files: an accepted entry sweeps an orphaned temp after the protocol files", async () => {
+  const { client, files } = makeMockClient();
+  const conn = await makeConnectedConn(client, {
+    pollingFrequency: 10,
+    timeToLiveMs: 120,
+  });
+  conn.id = "me";
+  conn.options.sweepExchangeFiles = true;
+  const tempPath = `/test/${ORPHAN_TEMP_NAME}`;
+  const stalePath = "/test/aaaa-bbbb-lock.json";
+  files.set(tempPath, Buffer.alloc(0));
+  files.set(stalePath, Buffer.alloc(0));
+
+  const order: string[] = [];
+  const origSafeDelete = client.safeDelete.bind(client);
+  client.safeDelete = async (p) => {
+    order.push(p);
+    return origSafeDelete(p);
+  };
+  const origDelete = client.delete.bind(client);
+  client.delete = async (p: string) => {
+    order.push(p);
+    return origDelete(p);
+  };
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect(files.has(tempPath)).toBe(false);
+  expect(files.has(stalePath)).toBe(false);
+  expect(order.indexOf(stalePath)).toBeGreaterThanOrEqual(0);
+  expect(order.indexOf(tempPath)).toBeGreaterThan(order.indexOf(stalePath));
+});
+
 test("synchronize() does NOT sweep a foreign temp-*.tmp whose stem is not a UUID; it is tolerated as foreign", async () => {
   // The entry sweep matches only the protocol's own
   // temp-<uuidv4()>.tmp shape, so a foreign `temp-export.tmp` (a user or
@@ -3203,6 +3297,46 @@ test("synchronize() (split): an orphaned temp in the OUTBOUND directory is swept
   expect(err).not.toBeInstanceOf(UsageError);
   expect((err as Error).message).toContain("timed out");
   expect(files.has(`/out/${tempName}`)).toBe(false);
+});
+
+for (const sweepExchangeFiles of [false, true]) {
+  test(`synchronize() (split): a refused entry keeps the orphaned temps in both directories (sweep flag ${sweepExchangeFiles})`, async () => {
+    // With no flag the leftover outbound message trips the strict-empty guard;
+    // with the flag, local retain mode refuses without --force-retain-sweep.
+    const { client, files } = makeMockClient();
+    const inTemp = `/in/${ORPHAN_TEMP_NAME}`;
+    const outTemp = "/out/temp-77777777-7777-4777-8777-777777777777.tmp";
+    files.set(inTemp, Buffer.alloc(0));
+    files.set(outTemp, Buffer.alloc(0));
+    files.set(
+      "/out/me-20260101T000000-000-12.json",
+      Buffer.from("x".repeat(12)),
+    );
+    const conn = makeSplitConn(client, "me", "/in", "/out");
+    conn.options.sweepExchangeFiles = sweepExchangeFiles;
+
+    await expect(conn.synchronize()).rejects.toBeInstanceOf(UsageError);
+    expect(files.has(inTemp)).toBe(true);
+    expect(files.has(outTemp)).toBe(true);
+  });
+}
+
+test("synchronize() (split): an accepted entry sweeps the orphaned temps in both directories", async () => {
+  const { client, files } = makeMockClient();
+  const inTemp = `/in/${ORPHAN_TEMP_NAME}`;
+  const outTemp = "/out/temp-77777777-7777-4777-8777-777777777777.tmp";
+  files.set(inTemp, Buffer.alloc(0));
+  files.set(outTemp, Buffer.alloc(0));
+  const conn = makeSplitConn(client, "me", "/in", "/out", 80);
+
+  const err = await conn.synchronize().then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+  expect(err).not.toBeInstanceOf(UsageError);
+  expect((err as Error).message).toContain("timed out");
+  expect(files.has(inTemp)).toBe(false);
+  expect(files.has(outTemp)).toBe(false);
 });
 
 test("synchronize() (split): a configured outbound without retain mode is rejected", async () => {
