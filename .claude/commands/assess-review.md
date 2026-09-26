@@ -66,6 +66,17 @@ Start with the whole, not the parts:
   and so is an out-of-claim `finding` of severity critical or major -- the role
   round's gate ignores those by design, the trajectory does not.
 
+- **Yield.** A round that fixed nothing -- every disposition you write for it
+  in Step 3 is `limit`, `deferred`, or `narrowed`, or it raised nothing -- ends
+  the branch's review sequence when the next round would be round 3 or later.
+  Order no further round then: the next `/light-review` call is refused by
+  `require-clean-tree-for-review.mjs` unless the owner raises the cap
+  (`--owner-cap-raise`), and a branch's first role round alone is exempt. When
+  you ask the owner for that raise, or for a raise of a spent budget, state with
+  the ask the size-keyed default recommendation light-review.md's Step 1 gives
+  for the branch's changed lines -- advisory, with thresholds measured on the
+  2026-08-31 to 2026-09-25 rounds and re-fit at each retro.
+
 On a branch whose ledger holds no prior row, skip the trajectory read:
 triggers 1-3 and 7 each compare against a previous round, so with nothing
 before this round check only triggers 4-6.
@@ -319,7 +330,7 @@ Each path is recorded on the checklist line naming both shas:
   refuses rather than answering about.
 
 The rebase path composes the branch with staging content no round has read,
-which is the same objection that keeps a base sync out, and it answers it rather
+which is the same objection that keeps a merge sync out, and it answers it rather
 than routing around it: a rebase leaves the branch's own effective diff as an
 object that can be compared across the move, and a merge does not. Where that
 diff is identical at both ends, the round that read it still stands. What the
@@ -333,17 +344,29 @@ the head to a full round. The whole argument, the markdown exclusion it inherits
 and the `docs/spec/` conflict that exclusion leaves unread:
 [`docs/notes/rebase-reattestation.md`](../../docs/notes/rebase-reattestation.md).
 
-A head moved by a BASE SYNC -- a merge commit whose first parent is the attested
-sha and whose second parent is on origin/staging -- is outside every path above.
-The attested-to-head diff contains the whole merged staging range, so the verifier
+A BASE SYNC -- bringing the branch up to a moved origin/staging -- is made by
+rebasing, and takes the rebase path above: the rebase-invariance verification,
+not a standing-contract role round. A round runs after a base sync only when that
+verifier refuses the move, and it is then the standing-contract round described
+below, run at the rebased head. Record the verification in the branch's ledger:
+add to its last row, in place like the dispositions, a `reattested` array entry
+`{"route": "rebase-invariance", "from": "<pre-rebase head sha>", "to": "<post-rebase head sha>", "date": "<date -I>"}`.
+It is not a round and counts against no budget. The round gate cannot tell a base
+sync's round from any other -- the Workflow call names a ref, not the reason for
+the round -- so this route is held here, by the session, and the ledger entry is
+its record.
+
+A head already moved by a MERGE SYNC -- a merge commit whose first parent is the
+attested sha and whose second parent is on origin/staging -- is outside every path
+above. The attested-to-head diff contains the whole merged staging range, so the verifier
 answers for what that range touched rather than for the merge, and a conflict
 resolution is branch-authored change no round has read. What it reports across
 one is measured rather than asserted here:
-`.claude/scripts/verify-nonexecutable-delta.test.mjs` builds real base-sync
+`.claude/scripts/verify-nonexecutable-delta.test.mjs` builds real merge-sync
 merges and pins each verdict -- a staging range that moved code VIOLATES, so does
 a line a conflict resolution invents over a range that did not, and a range that
 is itself only comments and markdown HOLDS. That last verdict says only that the
-merged range happened to be quiet, so the route does not branch on it: a base
+merged range happened to be quiet, so the route does not branch on it: a merge
 sync takes a round whatever the verifier reports. Re-run the branch's standing
 refutation contract in full at the merge head
 (`/light-review --role <role> --claims <file> --target <branch>`). The standing
@@ -359,9 +382,8 @@ resolution delta is inside what it reads. It counts against the branch's round
 budget like any other round; a spent cap is the owner's to raise, noted in the
 ledger. The checklist line then attests the merge head citing that round. An n/a
 line keeps its own path above -- the enumeration re-runs against the merged
-head's diff the same way -- and a head moved by anything other than that merge
-shape is not a base sync: a rebase takes its own path above, and any other
-shape takes the rules as already written.
+head's diff the same way -- and a head moved by any shape other than a rebase or
+that merge takes the rules as already written.
 
 ## Step 5 -- Clean up
 
