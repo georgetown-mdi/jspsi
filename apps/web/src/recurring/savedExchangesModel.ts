@@ -41,6 +41,7 @@ import type {
   ManagedExchangeRecord,
   ManagedExchangeSchedule,
   ManagedExchangeSide,
+  TooLargeSetOwner,
 } from "@psi/managed/managedExchangeRecord";
 import type {
   ManagedFailureTier,
@@ -129,13 +130,25 @@ export interface SavedExchangeRow {
   schedule?: SavedExchangeScheduleLines;
 }
 
+/** The too-large line's remedy gist by whose set was over the bound: the row's
+ * short form of the one remedy the next-visit alert states in full. */
+const TOO_LARGE_ROW_REMEDY_BY_OWNER: Record<TooLargeSetOwner, string> = {
+  local: "split your input",
+  partner: "ask your partner to split theirs",
+};
+
 /** The one-line status a failure tier displays as in the list -- a specific but quiet
  * line naming the state and its recovery gist, deferring the full copy (and, for the
  * unexplained tier, the attack framing and the out-of-band confirmation) to the
  * per-exchange surface the row opens. A benign tier is never treated as attack framing
  * here; the unexplained tier displays as "needs you to check with your partner", the
- * plain lead without the checklist. `at` is the last run's phrased instant. */
-function tierStatus(tier: ManagedFailureTier, at: string): string {
+ * plain lead without the checklist. `at` is the last run's phrased instant;
+ * `tooLargeSetOwner` names whose set a too-large run's was, when recorded. */
+function tierStatus(
+  tier: ManagedFailureTier,
+  at: string,
+  tooLargeSetOwner: TooLargeSetOwner | undefined,
+): string {
   switch (tier) {
     case "expired":
       return "Stored secret lapsed; re-invite to run again";
@@ -146,7 +159,13 @@ function tierStatus(tier: ManagedFailureTier, at: string): string {
     case "consent":
       return `Last run stopped before sending (${at}); settle what it sends`;
     case "too-large":
-      return `Last run stopped: a file is too large for a browser exchange (${at}); split the input`;
+      if (tooLargeSetOwner === undefined)
+        return `Last run stopped: a file is too large for a browser exchange (${at}); split the input`;
+      return (
+        `Last run stopped: ${tooLargeSetOwner === "local" ? "your" : "your partner's"} ` +
+        `file is too large for a browser exchange (${at}); ` +
+        TOO_LARGE_ROW_REMEDY_BY_OWNER[tooLargeSetOwner]
+      );
     case "handed-off":
       // The row already names the hand-off and its date beside this line, so the
       // status says what the run did rather than repeating the state.
@@ -234,7 +253,7 @@ function lastRunStatus(
     record.lastRun !== undefined
       ? dateTimeLabel(new Date(record.lastRun.at))
       : "";
-  return tierStatus(tier, at);
+  return tierStatus(tier, at, record.lastRun?.tooLargeSetOwner);
 }
 
 /** The backup state phrased for a row, from the record's local backup marker. A
