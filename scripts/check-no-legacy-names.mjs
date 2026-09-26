@@ -32,8 +32,7 @@
 // YYYY-MM-DD` stands in for the current date so the test can drive both arms.
 
 import { execFileSync } from "node:child_process";
-import { lstatSync, readFileSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { obligationRoot } from "./lib/deferredObligation.mjs";
@@ -83,29 +82,49 @@ export function trackedFiles(root) {
 }
 
 /**
+ * Content matches from one `git grep` over the tracked tree at `root`, keyed
+ * by path with each file's matches in ascending line order. One git process
+ * reading and searching the whole tree is far cheaper on this repository's
+ * file count than a readFileSync per tracked file from Node: see the timeout
+ * on "passes this repository before the expiry" in
+ * check-no-legacy-names.test.mjs for the measured cost this avoids.
+ */
+function grepTrackedContents(root) {
+  const byPath = new Map();
+  let stdout;
+  try {
+    stdout = execFileSync(
+      "git",
+      ["grep", "-n", "-z", "-i", "-a", "-E", "-e", LEGACY_NAME.source],
+      { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+    );
+  } catch (error) {
+    if (error.status === 1) return byPath; // no match anywhere in the tree
+    throw error;
+  }
+  for (const record of stdout.split("\n")) {
+    if (record === "") continue;
+    const [path, lineNumber, text] = record.split("\0");
+    const matches = byPath.get(path) ?? [];
+    matches.push({ line: Number(lineNumber), text: text.trim() });
+    byPath.set(path, matches);
+  }
+  return byPath;
+}
+
+/**
  * Every place in the tree at `root` holding a legacy name: `{path, line, text}`,
  * where `line` is 0 for a match in the path itself.
  */
 export function findLegacyNames(root) {
   const found = [];
+  const contentMatches = grepTrackedContents(root);
   for (const path of trackedFiles(root)) {
     if (LEGACY_NAME.test(path)) found.push({ path, line: 0, text: path });
     if (ALLOWED_PATHS.has(path)) continue;
     if (BINARY_EXTENSIONS.includes(extname(path).toLowerCase())) continue;
-    const absolute = resolve(root, path);
-    let stat;
-    try {
-      stat = lstatSync(absolute);
-    } catch (error) {
-      if (error.code === "ENOENT") continue;
-      throw error;
-    }
-    if (!stat.isFile()) continue;
-    const lines = readFileSync(absolute, "utf8").split("\n");
-    for (const [index, text] of lines.entries()) {
-      if (LEGACY_NAME.test(text)) {
-        found.push({ path, line: index + 1, text: text.trim() });
-      }
+    for (const match of contentMatches.get(path) ?? []) {
+      found.push({ path, line: match.line, text: match.text });
     }
   }
   return found;
