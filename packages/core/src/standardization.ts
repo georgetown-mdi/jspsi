@@ -1754,7 +1754,9 @@ export class StandardizedField {
   private readonly inputColumn: string;
   private readonly compiledSteps: CompiledStep[];
   private readonly rawRows: ReadonlyArray<CSVRow>;
-  private readonly cache = new Map<number, RealizedFieldValues>();
+  // An array rather than a Map: a V8 Map holds at most 2^24 entries, and an
+  // input may hold more rows than that.
+  private readonly cache: Array<RealizedFieldValues | undefined> = [];
 
   constructor(
     name: string,
@@ -1821,12 +1823,12 @@ export class StandardizedField {
   }
 
   private realize(index: number): RealizedFieldValues {
-    const cached = this.cache.get(index);
+    const cached = this.cache[index];
     if (cached !== undefined) return cached;
 
     const row = this.rawRows[index];
     const realized = row ? this.realizeRow(row) : noRealizedValues();
-    this.cache.set(index, realized);
+    this.cache[index] = realized;
     return realized;
   }
 }

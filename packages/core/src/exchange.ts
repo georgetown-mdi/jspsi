@@ -25,7 +25,6 @@ import {
   declaredKeyWidth,
   localFanOutFactor,
   StandardizedKeyIterable,
-  type KeyCandidates,
 } from "./standardization.js";
 import {
   assertFanOutImplemented,
@@ -98,6 +97,7 @@ import {
 import { MAX_WEBRTC_FRAME_BYTES } from "./connection/binaryPackBounds.js";
 import {
   minimumPsiSetFrameBytes,
+  ROUND_ONE_SET_UNCOUNTED_MESSAGE,
   roundOneSetTooLargeMessage,
   webrtcFrameExceedsBound,
 } from "./connection/webrtcOutboundBound.js";
@@ -1442,10 +1442,12 @@ export function assertFirstRoundFitsWebRtcFrame(
   const readsSingleCandidate =
     linkageTerms.algorithm === "psi-c" ||
     !candidateSetIsImplementedForStrategy(linkageTerms.linkageStrategy);
-  const roundSetSize = (isReceiver: boolean): number | Error | undefined => {
-    let values: Array<KeyCandidates>;
+  // A refusal the round would raise is a refusal in that role, left to the
+  // round when the other role fits, since this party may not play it. Any
+  // other failure to count, a resource limit among them, refuses at once.
+  const roundSetSize = (isReceiver: boolean): number | UsageError => {
     try {
-      values = Array.from(
+      const values = Array.from(
         new StandardizedKeyIterable(
           key,
           dataset,
@@ -1455,29 +1457,22 @@ export function assertFirstRoundFitsWebRtcFrame(
           false,
         ),
       );
-    } catch {
-      // A row the round would refuse, in a role this party may not play: the
-      // round reports it, and this check refuses nothing it cannot count.
-      return undefined;
-    }
-    try {
       return droppingRoundSetSize(
         readsSingleCandidate ? values.map(requireSingleCandidate) : values,
       );
-    } catch (refusal) {
-      return refusal as Error;
+    } catch (failure) {
+      if (failure instanceof UsageError) return failure;
+      throw new UsageError(ROUND_ONE_SET_UNCOUNTED_MESSAGE, { cause: failure });
     }
   };
-  const refusedInRole = (
-    size: number | Error | undefined,
-  ): size is number | Error =>
-    size !== undefined && (typeof size !== "number" || exceeds(size));
+  const refusedInRole = (size: number | UsageError): boolean =>
+    typeof size !== "number" || exceeds(size);
   const asSender = roundSetSize(false);
   if (!refusedInRole(asSender)) return;
   const asReceiver = roundSetSize(true);
   if (!refusedInRole(asReceiver)) return;
-  if (asSender instanceof Error) throw asSender;
-  if (asReceiver instanceof Error) throw asReceiver;
+  if (typeof asSender !== "number") throw asSender;
+  if (typeof asReceiver !== "number") throw asReceiver;
   const fewest = Math.min(asSender, asReceiver);
   throw new WebRtcFrameLimitError(
     roundOneSetTooLargeMessage(fewest, maxFrameBytes),

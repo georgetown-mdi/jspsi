@@ -142,6 +142,17 @@ export function roundOneSetTooLargeMessage(
 }
 
 /**
+ * The refusal a WebRTC exchange raises at its start when counting the values
+ * its first round sends fails for a reason other than a refusal of its own;
+ * the failure is the refusal's cause.
+ */
+export const ROUND_ONE_SET_UNCOUNTED_MESSAGE =
+  "This party could not count the values the first linkage key gives it to " +
+  "send, so it cannot confirm the set fits one WebRTC message. Nothing was " +
+  "sent. If the input is large, split it into smaller files and run one " +
+  "exchange for each.";
+
+/**
  * The refusal a round raises on a set frame it built that the partner's
  * receive path would refuse. `setOwner` is whose set the frame holds: this
  * party's own, or the partner's, which the reply returns re-encrypted.
