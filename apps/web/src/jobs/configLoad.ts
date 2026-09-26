@@ -412,10 +412,10 @@ const COMPOSED_FIELD_PATHS: ReadonlySet<string> = new Set([
  * that hand-back keeps it as the file states it ({@link ./handoff},
  * `handBackConfigDocument`). It is therefore left out of
  * {@link COMPOSED_BLOCKS}, and a run's hand-off drops it from its merge base
- * instead ({@link runHandoffMergeBase}), so the run's composition decides it
- * there, absent included.
+ * instead (`runHandoffMergeBase` in {@link ./handoff}), so the run's
+ * composition decides it there, absent included.
  */
-const RUN_COMPOSED_HAND_BACK_HELD_BLOCK =
+export const RUN_COMPOSED_HAND_BACK_HELD_BLOCK =
   "authentication" as const satisfies keyof ExchangeSpec;
 
 /**
@@ -431,19 +431,6 @@ export const COMPOSED_BLOCKS: ReadonlySet<string> = new Set(
     .map((field) => field.split(".")[0])
     .filter((block) => block !== RUN_COMPOSED_HAND_BACK_HELD_BLOCK),
 );
-
-/**
- * The opened document as a run's hand-off merges its composition over it: the
- * document less {@link RUN_COMPOSED_HAND_BACK_HELD_BLOCK}, which the run
- * composes from the console's own control. A run whose operator turned the
- * max-age policy off therefore hands off no `authentication` block, rather than
- * the one the file stated.
- */
-export function runHandoffMergeBase(document: ExchangeSpec): ExchangeSpec {
-  const { [RUN_COMPOSED_HAND_BACK_HELD_BLOCK]: _composedByTheRun, ...merged } =
-    document;
-  return merged;
-}
 
 /**
  * The document's settings no composition here writes, credential fields

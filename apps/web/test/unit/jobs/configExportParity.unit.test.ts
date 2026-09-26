@@ -16,11 +16,7 @@ import {
   buildJobHandoff,
 } from "@jobs/handoff";
 
-import {
-  COMPOSED_BLOCKS,
-  carriedThroughFields,
-  runHandoffMergeBase,
-} from "@jobs/configLoad";
+import { COMPOSED_BLOCKS, carriedThroughFields } from "@jobs/configLoad";
 
 import {
   TEST_HOST_KEY_FINGERPRINT,
@@ -144,7 +140,7 @@ describe("the settings a loaded configuration keeps in the export", () => {
 
   test("a run's export states the max-age policy the run composed", () => {
     const document = mountedDocument({ tokenMaxAgeDays: 30 });
-    const exported = exportOver(runHandoffMergeBase(document), {
+    const exported = exportOver(document, {
       tokenMaxAgeDays: 7,
     });
     expect(carriedThroughFields(document)).toEqual([]);
@@ -154,9 +150,7 @@ describe("the settings a loaded configuration keeps in the export", () => {
   });
 
   test("a max-age policy turned off for the run is off in its export", () => {
-    const exported = exportOver(
-      runHandoffMergeBase(mountedDocument({ tokenMaxAgeDays: 30 })),
-    );
+    const exported = exportOver(mountedDocument({ tokenMaxAgeDays: 30 }));
     expect(exported).not.toContain("authentication");
   });
 
@@ -352,14 +346,6 @@ describe("the settings a loaded configuration keeps in the export", () => {
     );
   });
 
-  test("a hand-off merged over the whole document keeps its authentication block", () => {
-    // The merge a hand-back into an unconducted configuration makes: the block
-    // sits outside COMPOSED_BLOCKS, so the document's own survives.
-    expect(exportOver(mountedDocument({ tokenMaxAgeDays: 30 }))).toContain(
-      "token_max_age_days: 30",
-    );
-  });
-
   test("a converted composition wins over the document it was opened from", () => {
     const exported = exportOver(
       mountedDocument({ tokenMaxAgeDays: 30 }),
@@ -370,20 +356,85 @@ describe("the settings a loaded configuration keeps in the export", () => {
     expect(exported).toContain(HANDOFF_SHARED_DIRECTORY_PLACEHOLDER);
   });
 
+  test("the hand-off states which folder and signing paths it holds as read", () => {
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: MOUNTED_SIGNING },
+    );
+    expect(
+      handoffOver(document, { signing: { mode: "none" } }).pathsAsRead,
+    ).toEqual({ credential: false, sharedDirectory: true, signing: true });
+    expect(
+      handoffOver(document, { signing: { mode: "none" } }, true).pathsAsRead,
+    ).toEqual({ credential: false, sharedDirectory: false, signing: false });
+    expect(handoffOver(undefined).pathsAsRead).toEqual({
+      credential: false,
+      sharedDirectory: false,
+      signing: false,
+    });
+  });
+
+  test("a split folder pair as read is a shared directory as read", () => {
+    const document = parseExchangeSpec({
+      connection: {
+        channel: "filedrop",
+        inboundPath: "/srv/partner-in",
+        outboundPath: "/srv/partner-out",
+        options: RETAIN_OPTIONS,
+      },
+      linkageTerms: validLinkageTerms(),
+    });
+    expect(
+      handoffOver(document, { options: RETAIN_OPTIONS }).pathsAsRead
+        .sharedDirectory,
+    ).toBe(true);
+  });
+
+  test("a signed run given the placeholder identity holds no signing path as read", () => {
+    const handoff = handoffOver(mountedDocument({ tokenMaxAgeDays: 30 }), {
+      signing: { mode: "certificate" },
+    });
+    expect(handoff.pathsAsRead.signing).toBe(false);
+    expect(handoff.pathsAsRead.sharedDirectory).toBe(true);
+  });
+
+  test("a receipt path alone is a signing path as read", () => {
+    const { identityFile: _unset, ...receiptOnly } = MOUNTED_SIGNING;
+    const document = mountedDocument(
+      { tokenMaxAgeDays: 30 },
+      { signing: receiptOnly },
+    );
+    expect(
+      handoffOver(document, { signing: { mode: "none" } }).pathsAsRead.signing,
+    ).toBe(true);
+  });
+
+  test("a folder the file names as the placeholder is not a folder as read", () => {
+    const document = parseExchangeSpec({
+      connection: {
+        channel: "filedrop",
+        path: HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+      },
+      linkageTerms: validLinkageTerms(),
+    });
+    expect(handoffOver(document).pathsAsRead.sharedDirectory).toBe(false);
+  });
+
   test("a shared secret in the document reaches no export", () => {
     // The load refuses a document stating one, so this states it past that
-    // refusal: the writer strips it whatever it is handed.
+    // refusal, beside a run that composes an authentication block of its own.
     const exported = exportOver(
       mountedDocument({
         sharedSecret: RUN_SHARED_SECRET,
         expires: "2026-12-31T00:00:00.000Z",
         tokenMaxAgeDays: 30,
       }),
+      { tokenMaxAgeDays: 7 },
     );
     expect(exported).not.toContain(RUN_SHARED_SECRET);
     expect(exported).not.toContain("shared_secret");
     expect(exported).not.toContain("expires");
-    expect(exported).toContain("token_max_age_days: 30");
+    expect(exported).toContain("token_max_age_days: 7");
   });
 
   test("a console that opened no configuration exports its composition", () => {
@@ -589,6 +640,65 @@ describe("the sftp credential paths a loaded configuration keeps in the export",
     expect(server.private_key_passphrase).toBe(
       HANDOFF_PASSPHRASE_PATH_PLACEHOLDER,
     );
+  });
+
+  /** Which paths the hand-off of a run over `document` holds as read. */
+  function pathsAsReadOver(
+    document: ExchangeSpec,
+    runCredential: Partial<JobSftpServerEntry>,
+    converted: boolean,
+  ): JobHandoff["pathsAsRead"] {
+    return buildJobHandoff(
+      validSftpIntent({ linkageTerms: validLinkageTerms() }),
+      {
+        host: "sftp.example.org",
+        hostKeyFingerprint: TEST_HOST_KEY_FINGERPRINT,
+        ...runCredential,
+      },
+      {
+        credentialPasted: false,
+        filedropSplit: false,
+        mountedDocument: document,
+        mountedDocumentConverted: converted,
+      },
+    ).pathsAsRead;
+  }
+
+  test("the hand-off states the credential paths as read unconverted and not once converted", () => {
+    const document = sftpDocument({
+      privateKey: "@/home/operator/.ssh/id_ed25519",
+      privateKeyPassphrase: "@/home/operator/.ssh/passphrase",
+    });
+    const run = {
+      privateKey: RUN_KEY_PATH,
+      privateKeyPassphrase: RUN_PASSPHRASE_PATH,
+    };
+    expect(pathsAsReadOver(document, run, false)).toEqual({
+      credential: true,
+      sharedDirectory: false,
+      signing: false,
+    });
+    expect(pathsAsReadOver(document, run, true).credential).toBe(false);
+  });
+
+  test("a credential path left a placeholder is not a credential as read", () => {
+    expect(
+      pathsAsReadOver(
+        sftpDocument({
+          privateKey: "@/home/operator/.ssh/id_ed25519",
+          privateKeyPassphrase: "an-inline-passphrase-value",
+        }),
+        { privateKey: RUN_KEY_PATH, privateKeyPassphrase: RUN_PASSPHRASE_PATH },
+        false,
+      ).credential,
+    ).toBe(false);
+    expect(
+      pathsAsReadOver(
+        sftpDocument({ password: "@/home/operator/.alcove/password" }),
+        { privateKey: RUN_KEY_PATH },
+        false,
+      ).credential,
+    ).toBe(false);
   });
 
   test("a sign-in method the run changed keeps the run's placeholder", () => {

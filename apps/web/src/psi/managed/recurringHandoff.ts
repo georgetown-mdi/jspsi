@@ -4,6 +4,7 @@ import {
 } from "@psi/jobClient/jobApiBody";
 
 import type {
+  HandoffPathsAsRead,
   HandoffSigningSetting,
   JobHandoff,
   JobHandoffTemplate,
@@ -56,6 +57,7 @@ export function parseHandoff(body: unknown): JobHandoff | null {
     credentialPasted,
     usedSigningIdentity,
     signingSettingsToSet,
+    pathsAsRead,
     template,
   } = body as Record<string, unknown>;
   if (mode !== "exchange" && mode !== "zeroSetup") return null;
@@ -66,6 +68,8 @@ export function parseHandoff(body: unknown): JobHandoff | null {
   if (typeof usedSigningIdentity !== "boolean") return null;
   const parsedSigningSettings = parseSigningSettings(signingSettingsToSet);
   if (parsedSigningSettings === null) return null;
+  const parsedPathsAsRead = parsePathsAsRead(pathsAsRead);
+  if (parsedPathsAsRead === null) return null;
   const parsedTemplate = parseTemplate(template);
   if (parsedTemplate === null) return null;
   return {
@@ -78,8 +82,27 @@ export function parseHandoff(body: unknown): JobHandoff | null {
     ...(parsedSigningSettings.length > 0
       ? { signingSettingsToSet: parsedSigningSettings }
       : {}),
+    pathsAsRead: parsedPathsAsRead,
     template: parsedTemplate,
   };
+}
+
+/** The paths-as-read record, or null unless it is an object holding exactly
+ * the three booleans. */
+function parsePathsAsRead(value: unknown): HandoffPathsAsRead | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return null;
+  const { credential, sharedDirectory, signing } = value as Record<
+    string,
+    unknown
+  >;
+  if (
+    typeof credential !== "boolean" ||
+    typeof sharedDirectory !== "boolean" ||
+    typeof signing !== "boolean"
+  )
+    return null;
+  return { credential, sharedDirectory, signing };
 }
 
 /** What the panel asks the operator to set each missing signing setting to. */
@@ -122,6 +145,62 @@ export function unsetSigningSettingsCaveat(
     settings.map((setting) => SIGNING_SETTING_REMEDY[setting]).join(" and ") +
     ", or set signing.mode to none to run unsigned."
   );
+}
+
+/**
+ * The panel's "Before you schedule it" list, in order: a signing setting
+ * Alcove would refuse to run without, the machine-specific paths -- each
+ * named as the opened configuration's own to confirm, or as a placeholder to
+ * set -- the pasted credential, and the host-key pin.
+ */
+export function handoffCaveats(handoff: JobHandoff): Array<string> {
+  const { channel, pathsAsRead, credentialPasted } = handoff;
+  const caveats: Array<string> = [];
+  if (handoff.signingSettingsToSet !== undefined)
+    caveats.push(unsetSigningSettingsCaveat(handoff.signingSettingsToSet));
+  if (channel === "sftp")
+    caveats.push(
+      pathsAsRead.credential
+        ? "The connection details and host-key fingerprint are filled in, " +
+            "and the credential path is the one in the configuration you " +
+            "opened -- check that the file is at that path on the machine " +
+            "that runs the schedule."
+        : "The connection details and host-key fingerprint are filled in, " +
+            "but the credential path is a placeholder -- set it to the " +
+            "credential file on the machine that runs the schedule.",
+    );
+  else
+    caveats.push(
+      pathsAsRead.sharedDirectory
+        ? "The shared-directory path is the one in the configuration you " +
+            "opened -- check that the synced shared directory is at that " +
+            "path on the machine that runs the schedule."
+        : "The shared-directory path is a placeholder -- set it to the " +
+            "synced shared directory on the machine that runs the schedule.",
+    );
+  if (pathsAsRead.signing)
+    caveats.push(
+      "The signing paths are the ones in the configuration you opened -- " +
+        "check that signing.identity_file and signing.receipt_output, " +
+        "where set, name the right locations on the machine that runs the " +
+        "schedule.",
+    );
+  if (credentialPasted)
+    caveats.push(
+      pathsAsRead.credential
+        ? "The SFTP credential you pasted into the console is not saved as " +
+            "a file. Save it on the scheduling machine at the credential " +
+            "path the configuration names."
+        : "The SFTP credential you pasted into the console is not saved as " +
+            "a file. Save it to a file on the scheduling machine and point " +
+            "the credential path at that file.",
+    );
+  if (channel === "sftp")
+    caveats.push(
+      "The host key is already pinned, so scheduled runs connect without a " +
+        "prompt.",
+    );
+  return caveats;
 }
 
 function parseTemplate(value: unknown): JobHandoffTemplate | null {

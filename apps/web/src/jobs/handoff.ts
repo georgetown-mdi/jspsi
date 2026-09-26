@@ -4,7 +4,10 @@ import {
   snakeizeKey,
 } from "@alcove/core";
 
-import { COMPOSED_BLOCKS } from "./configLoad";
+import {
+  COMPOSED_BLOCKS,
+  RUN_COMPOSED_HAND_BACK_HELD_BLOCK,
+} from "./configLoad";
 
 import { zeroSetupOptionsArgv, zeroSetupSftpArgv } from "./intentArgv";
 
@@ -104,10 +107,34 @@ export interface JobHandoff {
    * run that signed nothing, can lack either.
    */
   signingSettingsToSet?: Array<HandoffSigningSetting>;
+  /**
+   * Which machine-specific paths the template states as the opened
+   * configuration read them rather than as placeholders. The panel names a
+   * path stated as read as the operator's own, to confirm on the scheduling
+   * machine, and a placeholder as one to set.
+   */
+  pathsAsRead: HandoffPathsAsRead;
   /** The portable template itself: the exchange config document and the command
    * that runs it (exchange mode), or the zero-setup command tokens (zeroSetup
    * mode). */
   template: JobHandoffTemplate;
+}
+
+/**
+ * Per path kind, whether the template states the opened configuration's own
+ * value and no placeholder. All false for a zero-setup run, a converted
+ * configuration, and an exchange authored on the console.
+ */
+export interface HandoffPathsAsRead {
+  /** Every sftp credential `@path` the template states is the file's own.
+   * False on filedrop, and false when any credential field is a placeholder. */
+  credential: boolean;
+  /** The filedrop shared folder, or both folders of a split pair, is the
+   * file's own. False on sftp. */
+  sharedDirectory: boolean;
+  /** The template's `signing` block states a signing identity or receipt path
+   * of the file's own. */
+  signing: boolean;
 }
 
 /** A setting a `certificate`-mode signing block requires, as the file spells
@@ -298,6 +325,64 @@ function unsetCertificateSigningSettings(
   return unset;
 }
 
+/**
+ * Which paths `handoffSpec` states as the opened configuration read them. A
+ * path is as read when it is stated and is not the placeholder for its field:
+ * the placeholders are the only other value the composition writes there, and
+ * a file that itself names a placeholder still needs setting.
+ */
+function pathsAsReadIn(handoffSpec: ExchangeSpec): HandoffPathsAsRead {
+  const { connection, signing } = handoffSpec;
+  const credentialPaths =
+    connection.channel === "sftp"
+      ? [
+          connection.server.password,
+          connection.server.privateKey,
+          connection.server.privateKeyPassphrase,
+        ].filter((value) => value !== undefined)
+      : [];
+  const folderPaths =
+    connection.channel === "filedrop"
+      ? [
+          connection.path,
+          connection.inboundPath,
+          connection.outboundPath,
+        ].filter((value) => value !== undefined)
+      : [];
+  return {
+    credential: statedAndNoneIn(credentialPaths, [
+      HANDOFF_CREDENTIAL_PATH_PLACEHOLDER,
+      HANDOFF_PASSPHRASE_PATH_PLACEHOLDER,
+    ]),
+    sharedDirectory: statedAndNoneIn(folderPaths, [
+      HANDOFF_SHARED_DIRECTORY_PLACEHOLDER,
+      HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER,
+      HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER,
+    ]),
+    signing:
+      signing?.receiptOutput !== undefined ||
+      (signing?.identityFile !== undefined &&
+        signing.identityFile !== HANDOFF_SIGNING_IDENTITY_PLACEHOLDER),
+  };
+}
+
+/** Whether `values` is non-empty and holds none of `placeholders`. */
+function statedAndNoneIn(
+  values: ReadonlyArray<string>,
+  placeholders: ReadonlyArray<string>,
+): boolean {
+  return (
+    values.length > 0 && values.every((value) => !placeholders.includes(value))
+  );
+}
+
+/** The paths a zero-setup template states: placeholders only. */
+const NO_PATHS_AS_READ: HandoffPathsAsRead = {
+  credential: false,
+  sharedDirectory: false,
+  signing: false,
+};
+
 /** A filedrop connection, as core's spec types it. */
 type FiledropConnection = Extract<
   ExchangeSpec["connection"],
@@ -483,6 +568,19 @@ function handoffConfigDocument(
       ? composed
       : { ...heldTopLevelKeys(mountedDocument), ...composed };
   return serializeExchangeDocument(parseExchangeSpec(merged));
+}
+
+/**
+ * The opened document as a run's hand-off merges its composition over it: the
+ * document less {@link RUN_COMPOSED_HAND_BACK_HELD_BLOCK}, which a run composes
+ * from the console's own control and a hand-back holds. A run whose operator
+ * turned the max-age policy off therefore hands off no `authentication` block,
+ * rather than the one the file stated.
+ */
+function runHandoffMergeBase(document: ExchangeSpec): ExchangeSpec {
+  const { [RUN_COMPOSED_HAND_BACK_HELD_BLOCK]: _composedByTheRun, ...merged } =
+    document;
+  return merged;
 }
 
 /**
@@ -679,8 +777,9 @@ interface JobHandoffRunFacts {
    * The configuration the operator opened off the mounted working folder, as
    * the open read it. The settings of it a run composed here does not emit are
    * written into the exchange mode's template unchanged (see
-   * {@link handoffConfigDocument}). A zero-setup run composes no configuration
-   * at all and reads it nowhere.
+   * {@link handoffConfigDocument}), less the block a run composes and a
+   * hand-back holds ({@link runHandoffMergeBase}). A zero-setup run composes
+   * no configuration at all and reads it nowhere.
    */
   mountedDocument?: ExchangeSpec;
   /**
@@ -718,13 +817,18 @@ export function buildJobHandoff(
       keyFileBesideConfiguration: false,
       credentialPasted: credentialPastedOnSftp,
       usedSigningIdentity: false,
+      pathsAsRead: NO_PATHS_AS_READ,
       template: buildZeroSetupHandoffTemplate(intent, serverEntry, split),
     };
+  const mergeBase =
+    mountedDocument === undefined
+      ? undefined
+      : runHandoffMergeBase(mountedDocument);
   const handoffSpec = exchangeHandoffSpec(
     intent,
     serverEntry,
     split,
-    mountedDocument,
+    mergeBase,
     mountedDocumentConverted,
   );
   const signingSettingsToSet = unsetCertificateSigningSettings(handoffSpec);
@@ -736,6 +840,7 @@ export function buildJobHandoff(
     credentialPasted: credentialPastedOnSftp,
     usedSigningIdentity: intent.signing?.mode === "certificate",
     ...(signingSettingsToSet.length > 0 ? { signingSettingsToSet } : {}),
-    template: buildExchangeHandoffTemplate(handoffSpec, mountedDocument),
+    pathsAsRead: pathsAsReadIn(handoffSpec),
+    template: buildExchangeHandoffTemplate(handoffSpec, mergeBase),
   };
 }

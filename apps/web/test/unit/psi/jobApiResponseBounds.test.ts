@@ -286,6 +286,11 @@ describe("a hand-off body over its cap fails the reader safely", () => {
       keyFileBesideConfiguration: false,
       credentialPasted: false,
       usedSigningIdentity: false,
+      pathsAsRead: {
+        credential: false,
+        sharedDirectory: false,
+        signing: false,
+      },
       template: {
         kind: "config",
         yaml: "version: 1\n",
@@ -404,6 +409,11 @@ describe("a well-formed body under its cap reaches the client", () => {
       keyFileBesideConfiguration: false,
       credentialPasted: false,
       usedSigningIdentity: false,
+      pathsAsRead: {
+        credential: false,
+        sharedDirectory: false,
+        signing: false,
+      },
       template: {
         kind: "config",
         yaml: "version: 1\n",
