@@ -907,6 +907,55 @@ describe.skipIf(runningAsRoot)("import-legacy-mapping.sh", () => {
     expect(readFileSync(setAside, "utf8")).toBe(text);
     expect(host.mapping()).toEqual([]);
   });
+
+  it("keeps the mapping when two of its rows share a key the import can map to only one", () => {
+    const host = fixtureHost();
+    const text = `dup-1 ${KEY_A}\ndup-2 ${KEY_A}\n`;
+    const mapFile = legacyFile(host, "exchange-keys", text);
+    const imported = host.importLegacy(mapFile);
+    expect(imported.status).toBe(4);
+    expect(imported.stderr).toContain(
+      "does not account for 1 row(s) of " +
+        `${mapFile} (exchange id(s): dup-2)`,
+    );
+    expect(imported.stderr).toContain(`kept ${mapFile}, unchanged`);
+    expect(readFileSync(mapFile, "utf8")).toBe(text);
+    expect(host.mapping().map(({ id }) => id)).toEqual(["dup-1"]);
+    // The same file set aside is checked, not imported, and still kept.
+    const setAside = `${mapFile}.imported`;
+    writeFileSync(setAside, text);
+    rmSync(mapFile);
+    const checked = host.importLegacy(mapFile);
+    expect(checked.status).toBe(4);
+    expect(checked.stderr).toContain(
+      "does not account for 1 row(s) of " +
+        `${setAside} (exchange id(s): dup-2)`,
+    );
+    expect(readFileSync(setAside, "utf8")).toBe(text);
+    for (const result of [imported, checked]) {
+      for (const stream of [result.stdout, result.stderr]) {
+        expect(stream).not.toMatch(HEX64);
+      }
+    }
+  });
+});
+
+describe("relay_table.py", () => {
+  // The relay README states the module runs no container and so never puts a
+  // key on a command line; this holds that to the module's own text.
+  it("imports and calls nothing that starts a process", () => {
+    const source = readFileSync(join(relay, "relay_table.py"), "utf8");
+    for (const pattern of [
+      /^\s*(import|from)\s+(subprocess|pty|shlex)\b/m,
+      /^\s*import\s+[\w.]+\s*,.*\b(subprocess|pty|shlex)\b/m,
+      /^\s*from\s+os\s+import\b/m,
+      /\b(subprocess|pty|shlex)\s*\./,
+      /\bos\s*\.\s*(system|popen|exec\w*|spawn\w*|fork\w*|posix_spawn\w*)\b/,
+      /\b(__import__|importlib)\b/,
+    ]) {
+      expect(source).not.toMatch(pattern);
+    }
+  });
 });
 
 const REGISTRAR_TOKEN = "7".repeat(64);

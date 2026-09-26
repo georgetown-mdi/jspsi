@@ -371,19 +371,22 @@ def import_mapping(conn, realm, rows, now):
 
 
 def unaccounted_ids(conn, realm, rows, carried):
-    """The exchange ids of the mapping rows, (exchange_id, key, carry), whose key
-    the table lists with no exchange mapping it, or maps without listing it: a
-    key only the text file would still name. With `carried`, the rows just
-    imported, a carry row whose id and key the mapping holds neither of also
-    counts, as one the import did not land."""
+    """The exchange ids of the mapping rows, (exchange_id, key, carry), the table
+    does not account for: a row whose key the table lists with no exchange
+    mapping it, or maps without listing it, or maps to another exchange -- a
+    key, or a key's exchange, only the text file would still name. With
+    `carried`, the rows just imported, a carry row whose id and key the
+    mapping holds neither of also counts, as one the import did not land."""
     ids = []
     for exchange_id, key, carry in rows:
         listed = conn.execute("SELECT 1 FROM turn_secret WHERE realm = ? AND value = ?", (realm, key)).fetchone()
-        mapped = conn.execute("SELECT 1 FROM alcove_exchange WHERE realm = ? AND key = ?", (realm, key)).fetchone()
-        if bool(listed) != bool(mapped):
+        holder = conn.execute(
+            "SELECT exchange_id FROM alcove_exchange WHERE realm = ? AND key = ?", (realm, key)
+        ).fetchone()
+        if bool(listed) != bool(holder) or (holder is not None and holder[0] != exchange_id):
             ids.append(exchange_id)
             continue
-        if carried and carry and not mapped:
+        if carried and carry and holder is None:
             if conn.execute("SELECT 1 FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,)).fetchone() is None:
                 ids.append(exchange_id)
     return ids
@@ -401,8 +404,10 @@ def read_mapping_file(path, now):
 def describe_unaccounted(path, ids):
     return (
         "the secrets table does not account for %d row(s) of %s (exchange id(s): %s): the table lists a key "
-        "no exchange maps, or maps one it does not list. Remove each such key with forget-key, reading it from "
-        "that file, then run again" % (len(ids), path, ", ".join(ids))
+        "no exchange maps, maps one it does not list, or maps the row's key to another exchange. Remove a key "
+        "no exchange maps, or one mapped but not listed, with forget-key, reading it from that file; a key maps "
+        "to one exchange only, so delete from the file a row whose key another exchange holds, and register that "
+        "exchange again with a key of its own if it is still in use. Then run again" % (len(ids), path, ", ".join(ids))
     )
 
 

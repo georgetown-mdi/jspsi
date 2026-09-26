@@ -237,14 +237,18 @@ revoke-exchange.sh <exchange-id>
   `/etc/alcove-relay/exchange-keys` into the table once, through
   `import-legacy-mapping.sh`, and deletes that file, which holds every key in
   plaintext, once the table, read back, accounts for each of its rows: each
-  exchange carried in reads back, and no key in the file is listed without an
-  exchange mapping it, or mapped without being listed. If the import fails,
-  the file is kept unchanged and `install.sh` stops. If the import lands but a
-  key in the file is still listed with no exchange mapping it, the file is kept
-  and `install.sh` warns, naming the exchange ids; remove each such key with
-  `forget-key` and run `install.sh` again. An `exchange-keys.imported` an
-  earlier install set aside is checked the same way and deleted, never imported
-  again, so an exchange revoked since stays revoked.
+  exchange carried in reads back, no key in the file is listed without an
+  exchange mapping it, or mapped without being listed, and a key the table
+  maps is mapped to the row's own exchange. If the import fails, the file is
+  kept unchanged and `install.sh` stops. If the import lands but the table
+  does not account for a row, the file is kept and `install.sh` warns, naming
+  the exchange ids; remove a key listed with no exchange mapping it with
+  `forget-key`, delete from the file a row whose key another exchange holds
+  (a key maps to one exchange only; register that exchange again with a key
+  of its own if it is still in use), and run `install.sh` again. An
+  `exchange-keys.imported` an earlier install set aside is checked the same
+  way and deleted, never imported again, so an exchange revoked since stays
+  revoked.
 - **How they reach the table.** `relay_table.py`, on the host's own `python3`
   and its `sqlite3` module, opens `/var/lib/alcove-relay/turndb` as the relay
   image's account -- a script run as root drops to the account that owns the
@@ -379,7 +383,8 @@ journal entry that journald stamps with podman's command line, and where
 the container's output there too. Measured on Fedora 42: a key on a `podman
 run` command line reached the journal on every run, and a credential on
 `turnutils_uclient`'s did the same. Nothing here puts a key on a container's
-command line -- `relay_table.py` runs no container -- and `verify.sh` passes
+command line -- `relay_table.py` runs no container, which
+`scripts/relay-exchange-keys.test.mjs` checks -- and `verify.sh` passes
 podman's global `--events-backend=none` to every `turnutils_uclient` run. A run
 by hand whose command line or output carries a key or a credential takes the
 same flags, `podman --events-backend=none run --log-driver=none ...`, which
