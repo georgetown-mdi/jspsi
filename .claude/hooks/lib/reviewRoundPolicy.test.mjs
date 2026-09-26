@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -148,5 +150,19 @@ describe("parseLedger", () => {
     expect(() => parseLedger(`{"round":1}\n${line}\n`)).toThrow(
       "ledger line 2",
     );
+  });
+});
+
+describe("light-review.md thresholds", () => {
+  it("states each size threshold the module exports", () => {
+    const prose = readFileSync(
+      new URL("../../commands/light-review.md", import.meta.url),
+      "utf8",
+    );
+    for (const threshold of [SMALL_DIFF_LINES, LARGE_DIFF_LINES]) {
+      expect(prose).toContain(
+        ` ${threshold.toLocaleString("en-US")} changed lines`,
+      );
+    }
   });
 });
