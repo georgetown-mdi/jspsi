@@ -98,12 +98,12 @@ import {
   causeChainSome,
 } from "./errors.js";
 import { MAX_WEBRTC_FRAME_BYTES } from "./connection/binaryPackBounds.js";
-import { AEAD_ENVELOPE_OVERHEAD_BYTES } from "./connection/encryptedMessageConnection.js";
-import { MESSAGE_HEADER_BYTES } from "./connection/fileSyncFraming.js";
+import {
+  fileSyncMaxRoundSetValues,
+  SPLIT_INPUT_REMEDY,
+} from "./connection/fileSyncOutboundBound.js";
 import {
   minimumPsiSetFrameBytes,
-  PSI_ENCODED_ELEMENT_BYTES,
-  PSI_SET_MAX_FRAMING_BYTES,
   ROUND_ONE_SET_UNCOUNTED_MESSAGE,
   roundOneSetTooLargeMessage,
   webrtcFrameExceedsBound,
@@ -1453,24 +1453,7 @@ export function assertFirstRoundFitsWebRtcFrame(
   });
 }
 
-/**
- * The most values one PSI set in an SFTP or synced-folder message file can
- * hold under a frame bound of `maxFrameBytes`, so that the file stays within
- * the bound whichever first-round message holds the set.
- */
-export function fileSyncMaxRoundSetValues(
-  maxFrameBytes: number = MAX_FRAME_SIZE_BYTES,
-): number {
-  // File header 10 + AEAD envelope 30 + setup framing 6, then 35 per value.
-  const perFileBytes =
-    MESSAGE_HEADER_BYTES +
-    AEAD_ENVELOPE_OVERHEAD_BYTES +
-    PSI_SET_MAX_FRAMING_BYTES;
-  return Math.floor((maxFrameBytes - perFileBytes) / PSI_ENCODED_ELEMENT_BYTES);
-}
-
-const SPLIT_INPUT_REMEDY =
-  "Split the input into smaller files and run one exchange for each.";
+export { fileSyncMaxRoundSetValues };
 
 /**
  * The refusal an SFTP or synced-folder exchange raises at its start when this
@@ -1515,9 +1498,9 @@ export function fileSyncRoundOneTooManyDistinctMessage(limit: number): string {
  * inbound frame bound every file-sync receiver applies
  * (`MAX_FRAME_SIZE_BYTES`), so it also refuses a first round with more
  * distinct values than `MAX_ROUND_DISTINCT_VALUES` (`psi/link.ts`), which the count
- * itself raises. A later round is not checked here: its set is known only
- * once the earlier rounds have matched (docs/spec/FILE_SYNC.md, "Round set
- * size limits").
+ * itself raises. A later round's set is known only once the earlier rounds
+ * have matched, so it is checked on the frame the round builds
+ * (`PSIParticipant`; docs/spec/FILE_SYNC.md, "Round set size limits").
  *
  * @param maxFrameBytes - The receiver's bound; lowered only by tests.
  */

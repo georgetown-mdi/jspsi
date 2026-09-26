@@ -577,6 +577,10 @@ export class EncryptedMessageConnection implements MessageConnection {
     return this.inner.outboundWebRtcFrameBound?.();
   }
 
+  outboundFileSyncFrameBound(): number | undefined {
+    return this.inner.outboundFileSyncFrameBound?.();
+  }
+
   // The envelope is added before the inner transport packs and chunks the
   // frame, so it is charged once per frame, not per chunk.
   outboundFrameOverheadBytes(): number {

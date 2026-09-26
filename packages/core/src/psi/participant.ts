@@ -26,7 +26,13 @@ import {
   webrtcFrameExceedsBound,
   WEBRTC_FRAME_LIMIT_ABORT_REASON,
 } from "../connection/webrtcOutboundBound";
-import { WebRtcFrameLimitError } from "../errors";
+import {
+  FILE_SYNC_SET_LIMIT_ABORT_REASON,
+  fileSyncBuiltSetTooLargeMessage,
+  fileSyncMaxRoundSetValues,
+  fileSyncMessageFileBytes,
+} from "../connection/fileSyncOutboundBound";
+import { RoundSetLimitError, WebRtcFrameLimitError } from "../errors";
 import { sendAbort } from "../protocolSetup";
 import { decodePsiBinaryFrame, receivePsiBinaryFrame } from "./psiBinaryFrame";
 import { InProcessPsiEngine, type PsiEngine } from "./psiEngine";
@@ -390,10 +396,11 @@ export class PSIParticipant {
     frame: Uint8Array,
     setOwner: "local" | "partner",
   ): Promise<void> {
+    const envelopeBytes = conn.outboundFrameOverheadBytes?.() ?? 0;
     const bound = conn.outboundWebRtcFrameBound?.();
     if (bound !== undefined) {
       const packedFrameBytes = binaryPackByteStringLength(
-        frame.byteLength + (conn.outboundFrameOverheadBytes?.() ?? 0),
+        frame.byteLength + envelopeBytes,
       );
       if (webrtcFrameExceedsBound(packedFrameBytes, bound)) {
         await sendAbort(conn, [WEBRTC_FRAME_LIMIT_ABORT_REASON]);
@@ -402,6 +409,32 @@ export class PSIParticipant {
           setOwner,
         );
       }
+    }
+    const fileBound = conn.outboundFileSyncFrameBound?.();
+    if (
+      fileBound !== undefined &&
+      fileSyncMessageFileBytes(frame.byteLength, envelopeBytes) > fileBound
+    ) {
+      const kind: PsiMessageKind =
+        setOwner === "partner"
+          ? "response"
+          : this.config.role === "starter"
+            ? "serverSetup"
+            : "request";
+      const elementCount = countDeclaredPsiElements(
+        frame,
+        kind,
+        Number.MAX_SAFE_INTEGER,
+      );
+      await sendAbort(conn, [FILE_SYNC_SET_LIMIT_ABORT_REASON]);
+      throw new RoundSetLimitError(
+        fileSyncBuiltSetTooLargeMessage(
+          setOwner,
+          elementCount,
+          fileSyncMaxRoundSetValues(fileBound),
+        ),
+        { setOwner },
+      );
     }
     await conn.send(frame);
   }

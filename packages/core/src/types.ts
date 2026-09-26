@@ -107,6 +107,10 @@ export type Connection = {
   // wrote it, so a caller bounding a request/response wait adds it; a
   // transport that pushes frames (WebRTC) omits this.
   inboundPollIntervalMs?: () => number;
+  // Optional: the message-file bound the partner's read gate applies, which a
+  // PSI round checks the file of a set it built against before sending it. A
+  // transport with no such bound omits this.
+  outboundFileSyncFrameBound?: () => number;
 };
 
 type Role = "starter" | "joiner" | "either";
