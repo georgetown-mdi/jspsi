@@ -5,7 +5,10 @@ import type {
   FileInfo,
   FileTransportClient,
 } from "../../src/connection/fileSyncConnection";
-import { TransportOperationStalledError } from "../../src/errors";
+import {
+  FrameSizeExceededError,
+  TransportOperationStalledError,
+} from "../../src/errors";
 import { fromBase64Url, toBase64Url } from "../../src/utils/crypto";
 
 // Direct unit tests of the subsystem with injected fakes: a pass-through budget,
@@ -349,6 +352,25 @@ test("verifyPeerMarker on a failed read returns false rather than throwing", asy
     await subsystem.verifyPeerMarker(client, listing(80), DIR, PEER_ID),
   ).toBe(false);
 });
+
+test.each([
+  ["a stalled read", () => new TransportOperationStalledError("get (60 ms)")],
+  ["an over-cap read", () => new FrameSizeExceededError("over the cap")],
+])(
+  "verifyPeerMarker rethrows %s rather than ignoring it",
+  async (_label, makeError) => {
+    const thrown = makeError();
+    const client = makeClient({
+      get: vi.fn(async () => {
+        throw thrown;
+      }),
+    });
+    const { subsystem } = armed(client);
+    await expect(
+      subsystem.verifyPeerMarker(client, listing(80), DIR, PEER_ID),
+    ).rejects.toBe(thrown);
+  },
+);
 
 test("verifyPeerMarker refuses a non-string token even when its digits decode to the peer token", async () => {
   // A JSON number whose decimal digits are valid base64url: without the type

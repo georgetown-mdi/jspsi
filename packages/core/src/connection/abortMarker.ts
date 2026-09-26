@@ -31,7 +31,7 @@ import type { getLoggerForVerbosity } from "../utils/logger";
 import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay";
 import { toBase64Url, fromBase64Url, bytesEqual } from "../utils/crypto";
 import { parseBoundedJson } from "../utils/boundedJson";
-import { TransportOperationStalledError } from "../errors";
+import { TransportOperationStalledError, UsageError } from "../errors";
 import { ABORT_SUFFIX } from "./fileSyncNames";
 import type { FileInfo, FileTransportClient } from "./fileSyncConnection";
 
@@ -350,11 +350,12 @@ export class AbortMarkerSubsystem {
   // Reads and verifies a present `<peerId>-abort.json` against the
   // locally-derived peer abort token. Returns true only on an authenticated
   // match (the caller then fast-fails with a PeerAbortError); every other
-  // outcome -- absent, oversized, unreadable, malformed, wrong version,
-  // decode failure, or non-match -- returns false so the loop keeps
-  // polling and eventually falls back to the peer-silence hedge.
-  // Self-contained and non-throwing: the admin controls these bytes, so a
-  // read failure must never show as anything but "ignore".
+  // outcome -- absent, listed as oversized, unreadable, malformed, wrong
+  // version, decode failure, or non-match -- returns false so the loop keeps
+  // polling and eventually falls back to the peer-silence hedge. The one
+  // exception is a UsageError from the read (a stalled or over-cap get()),
+  // which is terminal on every other read of the poll cycle and is rethrown
+  // so the run ends on it rather than on the peer-silence timeout.
   //
   // `client` is the boundTransport-wrapped poll-loop transport (NOT the raw
   // rawClient the write rides); `path` is the inbound directory.
@@ -389,8 +390,7 @@ export class AbortMarkerSubsystem {
       // message get(), all on that shared budget, and on SFTP the adapter
       // self-bounds reads. The short rawClient budget is reserved for the
       // teardown write, which must fast-fail so a faulting process is not
-      // held open; a stalled read here only defers detection by one cycle
-      // (caught below -> false -> keep polling).
+      // held open.
       const raw = await client.get(`${path}/${markerName}`, {
         encoding: "utf-8",
         maxBytes: ABORT_MARKER_MAX_BYTES,
@@ -407,11 +407,12 @@ export class AbortMarkerSubsystem {
       // Constant-time, length-mismatch-safe: a wrong-length decode returns false
       // without a separate length check.
       return bytesEqual(decoded, peerToken);
-    } catch {
-      // Oversize (a server that under-reported the size), JSON/parse failure,
-      // base64url decode failure, or a transient read error: ignore and keep
-      // polling. Re-reading the tiny file each cycle lets a delayed atomic write
-      // (or a torn read on a sync-mediated transport) self-heal on a later cycle.
+    } catch (err) {
+      if (err instanceof UsageError) throw err;
+      // JSON/parse failure, base64url decode failure, or a transient read
+      // error: ignore and keep polling. Re-reading the tiny file each cycle lets
+      // a delayed atomic write (or a torn read on a sync-mediated transport)
+      // self-heal on a later cycle.
       return false;
     }
   }
