@@ -189,10 +189,10 @@ there is the one the brief describes.
   isolation, and `require-declared-worktree-isolation.mjs` blocks a spawn that
   makes one without the flag. The spawn is NOT worktree-isolated; the branch's
   tree already exists and is where its work belongs.
-- Direct EVERY command in the brief to that path explicitly -- `cd <TREE> &&
-  <command>` or `git -C <TREE> <command>`, once per command. A subagent's Bash
-  working directory reverts between calls, so a single leading `cd` does not
-  stick and the commands after it run in the wrong tree.
+- Direct EVERY command in the brief to that path explicitly -- `env -C <TREE>
+  <command>` or `git -C <TREE> <args>`, once per command. A single leading `cd`
+  does not scope the commands after it, and `block-worktree-cd.mjs` refuses a
+  `cd <TREE> && <command>` form.
 - **Direct the implementer's scratch to `/tmp`.** Every fix brief tells the
   implementer that its own scratch -- measurement files, repro probes, one-off
   scripts, build-output experiments -- goes to `/tmp`, never inside the branch

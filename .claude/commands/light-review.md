@@ -253,8 +253,9 @@ the round fails rather than attaching its verdict to the contract claim.
 
 This command's own scripts are checked in and never edited here, but they are
 the repo's reference Workflows, so the schema rules for a long-form agent live
-here: put the required list property first; instruct "populate every property;
-empty array when none"; and set no `maxLength` on free text -- the validator
+here: put the required list property first; name every required top-level key
+in the prompt itself; instruct "populate every property; empty array when
+none"; and set no `maxLength` on free text -- the validator
 counts characters, the model cannot, so retries never converge; ask for brevity
 in the property's description instead.
 

@@ -97,6 +97,25 @@ describe.each(SHAPES)("panel ($shape args)", ({ deliver }) => {
     expect(verdicts).toHaveLength(3);
   });
 
+  it("names every top-level key of the panelist schema in its prompt", async () => {
+    const spawned = [];
+    await run({ question: QUESTION, docs: [] }, (prompt, options) => {
+      spawned.push({ prompt, options });
+      return answer("fail closed");
+    });
+    expect(spawned).toHaveLength(3);
+    for (const { prompt, options } of spawned) {
+      expect(options.schema.required).toEqual([
+        "position",
+        "rationale",
+        "keyRisk",
+      ]);
+      for (const key of options.schema.required) {
+        expect(prompt, options.label).toContain(`\`${key}\``);
+      }
+    }
+  });
+
   it("weighs each panelist through its own lens", async () => {
     const lenses = [];
     await run({ question: QUESTION, docs: [] }, (prompt, options) => {

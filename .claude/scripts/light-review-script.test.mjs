@@ -380,9 +380,39 @@ describe.each(SHAPES)(
     it("gives every reviewer the worktree path and the scratch rule", async () => {
       const prompts = await promptsFor(deliver, {});
       for (const prompt of prompts) {
-        expect(prompt).toContain(`git -C ${TREE} <command>`);
+        expect(prompt).toContain(`env -C ${TREE} <command>`);
+        expect(prompt).toContain(`git -C ${TREE} <args>`);
+        expect(prompt).not.toContain(`cd ${TREE}`);
         expect(prompt).toContain("under /tmp");
       }
+    });
+
+    it("names every top-level key of the agent's schema in its prompt", async () => {
+      const run = runner(deliver);
+      const spawned = [];
+      const record = (reply) => (prompt, options) => {
+        spawned.push({ prompt, options });
+        return reply(prompt, options);
+      };
+      await run(lensArgs, record(lensReply));
+      await run(
+        roleArgs(["a claim"]),
+        record(() => roleReply([verdict("a claim")])),
+      );
+      expect(spawned).toHaveLength(5);
+      const keysByLabel = {};
+      for (const { prompt, options } of spawned) {
+        expect(options.schema.required.length).toBeGreaterThan(0);
+        for (const key of options.schema.required) {
+          expect(prompt, options.label).toContain(`\`${key}\``);
+        }
+        keysByLabel[options.label] = options.schema.required;
+      }
+      expect(keysByLabel).toMatchObject({
+        "reviewer-1": ["findings", "simplerShape"],
+        consolidator: ["clusters"],
+        "adversarial-verifier": ["claims", "findings", "summary"],
+      });
     });
 
     it("tells a reviewer with no worktree to read at the ref and stop short of running code", async () => {
