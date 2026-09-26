@@ -129,6 +129,8 @@ LABEL org.opencontainers.image.source="https://github.com/georgetown-mdi/alcove"
 # ones where a container cannot reach the Alpine mirror at all, so the tool has
 # to be in the image rather than fetched when the probe runs. Why it floats
 # rather than being version-pinned, and what the float costs:
+# docs/spec/CONTAINER_IMAGES.md, "The Docker image's dependency freeze". How a
+# version the mirror has since fixed reaches the scanned image:
 # docs/spec/DEPENDENCY_PINS.md, which also holds the residual npm float.
 RUN apk add --no-cache samba-client
 

@@ -955,6 +955,20 @@ no QEMU across the whole job matrix, and the release path's Trivy scan reads
 an amd64-only build before the separate multi-arch push, so neither workflow
 exercises the arm64 image a bumped digest also includes.
 
+**A package the mirror fixed, without a digest bump.** The runtime stage's
+`apk add --no-cache samba-client` floats against the Alpine mirror (why, and
+what that costs: [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-docker-images-dependency-freeze)),
+but a build replays that layer from `image_smoke.yaml`'s layer cache for as long
+as nothing above it changes. The cache scope carries the ISO week, so the
+scheduled Monday run on the default branch rebuilds the layer from the mirror
+and a fix the mirror already carries reaches the scanned image within a week
+with nothing in this repository changed. A scan that goes red on a package
+whose fixed version the mirror already holds is reading a layer cached earlier
+that week, not a reason to bump the digest. A re-run does not clear it, since it
+reads the same week's scope; wait for the next Monday run, or delete that
+week's cache entries (`gh cache list`, `gh cache delete`) to have the next run
+build from the mirror.
+
 **What beyond the digest deserves a look.** `node:26-alpine` is a floating tag
 underneath its digest, so a rebuild the tag picked up can have a different
 Node minor or patch release, and a different bundled npm, than the digest it
