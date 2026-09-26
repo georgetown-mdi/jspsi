@@ -204,7 +204,7 @@ install -d -m 700 -o "$IMAGE_UID" -g "$IMAGE_GID" /var/lib/alcove-relay
 install -d -m 755 "$LIBEXEC" "$LIBEXEC/aws" "$LIBEXEC/certs"
 install -m 755 "$HERE/render-config.sh" "$HERE/verify.sh" "$HERE/mint-credential.sh" \
   "$HERE/register-exchange.sh" "$HERE/revoke-exchange.sh" "$HERE/sweep-exchanges.sh" \
-  "$HERE/registrar.py" "$LIBEXEC/"
+  "$HERE/import-legacy-mapping.sh" "$HERE/registrar.py" "$LIBEXEC/"
 install -m 644 "$HERE/turnserver.conf.tmpl" "$HERE/exchange-keys.sh" "$HERE/relay_table.py" "$LIBEXEC/"
 install -m 755 "$HERE/aws/external-ip.sh" "$LIBEXEC/aws/"
 install -m 755 "$HERE/certs/renew.sh" "$HERE/certs/deploy-hook.sh" "$LIBEXEC/certs/"
@@ -285,25 +285,21 @@ systemctl restart alcove-relay.service \
 log "alcove-relay.service started"
 
 # An install from before the mapping moved into the secrets table kept it as a
-# text file under /etc; its exchanges are carried into the table once coturn
-# has created it, and the file is set aside.
-OLD_MAP_FILE="$ETC/exchange-keys"
-if [ -f "$OLD_MAP_FILE" ]; then
+# text file under /etc, holding every key in plaintext; its exchanges are
+# carried into the table once coturn has created it, and the file is deleted
+# once the table, read back, accounts for every row.
+if [ -f "$ETC/exchange-keys" ] || [ -f "$ETC/exchange-keys.imported" ]; then
   for _ in $(seq 30); do
     [ -f /var/lib/alcove-relay/turndb ] && break
     sleep 1
   done
-  (
-    set -a
-    # shellcheck disable=SC1090
-    . "$ENV_FILE"
-    set +a
-    /usr/bin/python3 -B "$LIBEXEC/relay_table.py" import-mapping "$OLD_MAP_FILE"
-  ) < /dev/null \
-    || die "could not carry $OLD_MAP_FILE into the secrets table; its exchanges cannot be revoked by id until it is. Fix the cause above and run install.sh again"
-  mv "$OLD_MAP_FILE" "$OLD_MAP_FILE.imported"
-  rm -f "$ETC/exchange-keys.lock"
-  log "carried $OLD_MAP_FILE into the secrets table and moved it to $OLD_MAP_FILE.imported"
+  LEGACY_STATUS=0
+  "$LIBEXEC/import-legacy-mapping.sh" < /dev/null || LEGACY_STATUS=$?
+  case "$LEGACY_STATUS" in
+    0) log "the secrets table accounts for every row of the legacy mapping, and the mapping is deleted" ;;
+    4) log "WARNING: the legacy mapping under $ETC is kept, holding keys in plaintext, until the table accounts for it; see the message above" ;;
+    *) die "the legacy mapping under $ETC could not be carried into the secrets table and is kept unchanged; an exchange it names cannot be revoked by id until it is. Fix the cause above and run install.sh again" ;;
+  esac
 fi
 
 if [ "$REGISTRAR" = 1 ]; then

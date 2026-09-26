@@ -252,15 +252,20 @@ fi
 
 # One TURNS client run through the image, which is where turnutils_uclient lives.
 # Host networking so it reaches the relay the way a party does. podman and docker
-# take these flags the same way; only install.sh's build line differs between
-# them.
+# take the run flags the same way. Under podman every container lifecycle event
+# is a journal entry stamped with podman's command line, which carries the
+# credential after -w: measured on a Fedora 42 host, each run's credentials
+# reached the journal, and podman's global --events-backend=none left none
+# there. docker records no such entry.
+RUNTIME_FLAGS=()
+[ "$RUNTIME" != podman ] || RUNTIME_FLAGS=(--events-backend=none)
 uclient() {
   local peer="$1" user="${2:-$TURN_USER}" cred="${3:-$TURN_CRED}"
   # The trailing argument is the TCP connect target; coturn's own 401 challenge
   # carries the realm it authenticates against (turnserver.conf's REALM), so
   # swapping this address does not change what realm the exchange below
   # authenticates under.
-  bounded 60 "$RUNTIME" run --rm --network host --entrypoint turnutils_uclient "$IMAGE" \
+  bounded 60 "$RUNTIME" ${RUNTIME_FLAGS[@]+"${RUNTIME_FLAGS[@]}"} run --rm --network host --entrypoint turnutils_uclient "$IMAGE" \
     -t -S -p 443 -u "$user" -w "$cred" -e "$peer" -n 2 -c -v "$CONNECT" 2>&1
 }
 

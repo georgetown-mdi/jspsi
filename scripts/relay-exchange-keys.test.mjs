@@ -98,12 +98,20 @@ conn.commit()`,
     [turndb, REALM, KEY_LISTED],
   );
   // verify.sh's TURNS client runs through the runtime; it gets no answer. The
-  // python3 wrapper records every argument list it is started with.
+  // runtime stubs and the python3 wrapper record every argument list they are
+  // started with.
   const argvLog = join(root, "python-argv.log");
   writeFileSync(argvLog, "");
-  const stub = join(root, "docker");
-  writeFileSync(stub, "#!/bin/bash\nexit 0\n");
-  chmodSync(stub, 0o755);
+  const runtimeLog = join(root, "runtime-argv.log");
+  writeFileSync(runtimeLog, "");
+  for (const runtime of ["docker", "podman"]) {
+    const stub = join(root, runtime);
+    writeFileSync(
+      stub,
+      `#!/bin/bash\nprintf '%s %s\\n' '${runtime}' "$*" >> '${runtimeLog}'\nexit 0\n`,
+    );
+    chmodSync(stub, 0o755);
+  }
   const realPython = process.env.PATH.split(":")
     .map((dir) => join(dir, "python3"))
     .find(existsSync);
@@ -157,6 +165,12 @@ conn.commit()`,
       runWith({}, "register-exchange.sh", args, input),
     revoke: (id) => runWith({}, "revoke-exchange.sh", [id]),
     sweep: () => runWith({}, "sweep-exchanges.sh", []),
+    importLegacy: (mapFile) =>
+      runWith(
+        { ALCOVE_RELAY_LEGACY_MAPPING: mapFile },
+        "import-legacy-mapping.sh",
+        [],
+      ),
     render: () => runWith({}, "render-config.sh", []),
     // No listener answers on the connect target, so the network probes fail
     // at once and the run reaches the secrets-table steps and its cleanup.
@@ -188,6 +202,16 @@ conn.commit()`,
         [turndb, id, String(registeredAt)],
       ),
     pythonArgv: () => readFileSync(argvLog, "utf8"),
+    runtimeRuns: () =>
+      readFileSync(runtimeLog, "utf8").split("\n").filter(Boolean),
+    useRuntime: (runtime) =>
+      writeFileSync(
+        envFile,
+        readFileSync(envFile, "utf8").replace(
+          /^ALCOVE_RELAY_RUNTIME=.*$/m,
+          `ALCOVE_RELAY_RUNTIME=${runtime}`,
+        ),
+      ),
     makeTableReadOnly: () => chmodSync(turndb, 0o444),
     makeTableUnopenable: () => chmodSync(turndb, 0o000),
     removeTable: () => rmSync(turndb),
@@ -761,6 +785,127 @@ except relay_table.TableError as error:
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(`removed the key's row (realm ${REALM})\n`);
     expect(host.rows()).toEqual([]);
+  });
+});
+
+describe.skipIf(runningAsRoot)("import-legacy-mapping.sh", () => {
+  const legacyFile = (host, name, text) => {
+    const file = join(host.root, name);
+    writeFileSync(file, text);
+    return file;
+  };
+
+  it("does nothing on a host with no legacy mapping", () => {
+    const host = fixtureHost();
+    const result = host.importLegacy(join(host.root, "exchange-keys"));
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(host.mapping()).toEqual([]);
+  });
+
+  it("deletes the mapping and its lock once the table reads back every row", () => {
+    const host = fixtureHost();
+    const mapFile = legacyFile(
+      host,
+      "exchange-keys",
+      `old-1 ${KEY_A} 1790000000 30\nold-2 ${KEY_B}\n`,
+    );
+    const lock = legacyFile(host, "exchange-keys.lock", "");
+    const result = host.importLegacy(mapFile);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("read back: the secrets table accounts");
+    expect(result.stdout).toContain(`deleted ${mapFile}`);
+    expect(existsSync(mapFile)).toBe(false);
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(`${mapFile}.imported`)).toBe(false);
+    expect(host.mapping().map(({ id }) => id)).toEqual(["old-1", "old-2"]);
+    expect(host.rows()).toEqual(
+      [listed(KEY_LISTED), listed(KEY_A), listed(KEY_B)].sort(),
+    );
+  });
+
+  it.each([
+    ["the table is read-only", 1, (host) => host.makeTableReadOnly()],
+    ["the table is unopenable", 1, (host) => host.makeTableUnopenable()],
+    ["coturn has not created the table", 1, (host) => host.removeTable()],
+  ])(
+    "keeps the mapping unchanged and says so when %s",
+    (_, status, breakTable) => {
+      const host = fixtureHost();
+      const text = `old-1 ${KEY_A}\n`;
+      const mapFile = legacyFile(host, "exchange-keys", text);
+      const lock = legacyFile(host, "exchange-keys.lock", "");
+      breakTable(host);
+      const result = host.importLegacy(mapFile);
+      expect(result.status).toBe(status);
+      expect(result.stderr).toContain(`kept ${mapFile}, unchanged`);
+      expect(result.stdout).not.toContain("deleted");
+      expect(readFileSync(mapFile, "utf8")).toBe(text);
+      expect(existsSync(lock)).toBe(true);
+      for (const stream of [result.stdout, result.stderr]) {
+        expect(stream).not.toMatch(HEX64);
+      }
+    },
+  );
+
+  it("keeps a mapping it refuses unchanged", () => {
+    const host = fixtureHost();
+    const text = `old-1 ${KEY_A}\n${KEY_B}\n`;
+    const mapFile = legacyFile(host, "exchange-keys", text);
+    const result = host.importLegacy(mapFile);
+    expect(result.status).toBe(3);
+    expect(result.stderr).toContain(`kept ${mapFile}, unchanged`);
+    expect(readFileSync(mapFile, "utf8")).toBe(text);
+    expect(host.mapping()).toEqual([]);
+  });
+
+  it("keeps the mapping while the table lists one of its keys with no exchange mapping it", () => {
+    const host = fixtureHost();
+    // A verify run's row is skipped, never mapped; its key is the fixture's
+    // unmapped row, so only this file still names it.
+    const text = `old-1 ${KEY_A}\nalcove-verify-a ${KEY_LISTED}\n`;
+    const mapFile = legacyFile(host, "exchange-keys", text);
+    const result = host.importLegacy(mapFile);
+    expect(result.status).toBe(4);
+    expect(result.stderr).toContain(
+      "does not account for 1 row(s) of " +
+        `${mapFile} (exchange id(s): alcove-verify-a)`,
+    );
+    expect(result.stderr).toContain("forget-key");
+    expect(result.stderr).toContain(`kept ${mapFile}, unchanged`);
+    expect(readFileSync(mapFile, "utf8")).toBe(text);
+    expect(host.mapping().map(({ id }) => id)).toEqual(["old-1"]);
+    for (const stream of [result.stdout, result.stderr]) {
+      expect(stream).not.toMatch(HEX64);
+    }
+  });
+
+  it("deletes a mapping an earlier install set aside, without importing it again", () => {
+    const host = fixtureHost();
+    host.register("old-1", KEY_A);
+    const setAside = legacyFile(
+      host,
+      "exchange-keys.imported",
+      `old-1 ${KEY_A}\nold-2 ${KEY_B}\n`,
+    );
+    const result = host.importLegacy(join(host.root, "exchange-keys"));
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(`deleted ${setAside}`);
+    expect(existsSync(setAside)).toBe(false);
+    // old-2 was revoked after the earlier import; it stays revoked.
+    expect(host.mapping().map(({ id }) => id)).toEqual(["old-1"]);
+    expect(host.rows()).toEqual([listed(KEY_LISTED), listed(KEY_A)].sort());
+  });
+
+  it("keeps a set-aside mapping naming a key the table lists unmapped", () => {
+    const host = fixtureHost();
+    const text = `old-9 ${KEY_LISTED}\n`;
+    const setAside = legacyFile(host, "exchange-keys.imported", text);
+    const result = host.importLegacy(join(host.root, "exchange-keys"));
+    expect(result.status).toBe(4);
+    expect(result.stderr).toContain("(exchange id(s): old-9)");
+    expect(readFileSync(setAside, "utf8")).toBe(text);
+    expect(host.mapping()).toEqual([]);
   });
 });
 
@@ -1622,6 +1767,36 @@ describe.skipIf(runningAsRoot)("verify.sh cleanup", { timeout: 60000 }, () => {
     }
   });
 });
+
+describe.skipIf(runningAsRoot)(
+  "verify.sh TURNS client runs",
+  { timeout: 60000 },
+  () => {
+    const clientRuns = (host) =>
+      host.runtimeRuns().filter((run) => run.includes("turnutils_uclient"));
+
+    it("keep podman's event log off, so no credential reaches the journal", () => {
+      const host = fixtureHost();
+      host.useRuntime("podman");
+      host.verify();
+      const runs = clientRuns(host);
+      expect(runs.length).toBeGreaterThan(0);
+      for (const run of runs) {
+        expect(run).toMatch(/^podman --events-backend=none run --rm /);
+      }
+    });
+
+    it("pass docker no podman-only flag", () => {
+      const host = fixtureHost();
+      host.verify();
+      const runs = clientRuns(host);
+      expect(runs.length).toBeGreaterThan(0);
+      for (const run of runs) {
+        expect(run).toMatch(/^docker run --rm /);
+      }
+    });
+  },
+);
 
 describe("render-config.sh and the secrets table", () => {
   it("renders the table and no static secret when the host holds none", () => {

@@ -16,12 +16,14 @@ Per-exchange keys, is the contract.
     relay_table.py status <exchange-id>                         key on stdin
     relay_table.py forget-key                                   key on stdin
     relay_table.py import-mapping <file>
+    relay_table.py check-mapping <file>
 
 A key is only ever read from standard input, so it is never on a command line.
 Run as root, it drops to the account owning turndb -- the relay image's -- before
 opening it, so a file it creates is one coturn can use. Exit status: 0 done, 1
 the table could not be read or written and nothing changed, 2 usage, 3 refused
-(a malformed argument, or the exchange's state), nothing changed.
+(a malformed argument, or the exchange's state), nothing changed, 4 the table,
+read back, disagrees with what was asked of it.
 
 Python 3.9 standard library only: the version Amazon Linux 2023 ships.
 """
@@ -313,10 +315,10 @@ def parse_mapping(text, now):
     under verify.sh's reserved prefix (is_verify_id) is skipped rather than
     refusing the whole file: a verify run that died before cleanup can leave
     one behind. Every other refusal still refuses the whole file. Returns
-    (rows, skipped_verify_count)."""
+    (rows, skipped_verify_rows), the second as (exchange_id, key) pairs."""
     now = int(now)
     rows = []
-    skipped_verify = 0
+    skipped_verify = []
     for number, line in enumerate(text.split("\n"), 1):
         if line.endswith("\r"):
             line = line[:-1]
@@ -338,7 +340,7 @@ def parse_mapping(text, now):
         except Refused as refusal:
             raise Refused("line %d of the mapping: %s" % (number, refusal))
         if is_verify_id(fields[0]):
-            skipped_verify += 1
+            skipped_verify.append((fields[0], fields[1]))
             continue
         rows.append((fields[0], fields[1], registered_at, max_age_days))
     return rows, skipped_verify
@@ -368,6 +370,42 @@ def import_mapping(conn, realm, rows, now):
     return _transaction(conn, body)
 
 
+def unaccounted_ids(conn, realm, rows, carried):
+    """The exchange ids of the mapping rows, (exchange_id, key, carry), whose key
+    the table lists with no exchange mapping it, or maps without listing it: a
+    key only the text file would still name. With `carried`, the rows just
+    imported, a carry row whose id and key the mapping holds neither of also
+    counts, as one the import did not land."""
+    ids = []
+    for exchange_id, key, carry in rows:
+        listed = conn.execute("SELECT 1 FROM turn_secret WHERE realm = ? AND value = ?", (realm, key)).fetchone()
+        mapped = conn.execute("SELECT 1 FROM alcove_exchange WHERE realm = ? AND key = ?", (realm, key)).fetchone()
+        if bool(listed) != bool(mapped):
+            ids.append(exchange_id)
+            continue
+        if carried and carry and not mapped:
+            if conn.execute("SELECT 1 FROM alcove_exchange WHERE exchange_id = ?", (exchange_id,)).fetchone() is None:
+                ids.append(exchange_id)
+    return ids
+
+
+def read_mapping_file(path, now):
+    try:
+        with open(path, encoding="ascii") as handle:
+            text = handle.read()
+    except (OSError, UnicodeDecodeError) as error:
+        raise TableError("could not read the mapping %s: %s" % (path, error))
+    return parse_mapping(text, now)
+
+
+def describe_unaccounted(path, ids):
+    return (
+        "the secrets table does not account for %d row(s) of %s (exchange id(s): %s): the table lists a key "
+        "no exchange maps, or maps one it does not list. Remove each such key with forget-key, reading it from "
+        "that file, then run again" % (len(ids), path, ", ".join(ids))
+    )
+
+
 # --- the command line ------------------------------------------------------------
 
 USAGE = """usage: relay_table.py register <exchange-id> <max-age-days|none>   (key on stdin)
@@ -376,8 +414,9 @@ USAGE = """usage: relay_table.py register <exchange-id> <max-age-days|none>   (k
        relay_table.py status <exchange-id>                         (key on stdin)
        relay_table.py forget-key                                   (key on stdin)
        relay_table.py import-mapping <file>
+       relay_table.py check-mapping <file>
 """
-ARITY = {"register": 2, "revoke": 1, "sweep": 0, "status": 1, "forget-key": 0, "import-mapping": 1}
+ARITY = {"register": 2, "revoke": 1, "sweep": 0, "status": 1, "forget-key": 0, "import-mapping": 1, "check-mapping": 1}
 
 
 def read_key():
@@ -462,21 +501,34 @@ def run_command(command, args):
     if command == "import-mapping":
         if not realm:
             raise Refused("ALCOVE_RELAY_REALM is unset in relay.env")
-        try:
-            with open(args[0], encoding="ascii") as handle:
-                text = handle.read()
-        except (OSError, UnicodeDecodeError) as error:
-            raise TableError("could not read the mapping %s: %s" % (args[0], error))
         now = time.time()
-        rows, skipped_verify = parse_mapping(text, now)
+        rows, skipped_verify = read_mapping_file(args[0], now)
         run_as_table_owner(TURNDB)
         imported, skipped = import_mapping(open_table(), realm, rows, now)
         print("imported %d exchange(s) from %s; %d already registered here were left alone" % (imported, args[0], skipped))
         if skipped_verify:
             print(
                 "skipped %d row(s) under verify.sh's '%s' prefix, never inserted: a verify run that died before "
-                "cleanup can leave those behind" % (skipped_verify, VERIFY_ID_PREFIX)
+                "cleanup can leave those behind" % (len(skipped_verify), VERIFY_ID_PREFIX)
             )
+        every_row = [(row[0], row[1], True) for row in rows] + [(i, k, False) for i, k in skipped_verify]
+        ids = unaccounted_ids(open_table(), realm, every_row, True)
+        if ids:
+            sys.stderr.write("%s\n" % describe_unaccounted(args[0], ids))
+            return 4
+        print("read back: the secrets table accounts for every row of %s" % args[0])
+        return 0
+    if command == "check-mapping":
+        if not realm:
+            raise Refused("ALCOVE_RELAY_REALM is unset in relay.env")
+        rows, skipped_verify = read_mapping_file(args[0], time.time())
+        run_as_table_owner(TURNDB)
+        every_row = [(row[0], row[1], True) for row in rows] + [(i, k, False) for i, k in skipped_verify]
+        ids = unaccounted_ids(open_table(), realm, every_row, False)
+        if ids:
+            sys.stderr.write("%s\n" % describe_unaccounted(args[0], ids))
+            return 4
+        print("the secrets table accounts for every row of %s" % args[0])
         return 0
     raise AssertionError(command)
 
