@@ -2106,16 +2106,14 @@ export async function linkViaSinglePassPSI(
     return [table[0], table[1]];
   }
 
-  stage(SINGLE_PASS_STAGE_IDS.encryptingOwnData);
-  await conn.send(await participant.createClientRequest(distinctValues));
-
-  // Tighten the read gate to the per-exchange derived cap before reading the
-  // reply, then clear it so the later payload read uses the default. Set after
-  // our request and before the reply (one peer round trip away), so the file-sync
-  // poll loop reads no frame between the set and the read it governs. A transport
-  // that bounds its inbound path another way (the WebRTC data channel, fixed at
-  // MAX_WEBRTC_FRAME_BYTES) no-ops setInboundFrameCap and relies on that envelope
-  // plus the coherence checks below.
+  // Tighten the read gate to the per-exchange derived cap before the request is
+  // built, then clear it so the later payload read uses the default. Masking the
+  // request can take minutes and a peer can write its next frame at any point in
+  // that window, so the gate is set before it opens. A transport that bounds its
+  // inbound path another way (the WebRTC data channel, fixed at
+  // MAX_WEBRTC_FRAME_BYTES) no-ops setInboundFrameCap, and a frame one read
+  // before the set is not covered by it: the length check after the read
+  // holds the cap for both.
   const replyCap = singlePassReplyByteCap(
     numLinkageKeys,
     senderSize,
@@ -2124,6 +2122,8 @@ export async function linkViaSinglePassPSI(
   conn.setInboundFrameCap?.(replyCap);
   let replyFrame: Uint8Array;
   try {
+    stage(SINGLE_PASS_STAGE_IDS.encryptingOwnData);
+    await conn.send(await participant.createClientRequest(distinctValues));
     replyFrame = await receivePsiBinaryFrame(
       conn,
       participant.id,
@@ -2131,6 +2131,13 @@ export async function linkViaSinglePassPSI(
     );
   } finally {
     conn.setInboundFrameCap?.(undefined);
+  }
+  if (replyFrame.byteLength > replyCap) {
+    throw partnerProtocolError(
+      participant.id,
+      `the single-pass reply is ${replyFrame.byteLength} byte(s), above the ` +
+        `${replyCap} byte(s) both parties derive from their declared sizes`,
+    );
   }
 
   const {

@@ -1096,6 +1096,51 @@ test("the single-pass receiver read gate is bounded to the derived reply cap", a
   expect(setCalls[setCalls.length - 1]).toBeUndefined();
 });
 
+test("a single-pass reply queued before the request is sent is held to the derived cap", async () => {
+  // The peer's reply is already waiting when the receiver starts, so the read
+  // gate has to be tightened before the request goes out, and a transport that
+  // does not apply the gate still meets the length check after the read.
+  const events: Array<string> = [];
+  const keyCount = 1;
+  const localRows = 3;
+  const partnerRows = 2;
+  const replyCap = singlePassReplyByteCap(
+    keyCount,
+    { effectiveKeyCount: keyCount, recordCount: partnerRows },
+    { effectiveKeyCount: keyCount, recordCount: localRows },
+  );
+  const receiver = new PSIParticipant(
+    "client",
+    psiLibrary,
+    { role: "joiner", verbose: -1 },
+    UNBOUNDED_PSI_ELEMENTS,
+  );
+  const fake: MessageConnection = {
+    send: async () => {
+      events.push("send");
+    },
+    receive: async () => new Uint8Array(replyCap + 1),
+    close: async () => {},
+    setInboundFrameCap: (maxBytes) => {
+      events.push(`cap:${String(maxBytes)}`);
+    },
+  };
+  const run = linkViaSinglePassPSI(
+    { cardinality: "one-to-one" },
+    receiver,
+    fake,
+    [["a", "b", "c"]],
+    fanOutFreeBounds(keyCount, partnerRows),
+    false,
+    -1,
+  );
+  await expect(run).rejects.toThrow(
+    `client protocol error: the single-pass reply is ${replyCap + 1} byte(s), ` +
+      `above the ${replyCap} byte(s) both parties derive from their declared sizes`,
+  );
+  expect(events).toEqual([`cap:${replyCap}`, "send", "cap:undefined"]);
+});
+
 test("the single-pass sender refuses a built reply above the derived cap", async () => {
   // The sender-side half of the same cap: before sending, it measures the reply it built
   // against singlePassReplyByteCap -- the same bound the receiver tightens its read gate
