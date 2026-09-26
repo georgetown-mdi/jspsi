@@ -33,14 +33,17 @@ unasked. Keep this pass in messages of its own, apart from any docket item.
    sets out.
 2. Consult the PM once over the whole list, through a `project-manager` spawn
    that holds the list, your opinion on each, the consequences of the docket's
-   rulings, and the owner's instruction above quoted verbatim. What the PM files
-   on its own is bounded by the one-autonomous-filing cap in
-   `.claude/pm/ruleset.md`, Filing and updating items: invoking this command
-   does not by itself count as the owner's delegation for a batch, so a draft
-   past the cap comes back to the owner for his word.
+   rulings, and the owner's instruction above quoted verbatim. The quoted
+   instruction is the owner's delegation for the batch: relayed verbatim in
+   the spawn prompt, it licenses filing every item you and the PM agree on,
+   so the one-autonomous-filing cap in `.claude/pm/ruleset.md`, Filing and
+   updating items, does not return agreed drafts to the owner.
 3. File only what you and the PM both agree on, each with an epic and an
    implementation order. Raise a disagreement with the owner rather than
-   settling it.
+   settling it. One side conceding on evidence the other verified in the
+   repository is agreement, not a disagreement to raise. A PM question that
+   blocks nothing is carried in the filed item's Open questions and named in
+   the report, never put to the owner mid-pass.
 4. In the same pass, update every open item that a filing, the session's work,
    or a docket ruling affects.
 5. Do the relevant housekeeping; retiring a worktree follows the ruleset's
