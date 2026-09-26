@@ -39,7 +39,6 @@ import {
 } from "../config";
 import { writeTermsRecord } from "../acceptedTermsRecords";
 import { assertConfigTermsRunnable } from "../configTermsGuards";
-import { detectFileConflicts } from "../fileUtils";
 import { resolveIdentity, resolveInvitationIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
@@ -541,25 +540,14 @@ export async function validateInvite(params: {
       throw new UsageError(
         `accept-timeout must be a positive duration; got ${acceptTimeout}s`,
       );
-    // Detect a pre-existing config before anything else so a bootstrap never
-    // clobbers a configuration partway through an exchange. A pre-existing config
-    // still aborts here: reusing it as the linkage-terms source is a documented
-    // remaining limitation (see docs/CLI.md "Online invitation"). A pre-existing
-    // key file, on the online path only, is downgraded to a warning below -- it
-    // will be overwritten by the rotated token if the partner accepts, so report
-    // it rather than abort (docs/CLI.md "Online invitation").
-    assertNoProvisionConflicts(
-      { configPath: options.configFile, keyPath: options.keyFile },
-      ["config"],
-    );
-    if (detectFileConflicts([options.keyFile]).length > 0)
-      log.warn(
-        `a key file already exists at ${redactAndRenderOperatorSuppliedText(
-          operatorSuppliedText(options.keyFile),
-        )}; it will be ` +
-          "overwritten by the rotated token if the partner accepts. Delete it " +
-          "or pass --key-file if reusing that secret was not intended.",
-      );
+    // Detect a pre-existing config or key file before anything else so a
+    // bootstrap never clobbers either partway through an exchange. Reusing a
+    // pre-existing config as the linkage-terms source is a documented remaining
+    // limitation (see docs/CLI.md "Online invitation").
+    assertNoProvisionConflicts({
+      configPath: options.configFile,
+      keyPath: options.keyFile,
+    });
     // Validate the URL before the token is minted, so an unusable URL (e.g. one
     // with no host) fails before the caller can disclose the token. The role is
     // stamped here because this command is the inviting end; on a ws:/wss: URL

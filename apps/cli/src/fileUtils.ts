@@ -135,6 +135,10 @@ function warnIfWindowsAclOverPermissive(
   const keyFileDisplay = redactAndRenderOperatorSuppliedText(
     operatorSuppliedText(keyFilePath),
   );
+  const couldNotJudge = (reason: string): string =>
+    `The access list on ${keyFileDisplay} could not be checked: ${reason}; ` +
+    `check it by hand with \`icacls "${keyFileDisplay}"\` and restrict the ` +
+    `file to owner-only so other users cannot read the ${secretLabel}`;
   let listing: ReturnType<typeof parseWindowsAclListing>;
   try {
     // Whitespace removed rather than trimmed: PowerShell wraps a long line to
@@ -155,6 +159,15 @@ function warnIfWindowsAclOverPermissive(
   }
   if (listing !== undefined) {
     const { currentSid, rules } = listing;
+    if (rules.every(({ type }) => type !== 0)) {
+      log.warn(
+        couldNotJudge(
+          "every entry the access list holds is a deny entry, which this " +
+            "check does not inspect",
+        ),
+      );
+      return;
+    }
     if (
       rules.some(
         ({ sid, rights, type }) =>
@@ -183,10 +196,6 @@ function warnIfWindowsAclOverPermissive(
     `Could not read the access list on ${keyFileDisplay}: ${reason}; check it ` +
     `by hand with \`icacls "${keyFileDisplay}"\` and restrict the file to ` +
     `owner-only so other users cannot read the ${secretLabel}`;
-  const couldNotJudge = (reason: string): string =>
-    `The access list on ${keyFileDisplay} could not be checked: ${reason}; ` +
-    `check it by hand with \`icacls "${keyFileDisplay}"\` and restrict the ` +
-    `file to owner-only so other users cannot read the ${secretLabel}`;
   let output: string;
   try {
     output = execFileSync("icacls", [keyFilePath], {

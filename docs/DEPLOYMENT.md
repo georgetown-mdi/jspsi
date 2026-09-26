@@ -585,7 +585,7 @@ Owner-only and the container's identity are one question here, not two: a `0600`
 **Inject via a secrets manager, not the image.** Never copy `.alcove.key` into a container image layer; image layers are readable by anyone with pull access to the registry. Instead, mount the file at runtime:
 
 - **Docker**: bind-mount the directory that holds the key file, read-write, and name the file inside it with `--key-file`: `--mount type=bind,src=/host/path/secrets,dst=/run/secrets` with `--key-file /run/secrets/.alcove.key`. Do not mount the key file on its own: the CLI saves the rotated token after each successful exchange by writing a new file beside the old one and renaming it into place, and a rename onto a file that is itself a mount point fails (`EBUSY`). On Linux the key-file pre-flight refuses such a mount before the key exchange; elsewhere the save fails after it, and both parties must re-invite. For the same reason do not use a read-only mount or a Docker secret, which is mounted read-only. Set the directory's owner to uid 1000 and the file to mode `0600` and owner uid 1000 on the host before the container starts.
-- **Kubernetes**: use a `Secret` volume with `defaultMode: 0600`. Do not use a `ConfigMap` for the key file. Set the pod's `securityContext` so the projected file belongs to the identity the container runs as; a `0600` file the container's uid does not own is unreadable to it.
+- **Kubernetes**: a `Secret` volume is mounted read-only, so the key-file pre-flight refuses a key file inside one. Use the `Secret` to seed a writable persistent volume instead: an init container copies it there, mode `0600`, when the volume holds no key file yet, and `--key-file` names the copy. The rotated key then persists on that volume from run to run, and the `Secret` is used only on the first run. Do not use a `ConfigMap` for the key file. Set the pod's `securityContext` so the copy belongs to the identity the container runs as; a `0600` file the container's uid does not own is unreadable to it.
 - **CI runners**: write the token to a temporary file with `install -m 0600 /dev/stdin .alcove.key <<< "$TOKEN"` (bash) or `printf '%s' "$TOKEN" | install -m 0600 /dev/stdin .alcove.key` (POSIX sh) rather than `echo "$TOKEN" > .alcove.key`, which may leave a world-readable file depending on the runner's umask.
 
 **Separate read-only config from read-write secrets.** If the working directory (containing `alcove.yaml` and input data) is mounted read-only - for example to prevent the container from modifying source data - mount a separate read-write volume for the key file and use `--key-file` to redirect the CLI. One exception needs the directory holding the config writable: under `signing.mode: certificate` a first contact with a partner you have not pinned records the fingerprint it adopts into `alcove.yaml` by renaming a new file over it (see [CLI.md](CLI.md#pinning-the-partners-certificate)), so either set `signing.partner_fingerprint` before that run or mount the configuration writable for it - a run that can do neither is refused before it connects:
@@ -600,16 +600,37 @@ docker run \
 ```
 
 ```yaml
-# Kubernetes: separate secretsDir volume alongside a read-only configMap mount
+# Kubernetes: a writable key volume seeded once from a Secret, alongside a
+# read-only configMap mount
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
 volumes:
   - name: config
     configMap:
       name: alcove-config
       defaultMode: 0444
-  - name: secrets
+  - name: key-seed
     secret:
       secretName: alcove-key
-      defaultMode: 0600
+      defaultMode: 0440
+  - name: secrets
+    persistentVolumeClaim:
+      claimName: alcove-key-state
+initContainers:
+  - name: seed-key
+    image: busybox
+    command:
+      - sh
+      - -c
+      - "[ -e /run/secrets/.alcove.key ] || install -m 0600 /run/key-seed/.alcove.key /run/secrets/.alcove.key"
+    volumeMounts:
+      - name: key-seed
+        mountPath: /run/key-seed
+        readOnly: true
+      - name: secrets
+        mountPath: /run/secrets
 containers:
   - name: alcove
     volumeMounts:

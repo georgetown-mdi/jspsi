@@ -1098,29 +1098,6 @@ const MORE_COMMAND_LINES: readonly SinkCase<LineOutcome>[] = [
     },
   },
   {
-    name: "invite: a key file already at the path on the online mint",
-    says: ["it will be overwritten by the rotated token"],
-    drive: async () => {
-      const filePath = backslashedPath(".alcove.key");
-      fs.writeFileSync(filePath, "{}");
-      const { log, lines } = stubLog();
-      await validateInvite({
-        resolved: {
-          mode: "online",
-          url: new URL("sftp://host/drop"),
-          input: writeInput(),
-        },
-        options: bootstrapOptions({
-          identity: "Agency A",
-          keyFile: filePath,
-        }),
-        acceptTimeout: 900,
-        log,
-      });
-      return { filePath, lines };
-    },
-  },
-  {
     name: "invite: a --linkage-strategy the config's own terms override",
     says: ["Edit linkage_strategy in"],
     drive: async () => {

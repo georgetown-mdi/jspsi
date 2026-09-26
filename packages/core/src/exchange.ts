@@ -2089,9 +2089,9 @@ export interface RunExchangeOptions {
    * conclusion of the exchange: both parties sign the same canonical receipt
    * content and swap signatures, yielding {@link ExchangeResult.signedReceipt}.
    * Absent (the default) skips the step entirely, so the unsigned-record path --
-   * the web app (no keys/key-exchange) and a CLI exchange without a signing
-   * identity -- runs {@link runExchange} unchanged. The CLI threads it only on the
-   * authenticated file-sync path, which is the only path that holds a session key.
+   * the web app (which holds no signing identity) and a CLI exchange without a
+   * signing identity -- runs {@link runExchange} unchanged. The CLI threads it
+   * only on the authenticated path, the only one that holds a session key.
    */
   signingIdentity?: SigningIdentity;
   /**
@@ -2732,9 +2732,10 @@ export async function runExchange(
     // the two directional payload MACs, plus a session-derived binder) and swap
     // signatures over the live channel, producing one dual-signed record. Gated
     // on a signing identity AND a session key both being present, so the
-    // unsigned-record path -- the web app (no keys) and a CLI exchange without a
-    // signing identity -- runs this function unchanged. Placed after the payload
-    // exchange so the receipt commits to the full result, payloads included.
+    // unsigned-record path -- the web app (no signing identity) and a CLI
+    // exchange without one -- runs this function unchanged. Placed after the
+    // payload exchange so the receipt commits to the full result, payloads
+    // included.
     //
     // A failure here is NOT swallowed: a fingerprint-pin or signature failure is
     // a security event that terminates the exchange (exchangeSignedReceipt

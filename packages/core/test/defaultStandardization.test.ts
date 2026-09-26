@@ -146,6 +146,21 @@ describe("getDefaultStandardization — structure", () => {
     expect(result[0].output).toBe("social_security");
   });
 
+  test("each field's steps are independent of every other field's and call's", () => {
+    const first = getDefaultStandardization(fullMetadata, minimalTerms);
+    const steps = (output: string) =>
+      first.find((t) => t.output === output)?.steps ?? [];
+    const lastNameBefore = structuredClone(steps("last_name"));
+    steps("first_name").push({ function: "to_lower_case" });
+    steps("first_name")[0].function = "remove_dashes";
+    expect(steps("last_name")).toEqual(lastNameBefore);
+
+    const second = getDefaultStandardization(fullMetadata, minimalTerms);
+    expect(second.find((t) => t.output === "first_name")?.steps).toEqual(
+      lastNameBefore,
+    );
+  });
+
   test("each transformation has a non-empty steps array", () => {
     const result = getDefaultStandardization(fullMetadata, minimalTerms);
     for (const t of result) {

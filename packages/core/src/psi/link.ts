@@ -847,7 +847,7 @@ export async function linkViaPSI(
   // with, as their ranks within the round. Where a candidate set widened a
   // both-sided round that is a SET rather than the one rank above, and it is
   // the set the returned list's runs are held to (docs/spec/PROTOCOL.md, What
-  // lifting the refusal owes). Sparse: only a matched record has an entry.
+  // the cascade realization owes). Sparse: only a matched record has an entry.
   const acceptedPartnerRanks: Array<Array<number>> = [];
   // Each round's blocks, held only where the cardinality forms them.
   const blocksByIter: Array<Array<RoundBlock>> = [];

@@ -2,6 +2,7 @@ import { ZodError, z } from "zod";
 import { expect, test } from "vitest";
 
 import {
+  MAX_PEER_ID_BYTES,
   MAX_RECONNECT_ATTEMPTS,
   MAX_RELAY_LOCATOR_URL_LENGTH,
   SHARED_SECRET_REGEX,
@@ -20,6 +21,7 @@ import {
 } from "../../src/config/invitation";
 
 import type { FileSyncOptions } from "../../src/config/connection";
+import { peerIdLengthRefusal } from "../../src/connection/fileSyncRendezvous";
 
 // Minimal valid configs used as bases for individual tests.
 const webrtcBase = {
@@ -1787,6 +1789,40 @@ test("peerId 'temp' is rejected", () => {
   if (result.success) return;
   const messages = result.error.issues.map((i) => i.message);
   expect(messages.some((m) => m.includes("reserved"))).toBe(true);
+});
+
+test("MAX_PEER_ID_BYTES is the longest id whose derived names fit beside a one-byte partner id", () => {
+  const partner = "x";
+  expect(
+    peerIdLengthRefusal("p".repeat(MAX_PEER_ID_BYTES), partner),
+  ).toBeUndefined();
+  expect(
+    peerIdLengthRefusal("p".repeat(MAX_PEER_ID_BYTES + 1), partner),
+  ).toBeDefined();
+});
+
+test("peerId is bounded in UTF-8 bytes, not characters", () => {
+  const parse = (peerId: string) =>
+    safeParseConnectionConfig({
+      ...sftpBase,
+      options: {
+        timestampInFilename: true,
+        locklessRendezvous: true,
+        retainFiles: true,
+        peerId,
+      },
+    });
+  expect(parse("p".repeat(MAX_PEER_ID_BYTES)).success).toBe(true);
+  const tooLong = parse("p".repeat(MAX_PEER_ID_BYTES + 1));
+  expect(tooLong.success).toBe(false);
+  if (tooLong.success) return;
+  expect(tooLong.error.issues.map((i) => i.message).join("\n")).toContain(
+    `at most ${MAX_PEER_ID_BYTES} bytes`,
+  );
+  const twoByteChar = String.fromCharCode(0xe9);
+  expect(
+    parse(twoByteChar.repeat(Math.floor(MAX_PEER_ID_BYTES / 2) + 1)).success,
+  ).toBe(false);
 });
 
 test("retainFiles is accepted on sftp when timestampInFilename and locklessRendezvous are true", () => {

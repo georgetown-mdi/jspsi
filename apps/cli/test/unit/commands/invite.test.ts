@@ -305,29 +305,19 @@ function onlineFixture(): { input: string; options: CommonBootstrapOptions } {
   };
 }
 
-test("validateInvite: online warns (does not error) on a pre-existing key file", async () => {
+test("validateInvite: online aborts on a pre-existing key file and leaves it untouched", async () => {
   const { input, options } = onlineFixture();
-  fs.writeFileSync(
-    options.keyFile,
-    JSON.stringify({ sharedSecret: KEY_TOKEN }),
-  );
-  const log = getLogger("invite-key-warn-test");
-  log.setLevel("silent");
-  const warnSpy = vi.spyOn(log, "warn");
-  // Completes without throwing: the pre-existing key is a warning on this path.
-  await validateInvite({
-    resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
-    options,
-    acceptTimeout: 900,
-    log,
-  });
-  expect(
-    warnSpy.mock.calls.some(
-      (c) =>
-        typeof c[0] === "string" && c[0].includes("key file already exists"),
-    ),
-  ).toBe(true);
-  warnSpy.mockRestore();
+  const existing = JSON.stringify({ sharedSecret: KEY_TOKEN });
+  fs.writeFileSync(options.keyFile, existing);
+  await expect(
+    validateInvite({
+      resolved: { mode: "online", url: new URL("sftp://host/drop"), input },
+      options,
+      acceptTimeout: 900,
+      log: silentLog,
+    }),
+  ).rejects.toThrow(options.keyFile);
+  expect(fs.readFileSync(options.keyFile, "utf8")).toBe(existing);
 });
 
 test("validateInvite: online still aborts on a pre-existing config file", async () => {

@@ -99,10 +99,12 @@ Emptying it is not sufficient on its own. npm omits a package the lockfile flags
 `vitefu` each declare it an optional peer. `--omit=optional` is what leaves it,
 and `rolldown` and `esbuild` beneath it, out of the image.
 
-What that omission costs is one package: `cpu-features`, ssh2's optional native
-CPU-detection addon (with `buildcheck` and `nan` beneath it), the only optional
-edge inside the `packages/core` plus `apps/cli` scope. ssh2 declares it optional
-and runs without it -- driven on the omitted tree, ssh2 1.17.0 completes a
+What that omission costs is ssh2's two optional edges, the only ones inside the
+`packages/core` plus `apps/cli` scope: `cpu-features`, its native CPU-detection
+addon (with `buildcheck` and `nan` beneath it), and `nan`, which ssh2 also
+declares optional directly. The omitted install holds none of the three
+(`npm explain nan` names both edges). ssh2 runs without them -- driven on the
+omitted tree, ssh2 1.17.0 completes a
 handshake, authentication and remote exec over loopback with `cpu-features`
 unresolvable.
 

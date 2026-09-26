@@ -207,7 +207,12 @@ export function getDefaultStandardization(
     if (steps === undefined) continue;
     const column = resolution.get(field.name)?.column;
     if (column === undefined) continue;
-    result.push({ output: field.name, input: column, steps });
+    // The step arrays are module constants shared across fields and calls.
+    result.push({
+      output: field.name,
+      input: column,
+      steps: structuredClone(steps),
+    });
   }
 
   return result;

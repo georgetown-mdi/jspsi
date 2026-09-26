@@ -8,7 +8,8 @@ ARG VITE_DEPLOYMENT_PROFILE=console
 
 # Base pinned to node:26-alpine's multi-arch index digest (both stages) so builds
 # resolve one exact image; a base bump for a node or musl patch is a deliberate
-# digest update, not an automatic float. See docs/spec/DEPENDENCY_PINS.md.
+# digest update, not an automatic float. See docs/spec/CONTAINER_IMAGES.md; the
+# bump procedure is in docs/spec/DEPENDENCY_PINS.md.
 FROM node:26-alpine@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS builder
 
 WORKDIR /build
@@ -97,9 +98,9 @@ RUN set -eu; \
 # --omit=optional rides beside --omit=dev because npm drops a package flagged
 # `dev` outright and keeps one flagged `devOptional`: optional peer edges reach
 # apps/web's vite -- with rolldown and esbuild under it -- so omitting dev alone
-# still installs the web build toolchain. The only optional edge inside this
-# scope is ssh2's `cpu-features` native addon, which ssh2 declares optional and
-# completes a handshake without.
+# still installs the web build toolchain. The only optional edges inside this
+# scope are ssh2's `cpu-features` native addon and `nan`, both of which ssh2
+# declares optional and completes a handshake without.
 RUN --mount=type=cache,target=/root/.npm \
   rm -rf node_modules \
   && npm ci --omit=dev --omit=optional -w packages/core -w apps/cli

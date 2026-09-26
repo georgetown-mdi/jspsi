@@ -175,6 +175,7 @@ vi.mock("../../src/keyFile", async (importActual) => {
     saveKeyFile: (
       keyFilePath: string,
       file: Parameters<typeof actual.saveKeyFile>[1],
+      options?: Parameters<typeof actual.saveKeyFile>[2],
     ) => {
       mockState.keyFileBeforeRotation[keyFilePath] = actual.loadKeyFile(
         keyFilePath,
@@ -182,7 +183,7 @@ vi.mock("../../src/keyFile", async (importActual) => {
       );
       if (keyFilePath === mockState.unwritableKeyFilePath)
         throw new Error("EACCES: permission denied");
-      actual.saveKeyFile(keyFilePath, file);
+      actual.saveKeyFile(keyFilePath, file, options);
     },
     markRotationInFlight: (
       ...args: Parameters<typeof actual.markRotationInFlight>
@@ -2747,6 +2748,39 @@ test("a run that stops between the handshake and the rotated save leaves its mar
   const partner = loadKeyFile(keyFileB);
   expect(partner?.sharedSecret).not.toBe(TOKEN_A);
   expect(partner?.rotationInFlightSince).toBeUndefined();
+}, 20_000);
+
+test("an exclusive rotated save refuses a key file already at the path and leaves it untouched", async () => {
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  const unrelated = { sharedSecret: TOKEN_B };
+  saveKeyFile(keyFileA, unrelated);
+
+  const [resultA] = await Promise.allSettled(
+    [keyFileA, keyFileB].map((keyFilePath, index) =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: {
+          sharedSecret: TOKEN_A,
+          keyFilePath,
+          saveKeyFileExclusively: true,
+        },
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: `test-${index}`,
+      }),
+    ),
+  );
+  expect(resultA.status).toBe("rejected");
+  expect(
+    ((resultA as PromiseRejectedResult).reason as Error).message,
+  ).toContain("refusing to overwrite");
+  expect(loadKeyFile(keyFileA)).toEqual(unrelated);
 }, 20_000);
 
 test("a marker that cannot be written stops the run before the key exchange, the secret unchanged", async () => {

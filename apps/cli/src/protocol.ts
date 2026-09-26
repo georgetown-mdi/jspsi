@@ -262,6 +262,10 @@ function partnerCertificatePinnedNotice(
 export interface AuthPersist extends Authentication {
   sharedSecret: string;
   keyFilePath: string;
+  /** Save the rotated secret with an exclusive create, refusing a key file
+   * already at {@link keyFilePath}: the online `invite` and `accept` hold no
+   * key file before the handshake, so one found there is not theirs. */
+  saveKeyFileExclusively?: boolean;
 }
 
 /**
@@ -1092,7 +1096,7 @@ async function authenticateRun(params: {
   // saveKeyFile below uses trimmedKeyFilePath, which was captured and
   // trimmed during pre-flight without mutating the caller-supplied
   // auth object.
-  const { keyFilePath: _ignored, ...authParams } = auth;
+  const { keyFilePath: _ignored, saveKeyFileExclusively, ...authParams } = auth;
   // trimmedKeyFilePath is set whenever auth is set; they are populated
   // together in the pre-flight branch above.
   const keyFilePath = build.trimmedKeyFilePath!;
@@ -1164,7 +1168,9 @@ async function authenticateRun(params: {
     // signal handler that reads tokenRotated sees either both pre-save
     // state (false) or both post-save state (true). Maintain this: do
     // not insert an await between saveKeyFile and the assignment.
-    saveKeyFile(keyFilePath, rotatedKeyFile);
+    saveKeyFile(keyFilePath, rotatedKeyFile, {
+      exclusive: saveKeyFileExclusively === true,
+    });
     run.tokenRotated = true;
   } catch (err) {
     // "may already hold": both parties independently derive

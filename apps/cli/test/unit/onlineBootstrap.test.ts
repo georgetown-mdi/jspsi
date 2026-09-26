@@ -2179,6 +2179,21 @@ function runtimeOptionsArg(callArgs: unknown[]): {
   };
 }
 
+test("runOnlineBootstrap saves the first rotated key with an exclusive create", async () => {
+  vi.mocked(runProtocol).mockImplementation((async () => ({})) as never);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alcove-bootstrap-"));
+  try {
+    await runOnlineBootstrap(
+      onlineBootstrapParams(path.join(dir, "alcove.yaml")),
+    ).catch(() => undefined);
+    expect(
+      vi.mocked(runProtocol).mock.lastCall?.[0].auth?.saveKeyFileExclusively,
+    ).toBe(true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runOnlineBootstrap writes the config from the hook even when the exchange then fails", async () => {
   // Handshake succeeds (runProtocol invokes onAuthenticated -> saveConfig), then
   // the data exchange fails. The config must already be on disk so the

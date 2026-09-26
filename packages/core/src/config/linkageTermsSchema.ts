@@ -908,10 +908,10 @@ const TransformStepBoundsSchema = TransformStepBaseSchema
       path: ["params", "length"],
     },
   )
-  // `parse_date` builds a regex from `inputFormat` and assembles its result
-  // from `outputFormat`, both recompiled per row -- an unbounded value
-  // drives an ever-larger regex or per-row output. Both formats are text or
-  // absent, by the type refusal below. The catastrophic-backtracking risk in the
+  // `parse_date` builds a regex from `inputFormat`, compiled once per step
+  // array, and assembles each matched row's result from `outputFormat` -- an
+  // unbounded value drives an ever-larger regex or per-row output. Both formats
+  // are text or absent, by the type refusal below. The catastrophic-backtracking risk in the
   // expanded regex is closed by the linear-time engine (standardization.ts),
   // not by this cap. Full reasoning: docs/spec/CHANNEL_SECURITY.md,
   // "Unbounded transform-parameter rejection". This refine and the empty-format

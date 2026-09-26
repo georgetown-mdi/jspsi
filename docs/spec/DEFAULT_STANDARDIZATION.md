@@ -338,8 +338,11 @@ or one no candidate parses a majority of, and the pipeline then keeps the
 
 Because the inferred format only tells the parser how to read this party's own
 file, and every candidate produces the same `YYYYMMDD` output, two parties
-holding differently formatted dates still derive identical keys. The examples
-below use the `MM/DD/YYYY` default.
+holding differently formatted dates still derive identical keys, provided each
+party's format is inferred correctly. A `DD/MM/YYYY` column whose days are all
+12 or under ties and infers `MM/DD/YYYY`, so every date in it is read with day
+and month swapped and does not match the partner's value for the same date. The
+examples below use the `MM/DD/YYYY` default.
 
 | Input | Result |
 | ----- | ------ |
@@ -394,7 +397,9 @@ steps:
 
 Result: a lowercased address of the shape `local@domain.tld`. The filter is a
 shape test, not a validator: it requires one `@` with a dotted right-hand side
-and no whitespace, and admits addresses no mail system would accept.
+and no whitespace, and admits addresses no mail system would accept. The
+engine's `\s` does not match a vertical tab (U+000B), so an address holding one
+passes the filter.
 
 `remove_non_ascii` precedes the filter, so a non-ASCII character in an address
 is deleted rather than causing the value to be dropped -- an internationalized

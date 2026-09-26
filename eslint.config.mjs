@@ -539,12 +539,12 @@ export default tseslint.config(
   },
   {
     // The two chokepoint modules the block above exempts, held to the string
-    // length bound alone: their exemption is from the parse and display bans
-    // (each owns the raw parser one of them names), and a length bound written
-    // in either counts code units like every other bound under
-    // packages/core/src. A block of its own, re-carrying the Displayable entries
-    // the packages-wide block sets for them, because flat config replaces a
-    // rule's whole options across blocks.
+    // length bound and the Displayable composition ban: their exemption is from
+    // the raw-parse, display-sink and root-logger bans (each owns the raw parser
+    // one of them names), and a length bound written in either counts code units
+    // like every other bound under packages/core/src. A block of its own,
+    // re-carrying the Displayable entries the packages-wide block sets for them,
+    // because flat config replaces a rule's whole options across blocks.
     files: [
       "packages/core/src/utils/boundedJson.ts",
       "packages/core/src/sensitiveFile.ts",

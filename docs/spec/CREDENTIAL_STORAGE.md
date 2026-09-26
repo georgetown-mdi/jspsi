@@ -56,12 +56,12 @@ non-following temp create, and the `fsync` ordering below hold for both steps.
 Create-if-absent is what every file written where none should exist takes: a
 signing identity being created for the first time; a key file provisioned from
 an invitation by `exchange --invitation`, or by an offline `invite`, an offline
-`accept`, or a zero-setup `--save`; a configuration those commands and an online
+`accept`, or a zero-setup `--save`; the key file an online `invite` or `accept`
+saves at its first handshake; a configuration those commands and an online
 `invite` or `accept` write fresh; and an `alcove init` config the operator asked
 to create rather than replace. Each of those commands checks the paths before
 it starts, and the create-if-absent write refuses a file that appeared after
-the check the same way. The rename is what a rotating key file (including the
-one an online `invite` or `accept` saves at its first handshake), a regenerated
+the check the same way. The rename is what a rotating key file, a regenerated
 signing identity, a rewritten config, an exchange record, and a receipt take,
 each overwriting by design.
 

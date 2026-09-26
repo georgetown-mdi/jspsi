@@ -41,12 +41,12 @@ const ECDSA_P256_SHA256 = { name: "ECDSA", hash: "SHA-256" } as const;
  * Thrown for any signing-identity or certificate problem: a malformed or
  * unsupported key/certificate, a failed self-signature, an unpinned or
  * mismatched partner fingerprint, or a receipt identity the certificate does not
- * authorize. Extends {@link UsageError} so the CLI classifies it as a
- * configuration/usage problem (exit 64), consistent with how a malformed key
- * file is handled.
+ * authorize. Extends {@link UsageError}, so a local identity failure exits 64;
+ * the signed-receipt step wraps a partner-trust failure in a security-kind
+ * `ReceiptVerificationError` (exit 69) instead.
  */
-// Exit-code mapping and the deferred trust-error split: docs/spec/PROTOCOL.md,
-// Signing identity and certificate pinning.
+// Exit-code mapping: docs/spec/PROTOCOL.md, Signing identity and certificate
+// pinning.
 export class SigningError extends UsageError {
   constructor(message: string) {
     super(message);

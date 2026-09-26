@@ -957,6 +957,7 @@ export async function runOnlineBootstrap(params: {
     sharedSecret: params.sharedSecret,
     expires: params.expires,
     keyFilePath: params.keyPath,
+    saveKeyFileExclusively: true,
   };
 
   // Read the files any `@path` credential ref names, holding the values aside

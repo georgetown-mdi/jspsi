@@ -1648,6 +1648,20 @@ describe("Windows access-list check tiers", () => {
     expect(warnings).toEqual([]);
   });
 
+  test("a listing of deny entries alone is reported unchecked", () => {
+    const { commands, warnings } = runWindowsAclCheck({
+      powershell: aclListing([
+        [OWNER_SID, FULL_CONTROL_RIGHTS, DENY],
+        [GUESTS_SID, READ_RIGHTS, DENY],
+      ]),
+    });
+
+    expect(commands).toEqual(["powershell"]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("could not be checked");
+    expect(warnings[0]).toContain("deny entry");
+  });
+
   test("a deny entry for another principal draws no warning", () => {
     const { commands, warnings } = runWindowsAclCheck({
       powershell: aclListing([

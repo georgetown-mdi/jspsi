@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 // Structural invariants of the Dockerfiles that keep each shipped image's
 // dependency tree frozen to the committed package-lock.json, and keep the
 // runtime layout the CLI's resolution depends on. Each test names the runtime
-// claim it stands in for; docs/spec/DEPENDENCY_PINS.md holds the rationale.
+// claim it stands in for; docs/spec/CONTAINER_IMAGES.md holds the rationale.
 //
 // Two images ship from this repository and both are held to the same
 // invariants: the default `Dockerfile` on node:26-alpine, and `Dockerfile.fips`
@@ -35,7 +35,7 @@ const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
 // The package managers whose installs are frozen by literal per file below. A
 // runtime-stage fetch by some other route -- curl and extract, `rpm` driven
 // directly, or another language's package manager -- is outside what this sees,
-// as docs/spec/DEPENDENCY_PINS.md records.
+// as docs/spec/CONTAINER_IMAGES.md records.
 const OS_PACKAGE_MANAGER = /\b(apk|apt|apt-get|dnf|microdnf|yum|pip|pip3)\b/;
 
 // npm reached as an invocation: its name as a command's leading word, which is
@@ -306,6 +306,14 @@ function analyze(file) {
 // reach and docs/spec/DEPENDENCY_PINS.md records as a limit.
 const EXPECTED_NPMRC_COPY = "COPY .npmrc package.json package-lock.json ./";
 
+// The builder's production install, frozen whole: its workspace scope decides
+// which packages ship as much as its flags do. image_smoke.yaml measures the
+// shipped tree against a resolution it runs with this same command.
+const PRODUCTION_INSTALL =
+  "rm -rf node_modules && npm ci --omit=dev --omit=optional -w packages/core -w apps/cli";
+const SMOKE_SCOPE_STEP =
+  "- name: Measure the image's production node_modules scope";
+
 // The base each image's stages build from, frozen by literal. A tag resolves to
 // whatever the registry serves that day, so a stage on one is a different
 // runtime on every build. Each is the multi-arch index digest, which is the one
@@ -325,7 +333,7 @@ const FIPS_BASE =
 // Each image's whole OS-package surface, frozen by literal the way the .npmrc
 // COPY above is. The npm tree is copied from the builder and resolves nothing,
 // so these installs are the only dependencies an image build fetches from a
-// distribution mirror -- which is the claim docs/spec/DEPENDENCY_PINS.md
+// distribution mirror -- which is the claim docs/spec/CONTAINER_IMAGES.md
 // records, and a claim prose cannot hold: a second package, or a wider spec on
 // one of these lines, ships unreviewed while the sentence still displays as the
 // reviewed set.
@@ -509,9 +517,25 @@ for (const {
       const npmRuns = image.builderRuns.filter((run) => /\bnpm\b/.test(run));
       expect(npmRuns.length).toBeGreaterThan(0);
       const last = normalize(npmRuns[npmRuns.length - 1]);
-      expect(last).toMatch(/\brm -rf node_modules && npm ci\b/);
-      expect(last).toMatch(/\bnpm ci\b[^&|;]*\s--omit=dev(?=\s|$)/);
-      expect(last).toMatch(/\bnpm ci\b[^&|;]*\s--omit=optional(?=\s|$)/);
+      expect(last).toBe(
+        `--mount=type=cache,target=/root/.npm ${PRODUCTION_INSTALL}`,
+      );
+    });
+
+    it("runs the production install the image smoke measures the shipped tree against", () => {
+      const workflow = readRepoFile(".github/workflows/image_smoke.yaml").split(
+        "\n",
+      );
+      const step = workflow.findIndex(
+        (line) => line.trim() === SMOKE_SCOPE_STEP,
+      );
+      expect(step).toBeGreaterThanOrEqual(0);
+      const smokeInstall = workflow
+        .slice(step)
+        .find((line) => /^\s*npm ci\b/.test(line));
+      expect(`rm -rf node_modules && ${normalize(smokeInstall ?? "")}`).toBe(
+        PRODUCTION_INSTALL,
+      );
     });
 
     it("runs no npm in the runtime stage, so the copied tree is what ships", () => {
@@ -1155,6 +1179,31 @@ describe("Dockerfile.fips certificate pins", () => {
     expect(argDefault("AL2023_RELEASEVER")).toMatch(/^2023\.\d+\.\d{8}$/);
   });
 
+  it("fails the build unless the base rootfs is the release snapshot the dnf lines pin", () => {
+    const from = image.instructions.findIndex(
+      ({ inst, rest }) => inst === "FROM" && / AS nodebase$/.test(rest),
+    );
+    expect(from).toBeGreaterThanOrEqual(0);
+    const firstRun = image.instructions
+      .slice(from)
+      .find(({ inst }) => inst === "RUN");
+    const check = normalize(firstRun?.rest ?? "");
+    expect(check).toMatch(/^set -eux;/);
+    expect(check).toContain(
+      `base_release="$(rpm -q --qf '%{VERSION}' system-release)";`,
+    );
+    expect(check).toMatch(
+      /test "\$\{base_release\}" = "\$\{AL2023_RELEASEVER\}"$/,
+    );
+    // Every later stage builds on that one, so the check covers the image.
+    expect(
+      image.instructions
+        .slice(from + 1)
+        .filter(({ inst }) => inst === "FROM")
+        .map(({ rest }) => normalize(rest).split(" ")[0]),
+    ).toEqual(["nodebase", "nodebase"]);
+  });
+
   it("fails the build unless the installed package and the activated module match those pins", () => {
     // The check is what keeps the certificate claim from being prose. Its two
     // halves answer different questions -- which package landed, and which
@@ -1234,7 +1283,7 @@ describe("Dockerfile.fips certificate pins", () => {
 // The pin that decides what the variant's Node runtime is made of. The build's
 // own checksum step compares the tarball against whatever hash the RUN holds,
 // so it cannot notice a committed hash that has drifted from the value
-// docs/spec/DEPENDENCY_PINS.md records as resolved and reviewed. These literals
+// docs/spec/CONTAINER_IMAGES.md records as resolved and reviewed. These literals
 // are what holds it.
 describe("Dockerfile.fips Node runtime pins", () => {
   const image = IMAGES.find(({ file }) => file === "Dockerfile.fips").image;

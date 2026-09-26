@@ -141,7 +141,7 @@ RUN set -eu; \
 # production-only, `npm ci` emptying node_modules only when it is unscoped and
 # reifying in place under the -w scoping here; --omit=optional rides beside
 # --omit=dev because npm keeps a package flagged `devOptional`, which optional
-# peer edges make of apps/web's vite. Measurements, and the one optional edge
+# peer edges make of apps/web's vite. Measurements, and the optional edges
 # inside this scope, are in docs/spec/CONTAINER_IMAGES.md.
 RUN --mount=type=cache,target=/root/.npm \
   rm -rf node_modules \

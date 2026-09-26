@@ -919,6 +919,13 @@ export const LOW_POLLING_FREQUENCY_WARN_MS = 1000;
  */
 export const CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS = 60_000;
 
+// The longest `peer_id`, in UTF-8 bytes: the id that, with a one-byte partner
+// id, makes the longest name the exchange writes -- the retain-mode ack of a
+// timestamped message -- exactly the 255-byte file name limit. A longer id fits
+// no partner.
+/** @internal */
+export const MAX_PEER_ID_BYTES = 211;
+
 const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
   .object({
     ...sharedOptionsFields,
@@ -939,6 +946,17 @@ const FileSyncOptionsSchema: z.ZodType<FileSyncOptions> = z
       "session, causing phantom message detection",
     path: ["peerId"],
   })
+  .refine(
+    (opts) =>
+      opts.peerId === undefined ||
+      new TextEncoder().encode(opts.peerId).length <= MAX_PEER_ID_BYTES,
+    {
+      message:
+        `peer_id must be at most ${MAX_PEER_ID_BYTES} bytes of UTF-8; the ` +
+        "file names built from it would exceed the 255-byte limit",
+      path: ["peerId"],
+    },
+  )
   .refine((opts) => opts.peerId !== "temp", {
     message:
       "peer_id 'temp' is reserved; the lockless rendezvous upload glob " +
