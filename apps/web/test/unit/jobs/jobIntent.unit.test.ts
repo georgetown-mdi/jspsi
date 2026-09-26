@@ -1704,13 +1704,13 @@ describe("the zero-setup arms admit only what their argv can hold", () => {
         }),
       ).success,
     ).toBe(true);
-    // The ceiling is the duration FLAG's, so the exchange mode -- which composes
-    // a configuration document and passes no such flag -- keeps admitting it.
+    // The exchange mode composes a configuration document rather than a flag,
+    // and that document's peer_timeout_ms holds the same ceiling.
     expect(
       jobExchangeIntentSchema.safeParse(
         validIntent({ options: { peerTimeoutMs: overCeilingMs } }),
       ).success,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   test("accepts a whole-second timeout and every other tuning setting", () => {
