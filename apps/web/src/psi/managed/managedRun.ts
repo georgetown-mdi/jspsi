@@ -290,12 +290,13 @@ export function remapLapsedRunFailure(
  * {@link OutboundDisclosureRefusalError} before the data exchange began
  * records `consent`; {@link PartnerNoShowError} before the data exchange began
  * records the benign `missed` outcome ({@link missedRun}). A
- * {@link WebRtcFrameLimitError} records `too-large` on either side of the data
- * exchange boundary: a round past the first refuses after data has moved, and
- * the same files refuse identically at every window. `aborted` then
- * records `cancelled`. A `security`-kind {@link ConnectionError} before the
- * data exchange began records `auth`. Everything else -- including any of
- * these once the data exchange began -- records `transport`.
+ * {@link WebRtcFrameLimitError} records `too-large`, with the refusal's
+ * `setOwner`, on either side of the data exchange boundary: a round past the
+ * first refuses after data has moved, and the same files refuse identically
+ * at every window. `aborted` then records `cancelled`. A `security`-kind
+ * {@link ConnectionError} before the data exchange began records `auth`.
+ * Everything else -- including any of these once the data exchange began --
+ * records `transport`.
  *
  * `terms-shortfall`, `consent`, `auth`, and `missed` require
  * `!dataExchangeStarted`: each tells the operator nothing left this device.
@@ -324,7 +325,10 @@ export function rerunFailureLastRun(
   if (error instanceof PartnerNoShowError && !dataExchangeStarted)
     return missedRun(at);
   if (error instanceof WebRtcFrameLimitError)
-    return failedRun(at, "failed", "too-large");
+    return {
+      ...failedRun(at, "failed", "too-large"),
+      tooLargeSetOwner: error.setOwner,
+    };
   if (aborted) return failedRun(at, "failed", "cancelled");
   if (
     error instanceof ConnectionError &&

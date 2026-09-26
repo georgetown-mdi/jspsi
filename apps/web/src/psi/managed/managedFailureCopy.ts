@@ -21,7 +21,10 @@
 
 import { MAX_WEBRTC_FRAME_BYTES } from "@alcove/core";
 
-import type { ManagedExchangeSchedule } from "./managedExchangeRecord";
+import type {
+  ManagedExchangeSchedule,
+  TooLargeSetOwner,
+} from "./managedExchangeRecord";
 
 /**
  * The consecutive-miss count at which a surface escalates from naming the last
@@ -91,11 +94,40 @@ export const WEBRTC_MESSAGE_BOUND_LABEL = `${(
   (1024 * 1024)
 ).toString()} MiB`;
 
-/** The too-large tier's remedy, in the words the next-visit alert and the
- * between-visit notification both state it in. */
+/** The too-large tier's remedy for a record that does not say whose set was
+ * over the bound, in the words the next-visit alert and the between-visit
+ * notification both state it in. */
 export const TOO_LARGE_REMEDY =
   "Split the input into smaller files and set up one exchange for each; if " +
   "the set was your partner's, ask them to split theirs.";
+
+/** The title over a too-large failure that names whose set it was, shared by a
+ * managed run's live refusal and the record read back. */
+export const TOO_LARGE_FAILURE_TITLE_BY_OWNER: Record<
+  TooLargeSetOwner,
+  string
+> = {
+  local: "Your file is too large for a browser exchange",
+  partner: "Your partner's file is too large for a browser exchange",
+};
+
+/** Whose values the set over the bound was built from, in the words the
+ * next-visit alert and the between-visit notification both state it in. */
+export const TOO_LARGE_SET_SOURCE_BY_OWNER: Record<TooLargeSetOwner, string> = {
+  local: "the set of values built from your input file",
+  partner: "the set of values built from your partner's input file",
+};
+
+/** The one remedy a too-large failure that names whose set it was takes, in
+ * the words the next-visit alert and the between-visit notification both state
+ * it in. */
+export const TOO_LARGE_REMEDY_BY_OWNER: Record<TooLargeSetOwner, string> = {
+  local:
+    "Split your input into smaller files and set up one exchange for each.",
+  partner:
+    "Ask your partner to split their input into smaller files, and set up " +
+    "one exchange with them for each.",
+};
 
 /** The title over the interrupted-rotation failure tier. */
 export const PARTIAL_ROTATION_FAILURE_TITLE =

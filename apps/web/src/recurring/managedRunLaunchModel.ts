@@ -19,7 +19,10 @@ import {
   SINGLE_COLUMN_DELIMITER_REMEDY,
   TERMS_SHORTFALL_FAILURE_TITLE,
   TOO_LARGE_FAILURE_TITLE,
+  TOO_LARGE_FAILURE_TITLE_BY_OWNER,
   TOO_LARGE_REMEDY,
+  TOO_LARGE_REMEDY_BY_OWNER,
+  TOO_LARGE_SET_SOURCE_BY_OWNER,
   UNEXPLAINED_FAILURE_TITLE,
   WEBRTC_MESSAGE_BOUND_LABEL,
 } from "@psi/managed/managedFailureCopy";
@@ -37,7 +40,10 @@ import { canReinviteFromRecord } from "@psi/managed/managedReinvite";
 
 import { dateTimeLabel } from "@psi/formatting";
 
-import type { ManagedExchangeRecord } from "@psi/managed/managedExchangeRecord";
+import type {
+  ManagedExchangeRecord,
+  TooLargeSetOwner,
+} from "@psi/managed/managedExchangeRecord";
 import type { ManagedFailureTier } from "@psi/managed/managedFailureTiers";
 import type { ManagedLocalState } from "@psi/managed/managedLocalState";
 
@@ -327,37 +333,53 @@ const CONSENT_FAILURE: ManagedRunFailureAlert = {
   recovery: "reconfirm",
 };
 
+const TOO_LARGE_RETRY_NOTE =
+  "Running it again with the same files stops the same way - this is not a " +
+  "connection problem.";
+
 /** The benign too-large state read back from a record: a set the last run had
  * to send was over the bound one WebRTC message holds, so the run refused to
  * send it. The record holds no count, so this copy states the bound and not
  * the set's size; a live launch shows the refusal's own message instead
  * ({@link tooLargeFailure}). Not the retry state -- the same files refuse
  * identically -- and it claims nothing about earlier rounds, since a round
- * past the first refuses after data has moved. */
-const TOO_LARGE_FAILURE: ManagedRunFailureAlert = {
-  kind: "too-large",
-  title: TOO_LARGE_FAILURE_TITLE,
-  message:
-    "The last run stopped because a set of values it had to send was over " +
-    `the ${WEBRTC_MESSAGE_BOUND_LABEL} one WebRTC message can hold, so that ` +
-    "set was not sent. Running it again with the same files stops the same " +
-    "way - this is not a connection problem. " +
-    TOO_LARGE_REMEDY,
-  recovery: "split",
-};
+ * past the first refuses after data has moved. The record's
+ * `tooLargeSetOwner` names whose set it was and so the one remedy; a record
+ * without it states both. */
+function recordedTooLargeFailure(
+  owner: TooLargeSetOwner | undefined,
+): ManagedRunFailureAlert {
+  const bound = `the ${WEBRTC_MESSAGE_BOUND_LABEL} one WebRTC message can hold`;
+  if (owner === undefined)
+    return {
+      kind: "too-large",
+      title: TOO_LARGE_FAILURE_TITLE,
+      message:
+        `The last run stopped because a set of values it had to send was ` +
+        `over ${bound}, so that set was not sent. ${TOO_LARGE_RETRY_NOTE} ` +
+        TOO_LARGE_REMEDY,
+      recovery: "split",
+    };
+  return {
+    kind: "too-large",
+    title: TOO_LARGE_FAILURE_TITLE_BY_OWNER[owner],
+    message:
+      `The last run stopped because ${TOO_LARGE_SET_SOURCE_BY_OWNER[owner]} ` +
+      `was over ${bound}, so it was not sent. ${TOO_LARGE_RETRY_NOTE} ` +
+      TOO_LARGE_REMEDY_BY_OWNER[owner],
+    recovery: "split",
+  };
+}
 
 /** The too-large state for THIS run's refusal: the refusal's message states the
  * set's size, the bound, what was sent and whose input to split, or that the
  * first-round count could not be taken and why, so it is the state's whole
  * message. The titles are the one-shot seats' own for the same refusal. */
 function tooLargeFailure(error: unknown): ManagedRunFailureAlert {
-  if (!(error instanceof WebRtcFrameLimitError)) return TOO_LARGE_FAILURE;
+  if (!(error instanceof WebRtcFrameLimitError))
+    return recordedTooLargeFailure(undefined);
   return {
-    ...TOO_LARGE_FAILURE,
-    title:
-      error.setOwner === "local"
-        ? "Your file is too large for a browser exchange"
-        : "Your partner's file is too large for a browser exchange",
+    ...recordedTooLargeFailure(error.setOwner),
     message: sanitizeErrorForDisplay(error),
   };
 }
@@ -485,7 +507,7 @@ export function managedRunTierFailure(
     case "consent":
       return CONSENT_FAILURE;
     case "too-large":
-      return TOO_LARGE_FAILURE;
+      return recordedTooLargeFailure(record.lastRun?.tooLargeSetOwner);
     case "handed-off":
       return HANDED_OFF_FAILURE;
     case "custody-unreadable":

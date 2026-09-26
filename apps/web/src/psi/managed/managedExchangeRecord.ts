@@ -240,6 +240,10 @@ export type ManagedExchangeFailureKind =
   | "too-large"
   | "cancelled";
 
+/** Whose set a `"too-large"` refusal found over the bound: `"local"` for this
+ * party's own, `"partner"` for the partner's set a run had to send back. */
+export type TooLargeSetOwner = "local" | "partner";
+
 /** Run bookkeeping the backup state and the desync UX read. Every field is a
  * timestamp, a closed enum, or a marker present only as `true` -- no free-text
  * field, so the record structurally cannot hold a match result, a count, or a
@@ -257,6 +261,10 @@ export interface ManagedExchangeLastRun {
    * between-visit notice state the delimiter remedy where it is set and the
    * agreed-keys copy where it is absent. */
   singleColumnInput?: true;
+  /** Present only on a `"too-large"` failure: whose set was over the bound.
+   * The next visit's summary and the between-visit notice name the one remedy
+   * that side takes, and both remedies where it is absent. */
+  tooLargeSetOwner?: TooLargeSetOwner;
 }
 
 /** The failure kinds that raise a standing condition: a rotation this device
@@ -463,6 +471,7 @@ export const lastRunSchema: ZodType<ManagedExchangeLastRun> = z.object({
     ])
     .optional(),
   singleColumnInput: z.literal(true).optional(),
+  tooLargeSetOwner: z.enum(["local", "partner"]).optional(),
 });
 
 /** The canonical validator for the operator's answer. Strict, so a member a

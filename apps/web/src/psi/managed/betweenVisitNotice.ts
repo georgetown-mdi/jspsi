@@ -33,7 +33,10 @@ import {
   SINGLE_COLUMN_DELIMITER_REMEDY,
   TERMS_SHORTFALL_FAILURE_TITLE,
   TOO_LARGE_FAILURE_TITLE,
+  TOO_LARGE_FAILURE_TITLE_BY_OWNER,
   TOO_LARGE_REMEDY,
+  TOO_LARGE_REMEDY_BY_OWNER,
+  TOO_LARGE_SET_SOURCE_BY_OWNER,
   UNEXPLAINED_FAILURE_TITLE,
   WEBRTC_MESSAGE_BOUND_LABEL,
   repeatedMissCoordination,
@@ -219,7 +222,8 @@ function partialRotationNotice(
  * The reading rides the tag as well as the body: the two readings are different
  * standing states with different remedies, so a shortfall that becomes a
  * one-column reading says so rather than being suppressed as the state already
- * reported. */
+ * reported. The too-large notice splits the same way on the stamp's own
+ * `tooLargeSetOwner`, which names whose input to split. */
 function failureNotice(
   record: ManagedExchangeRecord,
   local: ManagedLocalState | undefined,
@@ -271,16 +275,29 @@ function failureNotice(
         `partner.`,
       tag: noticeTag(record.id, "consent"),
     };
-  if (tier === "too-large")
+  if (tier === "too-large") {
+    const owner = record.lastRun?.tooLargeSetOwner;
+    const overBound =
+      `was over the ${WEBRTC_MESSAGE_BOUND_LABEL} one WebRTC message can ` +
+      `hold, and every later window stops the same way.`;
     return {
       kind: "too-large",
-      title: NOTICE_TITLES["too-large"],
+      title:
+        owner === undefined
+          ? NOTICE_TITLES["too-large"]
+          : TOO_LARGE_FAILURE_TITLE_BY_OWNER[owner],
       body:
-        `${name} stopped because a set of values it had to send was over the ` +
-        `${WEBRTC_MESSAGE_BOUND_LABEL} one WebRTC message can hold, and every ` +
-        `later window stops the same way. ${TOO_LARGE_REMEDY}`,
-      tag: noticeTag(record.id, "too-large"),
+        owner === undefined
+          ? `${name} stopped because a set of values it had to send ` +
+            `${overBound} ${TOO_LARGE_REMEDY}`
+          : `${name} stopped because ${TOO_LARGE_SET_SOURCE_BY_OWNER[owner]} ` +
+            `${overBound} ${TOO_LARGE_REMEDY_BY_OWNER[owner]}`,
+      tag: noticeTag(
+        record.id,
+        owner === undefined ? "too-large" : `too-large:${owner}`,
+      ),
     };
+  }
   return {
     kind: "unexplained",
     title: NOTICE_TITLES.unexplained,

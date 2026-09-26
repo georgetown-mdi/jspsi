@@ -796,8 +796,9 @@ was the partner's, for the partner to split theirs.
 - **On the run screen**, an attended run shows the refusal's own message: the
   set's size, the bound, whose input it was, and what to do.
 - **At the next visit and in the between-visit notification**, the bookkeeping
-  holds the state but no size (it holds no counts), so they state the bound
-  and the remedy.
+  holds the state and whose set it was but no size (it holds no counts), so
+  they state the bound and the one remedy that applies: split your input, or
+  ask the partner to split theirs.
 
 #### An input that has not changed since the last run
 
