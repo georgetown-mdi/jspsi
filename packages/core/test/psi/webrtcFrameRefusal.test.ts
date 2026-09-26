@@ -485,3 +485,37 @@ test("the first-round check reports no row, so each row's warning comes once, fr
   expect(lines[0]).toMatch(/^row 0, key "names": .*contributes no value/);
   expect(lines[1]).toMatch(/^row 1, key "names": cross-product produced 21 /);
 });
+
+test("the first-round check refuses, with the failure as its cause, when the receiver-role count throws", () => {
+  const rowCount = 50;
+  const prepared = preparedWith(
+    Array.from({ length: rowCount }, (_unused, i) => letters(i)),
+  );
+  // The field cache holds each row once read, so the receiver-role pass fails
+  // at its collection of the key's values instead of at a row.
+  const failure = new RangeError("Invalid array length");
+  const arrayFrom = Array.from.bind(Array);
+  let keyPasses = 0;
+  vi.spyOn(Array, "from").mockImplementation(((
+    source: Iterable<unknown> | ArrayLike<unknown>,
+    ...rest: Array<unknown>
+  ) => {
+    if (source instanceof StandardizedKeyIterable && ++keyPasses === 2)
+      throw failure;
+    return (arrayFrom as (...args: Array<unknown>) => Array<unknown>)(
+      source,
+      ...rest,
+    );
+  }) as typeof Array.from);
+  let refusal: unknown;
+  try {
+    assertFirstRoundFitsWebRtcFrame(prepared, 100);
+  } catch (err) {
+    refusal = err;
+  }
+  expect(keyPasses).toBe(2);
+  expect(refusal).toBeInstanceOf(WebRtcFrameLimitError);
+  expect((refusal as WebRtcFrameLimitError).setOwner).toBe("local");
+  expect((refusal as Error).message).toBe(ROUND_ONE_SET_UNCOUNTED_MESSAGE);
+  expect((refusal as Error).cause).toBe(failure);
+});
