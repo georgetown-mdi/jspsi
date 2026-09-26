@@ -17,7 +17,8 @@
 #
 # LIVE, driven 2026-09-03 on the relay box: image build, uid probe, certificate
 # deploy, config render, and the 443 bind were all exercised from this unit's
-# docker run. The Quadlet path (alcove-relay.container) remains undriven.
+# docker run. The Quadlet path (alcove-relay.container) was driven 2026-09-24
+# on a stand-in Fedora 42 host, not an instance.
 
 [Unit]
 Description=alcove WebRTC relay (coturn, TURNS on 443/tcp)

@@ -46,9 +46,11 @@ name, allocations were driven with `turnutils_uclient`, an allocation toward an
 internal address was confirmed refused, and `verify.sh` finished 6 pass / 0
 fail / 0 unclear from `install.sh`'s own end-of-install run.
 
-**The podman/Quadlet path remains undriven** -- everything measured above went
-through `alcove-relay-docker.service`, and nothing has exercised
-`alcove-relay.container` or its generator. `verify.sh` has also not
+**The podman/Quadlet path has been driven on a stand-in host, not an
+instance.** On 2026-09-24 `install.sh` installed the relay under
+`alcove-relay.container` in a throwaway Fedora 42 container running systemd
+and podman 5.8, and `verify.sh`'s probes passed there as they did on the docker
+host beside it, the self-signed test certificate aside. `verify.sh` has not
 exercised the data leg to a responsive peer (`ALCOVE_RELAY_VERIFY_PEER`):
 its allocation and refusal probes were driven, not exchange traffic. A
 relayed exchange has been driven through this relay separately; what that
@@ -143,6 +145,7 @@ or the Dockerfile and it converges.
 | `install.sh` | The whole install, idempotent |
 | `relay_table.py` | The one write path to the secrets table: register, revoke, and sweep, each one SQLite transaction, as the relay image's account. Everything below that touches the table calls it. See [Per-exchange keys](#per-exchange-keys) |
 | `register-exchange.sh`, `revoke-exchange.sh`, `exchange-keys.sh` | Add and remove one exchange's relay key, through `relay_table.py`; the third is the shared part both source, and `sweep-exchanges.sh` and `verify.sh` too. See [Per-exchange keys](#per-exchange-keys) |
+| `import-legacy-mapping.sh` | Carries the text mapping an install from before the secrets table's own mapping kept into the table, and deletes it once the table reads back every row; `install.sh` runs it. See [Per-exchange keys](#per-exchange-keys), The mapping |
 | `sweep-exchanges.sh`, `alcove-relay-sweep.service`, `.timer` | Revokes every exchange whose registration has lapsed, hourly. See [Per-exchange keys](#per-exchange-keys), Lifetime |
 | `registrar.py`, `alcove-relay-registrar.service` | The optional HTTPS registrar, which registers and revokes through `relay_table.py` for a caller holding the relay-owner token. See [The registrar](#the-registrar) |
 | `verify.sh` | Drives a real TURNS handshake, a real allocation, a probe that an allocation toward an internal address is refused, and the secrets table: two keys registered for the run both allocate, an unregistered key and a credential keyed with a key's decoded bytes are refused, and a revoked key's new allocation is refused. Where the host holds a registrar token it also asks the registrar: calls with no token or a wrong one are answered 401 and write nothing, and a registration and a revocation with the token reach the mapping and the table; with no token it says it skipped the registrar. Its exchanges are under the ids `alcove-verify-a`, `-b`, and `-registrar`, a prefix every other caller is refused. On exit it revokes them, each in one transaction, and warns naming the exchange id, never the key, for any it could not revoke. Passes only on an observed refusal: a question that could not be asked reports UNCLEAR and fails. Connects to the realm's name by default; `ALCOVE_RELAY_VERIFY_CONNECT` overrides the TCP connect target while the realm still names the SNI and TURN realm -- `install.sh` sets it to the instance's private address for the end-of-install run, because EC2 does not hairpin an instance's traffic back to its own Elastic IP, while the daily timer stays on the public name so it fails if that path breaks. `ALCOVE_RELAY_VERIFY_WAIT` sets how many seconds it retries a bare TCP connect before its first probe, waiting for a just-(re)started listener to come up; 30 by default |
@@ -231,8 +234,24 @@ revoke-exchange.sh <exchange-id>
   or sweep is one SQLite transaction across the row and the mapping: it lands
   whole or not at all, and its result is the write's own, with nothing read
   back. `install.sh` carries a mapping an earlier install kept in
-  `/etc/alcove-relay/exchange-keys` into the table once, and moves that file
-  to `exchange-keys.imported`.
+  `/etc/alcove-relay/exchange-keys` into the table once, through
+  `import-legacy-mapping.sh`, and deletes that file, which holds every key in
+  plaintext, once the table, read back, accounts for each of its rows: each
+  exchange carried in reads back, no key in the file is listed without an
+  exchange mapping it, or mapped without being listed, and a key the table
+  maps is mapped to the row's own exchange. If the import fails, the file is
+  kept unchanged and `install.sh` stops. If the import lands but the table
+  does not account for a row, the file is moved to `exchange-keys.imported`
+  and `install.sh` warns, naming the exchange ids; remove a key listed with
+  no exchange mapping it with `forget-key`, delete from
+  `exchange-keys.imported` a row whose key another exchange holds (a key maps
+  to one exchange only; register that exchange again with a key of its own
+  if it is still in use), and run `install.sh` again. A file is imported
+  once only: every later run checks `exchange-keys.imported` the same way,
+  never imports it again, and deletes it once the table accounts for it, so
+  an exchange revoked or swept since stays revoked, and a row removed from
+  the file is not carried in. Deleting either file deletes
+  `exchange-keys.lock` beside it too; a kept or moved file keeps the lock.
 - **How they reach the table.** `relay_table.py`, on the host's own `python3`
   and its `sqlite3` module, opens `/var/lib/alcove-relay/turndb` as the relay
   image's account -- a script run as root drops to the account that owns the
@@ -247,7 +266,7 @@ revoke-exchange.sh <exchange-id>
   the import skips -- a verify run that died before cleaning up -- gets no
   mapping, so if an earlier install already wrote its key into the table
   that key stays until it is removed with `forget-key`, the key taken from
-  `exchange-keys.imported`.
+  the legacy file, which `install.sh` keeps until then.
 - **A replaced `turndb` needs a restart.** coturn holds the file open. A
   `turndb` deleted or replaced under a running coturn -- by hand, or a restore
   from backup -- leaves the server reading the file it opened while every write
@@ -359,6 +378,25 @@ install docker` installs Docker Engine. That is measured on the arm64 AMI
 [`aws/provision.md`](aws/provision.md) prescribes, and it is why the docker path
 is a tracked unit rather than a documented equivalence. `install.sh` still
 prefers podman wherever the distribution carries it.
+
+**Under podman, a container's command line reaches the journal.** Each
+container lifecycle event (create, start, died, remove, and the rest) is a
+journal entry that journald stamps with podman's command line, and where
+`containers.conf` sets `log_driver = "journald"`, Fedora's default, conmon sends
+the container's output there too. Measured on Fedora 42: a key on a `podman
+run` command line reached the journal on every run, and a credential on
+`turnutils_uclient`'s did the same. Nothing here puts a key on a container's
+command line -- `relay_table.py` runs no container:
+`scripts/relay-exchange-keys.test.mjs` checks that its import statements name
+exactly the modules it uses today, that it imports `os` only by that name and
+takes no name from it with `from os import`, and that it holds no `getattr` on
+`os`, `__import__`, or `importlib`, though not a name reached some other way
+off `os` or code a string builds and `eval` runs -- and `verify.sh` passes
+podman's global `--events-backend=none` to every `turnutils_uclient` run. A run
+by hand whose command line or output carries a key or a credential takes the
+same flags, `podman --events-backend=none run --log-driver=none ...`, which
+were measured to leave none in the journal while the caller still reads the
+output. docker journaled neither.
 
 The two unit files carry the same image, the same read-only mounts, and the same
 container flags. `alcove-relay-docker.service`'s header holds the

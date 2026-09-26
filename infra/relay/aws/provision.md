@@ -14,9 +14,10 @@ confirmed, and `verify.sh` finished 6 pass / 0 fail / 0 unclear from
 `install.sh`'s own end-of-install run. Two things an earlier attempt found are
 fixed in what is below: the clone took the repository's default branch, which
 predates `infra/relay` and so had nothing to install, and the install asked for
-a podman package AL2023 does not publish. The podman/Quadlet path remains
-undriven, and the data leg to a responsive peer plus a real relayed exchange
-between two parties have not been exercised.
+a podman package AL2023 does not publish. The podman/Quadlet path has been
+driven only on a stand-in Fedora host (the relay's README, Provenance), and
+the data leg to a responsive peer plus a real relayed exchange between two
+parties have not been exercised.
 
 ## The instance
 
