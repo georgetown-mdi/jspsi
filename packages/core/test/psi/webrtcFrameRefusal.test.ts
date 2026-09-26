@@ -389,7 +389,8 @@ test("the first-round check refuses, with the failure as its cause, when the cou
   } catch (err) {
     refusal = err;
   }
-  expect(refusal).toBeInstanceOf(UsageError);
+  expect(refusal).toBeInstanceOf(WebRtcFrameLimitError);
+  expect((refusal as WebRtcFrameLimitError).setOwner).toBe("local");
   expect((refusal as Error).message).toBe(ROUND_ONE_SET_UNCOUNTED_MESSAGE);
   expect((refusal as Error).cause).toBe(failure);
 });

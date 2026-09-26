@@ -1401,17 +1401,20 @@ export function prepareForExchange(
  * exchange, once {@link prepareForExchange} has returned and before the
  * connection opens; any other channel has no such bound.
  *
- * It refuses only on a certain count: the values the first cascade or
- * count-only round sends under the rule that drops a value several records
- * hold ({@link droppingRoundSetSize}), the fewest that round sends whatever
- * cardinality the terms resolve, taken in both PSI roles, since which one this
- * party plays is not yet known. Every later round, and a frame this bound
- * cannot size from a count, is checked on the frame the round builds
- * (`PSIParticipant`). Where the round reads one candidate per record, a
- * record holding a candidate set raises the round's own fan-out refusal
- * rather than this one. A single-pass exchange is not checked here: its
- * dataset ceiling holds every frame it sends under the bound
- * (docs/spec/PROTOCOL.md, "The single-pass dataset ceiling").
+ * It counts the values the first cascade or count-only round sends under the
+ * rule that drops a value several records hold ({@link droppingRoundSetSize}),
+ * the fewest that round sends whatever cardinality the terms resolve, taken in
+ * both PSI roles, since which one this party plays is not yet known. It
+ * refuses on a count over the bound in both roles, and on any failure to
+ * count, with the failure as the refusal's cause. A {@link UsageError} the
+ * round would raise in one role is left to the round when the other role
+ * fits. Every later round, and a frame this bound cannot size from a count,
+ * is checked on the frame the round builds (`PSIParticipant`). Where the
+ * round reads one candidate per record, a record holding a candidate set
+ * raises the round's own fan-out refusal rather than this one. A single-pass
+ * exchange is not checked here: its dataset ceiling holds every frame it
+ * sends under the bound (docs/spec/PROTOCOL.md, "The single-pass dataset
+ * ceiling").
  *
  * @param maxFrameBytes - The receiver's bound; lowered only by tests.
  */
@@ -1462,7 +1465,11 @@ export function assertFirstRoundFitsWebRtcFrame(
       );
     } catch (failure) {
       if (failure instanceof UsageError) return failure;
-      throw new UsageError(ROUND_ONE_SET_UNCOUNTED_MESSAGE, { cause: failure });
+      throw new WebRtcFrameLimitError(
+        ROUND_ONE_SET_UNCOUNTED_MESSAGE,
+        "local",
+        { cause: failure },
+      );
     }
   };
   const refusedInRole = (size: number | UsageError): boolean =>

@@ -194,7 +194,9 @@ export class OperatorConfigError extends UsageError {
  * Not an {@link OperatorConfigError}: the reply's size is set by the partner's
  * set, and that family's messages hold only this party's own configuration.
  * Holds `alcoveRecoveryHintEmitted`: a retry refuses identically, so the CLI's
- * generic retry advisory is suppressed.
+ * generic retry advisory is suppressed. The start-of-exchange check raises it
+ * too, with `setOwner` `"local"` and the failure as its `cause`, when it cannot
+ * count this party's first-round set at all.
  */
 export class WebRtcFrameLimitError extends UsageError {
   readonly alcoveRecoveryHintEmitted = true;
@@ -202,8 +204,9 @@ export class WebRtcFrameLimitError extends UsageError {
   constructor(
     message: string,
     readonly setOwner: "local" | "partner",
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "WebRtcFrameLimitError";
   }
 }

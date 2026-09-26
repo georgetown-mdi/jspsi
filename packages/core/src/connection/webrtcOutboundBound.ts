@@ -149,8 +149,7 @@ export function roundOneSetTooLargeMessage(
 export const ROUND_ONE_SET_UNCOUNTED_MESSAGE =
   "This party could not count the values the first linkage key gives it to " +
   "send, so it cannot confirm the set fits one WebRTC message. Nothing was " +
-  "sent. If the input is large, split it into smaller files and run one " +
-  "exchange for each.";
+  `sent. ${SPLIT_OR_FILE_SYNC_REMEDY}`;
 
 /**
  * The refusal a round raises on a set frame it built that the partner's

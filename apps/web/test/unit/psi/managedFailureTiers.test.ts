@@ -1,6 +1,7 @@
 import {
   ConnectionError,
   LinkageTermsUnsatisfiableError,
+  UsageError,
   WebRtcFrameLimitError,
   assertFirstRoundFitsWebRtcFrame,
   generateSharedSecret,
@@ -33,6 +34,7 @@ import {
   remapLapsedRunFailure,
   rerunFailureLastRun,
 } from "@psi/managed/managedRun";
+import { ROUND_ONE_SET_UNCOUNTED_MESSAGE } from "@alcove/core/testing";
 import { prepareManagedRerunExchange } from "@psi/managed/managedPreparedExchange";
 
 import type {
@@ -688,6 +690,36 @@ describe("the too-large tier: a set over the bound one WebRTC message holds", ()
       expect(failure.reportedCause).toBeUndefined();
       expect(managedRunRetryable(failure)).toBe(false);
     }
+  });
+
+  test("a first round the check cannot count records too-large and shows its own message", () => {
+    const uncounted = new WebRtcFrameLimitError(
+      ROUND_ONE_SET_UNCOUNTED_MESSAGE,
+      "local",
+      { cause: new RangeError("Map maximum size exceeded") },
+    );
+    expect(uncounted).toBeInstanceOf(UsageError);
+    expect(
+      rerunFailureLastRun(uncounted, Date.parse(RUN_AT), false, false),
+    ).toEqual({ at: RUN_AT, outcome: "failed", failureKind: "too-large" });
+    const failure = classifyManagedRunFailure(
+      uncounted,
+      {
+        atLaunch: record(),
+        afterRun: record({ lastRun: failed("too-large") }),
+      },
+      undefined,
+      NOW,
+      false,
+    );
+    if (failure.kind === "handed-off")
+      throw new Error("expected the too-large alert");
+    expect(failure.kind).toBe("too-large");
+    expect(failure.message).toContain(ROUND_ONE_SET_UNCOUNTED_MESSAGE);
+    expect(failure.message).toContain("Map maximum size exceeded");
+    expect(failure.message).not.toMatch(/try again|temporary/i);
+    expect(failure.recovery).toBe("split");
+    expect(managedRunRetryable(failure)).toBe(false);
   });
 });
 
