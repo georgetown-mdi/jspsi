@@ -347,9 +347,9 @@ const TOO_LARGE_FAILURE: ManagedRunFailureAlert = {
 };
 
 /** The too-large state for THIS run's refusal: the refusal's message states the
- * set's size, the bound, what was sent, and whose input to split, all composed
- * from frame sizes and fixed constants, so it is the state's whole message. The
- * titles are the one-shot seats' own for the same refusal. */
+ * set's size, the bound, what was sent and whose input to split, or that the
+ * first-round count could not be taken and why, so it is the state's whole
+ * message. The titles are the one-shot seats' own for the same refusal. */
 function tooLargeFailure(error: unknown): ManagedRunFailureAlert {
   if (!(error instanceof WebRtcFrameLimitError)) return TOO_LARGE_FAILURE;
   return {
