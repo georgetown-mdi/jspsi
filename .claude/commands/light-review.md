@@ -17,7 +17,7 @@ before proceeding -- it holds the session rules this command's steps assume.
 
 ## Input
 
-    /light-review [--target <ref> ...] [--role <name> --claims <path>] [--owner-cap-raise] [doc-file ...]
+    /light-review [--target <ref> ...] [--role <name> --claims <path>] [doc-file ...]
 
 - `--target <ref>`: optional and repeatable. The ref to review, once per ref.
   With none, the target is the branch `HEAD` resolves to where you are standing,
@@ -26,9 +26,6 @@ before proceeding -- it holds the session rules this command's steps assume.
   else -- stop if the name is anything else. Selects ROLE mode; without it you are in
   LENS mode.
 - `--claims <path>`: the refutation contract for role mode, one claim per line.
-- `--owner-cap-raise`: the owner's word that this round runs past a spent round
-  budget or an ended review sequence (Step 1). Pass it only when the owner said
-  so for this round; never infer it.
 - `[doc-file ...]`: optional paths to documentation relevant to these changes (e.g.
   `docs/spec/FILE_SYNC.md`). These are the remaining tokens in `$ARGUMENTS` after the
   flags above; call this list DOCS. There may be none.
@@ -117,24 +114,18 @@ Also read each target's rounds ledger (`PRIMARY/scratch/review-rounds/<key>.json
 if it exists: its first row's `cap` is that branch's round budget (a first row
 without `cap` predates the field -- treat the budget as unset). When a ledger already
 holds `cap` rows, drop that target and say its round budget is spent -- only the owner
-raises it, and `--owner-cap-raise` is how a raised round runs.
+raises it.
 
-The ledger also ends a sequence that stopped yielding. When this round would be round
-3 or later and the ledger's last row fixed nothing -- every entry in its
-`dispositions` is `limit`, `deferred`, or `narrowed`, or it has none -- the branch's
-review sequence has ended: drop that target and say so, unless `--owner-cap-raise`
-was passed. A branch's first role round is exempt
-(a diff with adversary-reachable surface keeps its role round whatever its size or
-round index). `require-clean-tree-for-review.mjs` refuses the
-Step 2 call for such a round, reading the same ledger; its refusal states the
-size-keyed recommendation below for that branch.
+When you ask the owner to raise a spent budget, state the default recommendations
+below with the ask. The size thresholds are measured -- the quartiles of branch diff
+size over the rounds of 2026-08-31 to 2026-09-25 -- and re-fit at each retro, so quote
+them as measured, not as constants. All are advisory: nothing enforces them, and the
+owner's word settles the round.
 
-When you ask the owner to raise a spent budget or restart an ended sequence, state the
-size-keyed default recommendation with the ask. The two thresholds are measured -- the
-quartiles of branch diff size over the rounds of 2026-08-31 to 2026-09-25 -- and re-fit
-at each retro, so quote them as measured, not as constants. Both are advisory:
-nothing enforces them, and the owner's word settles the round.
-
+- From round 3 on, a round after one that fixed nothing -- every entry in the last
+  ledger row's `dispositions` is `limit`, `deferred`, or `narrowed`, or it has none --
+  is the session's default recommendation to stop, stated when it asks for a cap
+  raise. A branch's first role round is exempt.
 - A diff of 482 changed lines or fewer: recommend a role round only when the lens
   round fixed a major, or the owner names the surface. A diff with adversary-reachable
   surface keeps its role round whatever its size.
@@ -167,8 +158,7 @@ message so they run concurrently. Each call sets `scriptPath` to the ABSOLUTE
 path `<PRIMARY>/.claude/scripts/light-review-workflow.mjs`, with PRIMARY from Step 1 --
 the bare relative `.claude/scripts/light-review-workflow.mjs` fails the call with
 "script file not found" -- and `args` to
-`{"targetRef": "<ref>", "worktreePath": <TREE, or null when no tree holds the ref>, "docs": [<the DOCS list, possibly empty>], "role": <the role name or null>, "claims": [<CLAIMS, or an empty list in lens mode>]}`,
-adding `"ownerCapRaise": true` only when `--owner-cap-raise` was passed.
+`{"targetRef": "<ref>", "worktreePath": <TREE, or null when no tree holds the ref>, "docs": [<the DOCS list, possibly empty>], "role": <the role name or null>, "claims": [<CLAIMS, or an empty list in lens mode>]}`.
 
 One call reviews one ref. There is no batched multi-ref call to build: the fan-out
 is several Workflow calls, which is the only shape available -- a subagent cannot
@@ -182,9 +172,8 @@ is the point; a prompt-side "return only JSON" instruction does not hold here.
 
 Each target must be committed before you invoke it: the round reviews the ref, and
 `require-clean-tree-for-review.mjs` blocks the call when the tree holding any target
-is dirty, when a round against that same branch is already in flight (the
-lock Step 3 releases), and when the branch's ledger has ended its review sequence
-(Step 1).
+is dirty -- and when a round against that same branch is already in flight, which is
+the lock Step 3 releases.
 
 The script returns `{reviewerCount, simplerShapeVotes, clusters}` in lens mode and
 `{claims, findings, gate, summary}` in role mode; Step 3 turns whichever came back into
