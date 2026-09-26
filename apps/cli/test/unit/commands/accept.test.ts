@@ -6107,7 +6107,7 @@ async function runOfflineAcceptCapturingStdio(params: {
 /** The line a declined confirmation leaves the operator with. */
 const DECLINE_LINE = "invitation declined; no files were written";
 
-describe("handler: an online acceptance names the directories its invitation supplies", () => {
+describe("handler: an acceptance names the directories its invitation supplies", () => {
   // The inviter's pair; this party reads where the inviter writes and writes
   // where the inviter reads.
   const inviterIn = platformAbsolutePath("/srv/exchange/inviter-in");
@@ -6147,9 +6147,12 @@ describe("handler: an online acceptance names the directories its invitation sup
       expect(atPrompt).toBeDefined();
       const heading = atPrompt!.indexOf(directoriesHeading);
       expect(heading).toBeGreaterThanOrEqual(0);
-      expect(atPrompt!.slice(heading + 1, heading + 3)).toEqual([
+      expect(atPrompt!.slice(heading + 1, heading + 4)).toEqual([
         inboundLine,
         outboundLine,
+        "  Confirming runs the exchange in these directories, and your " +
+          "configuration keeps them for later exchanges. To use your own " +
+          "directories, decline and run again with --outbound-path.",
       ]);
       expect(heading).toBeLessThan(atPrompt!.indexOf(SURFACE_HEADING));
       // Repeated as the last lines before the question, so the paths are on
@@ -6158,6 +6161,46 @@ describe("handler: an online acceptance names the directories its invitation sup
       expect(promptConfirmMock).toHaveBeenCalledWith(
         "Accept this invitation and run the exchange now, in the directories " +
           "named above?",
+      );
+    } finally {
+      fs.rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: an offline acceptance names the directories its configuration will record", async () => {
+    const fixture = offlineAcceptFixture();
+    try {
+      const encoded = await encodeInvitation(
+        splitEndpointToken(FUTURE(), splitEndpoint),
+      );
+      let atPrompt: Array<string> | undefined;
+      await runOfflineAcceptCapturingStdio({
+        encoded,
+        fixture,
+        onPrompt: (stderrWrites) => {
+          atPrompt = stderrLines([...stderrWrites]);
+          return false;
+        },
+      });
+      expect(atPrompt).toBeDefined();
+      expect(atPrompt).not.toContain(directoriesHeading);
+      const heading = atPrompt!.indexOf(
+        "The configuration this acceptance writes uses the two directories " +
+          "this invitation names:",
+      );
+      expect(heading).toBeGreaterThanOrEqual(0);
+      expect(atPrompt!.slice(heading + 1, heading + 4)).toEqual([
+        inboundLine,
+        outboundLine,
+        "  Confirming records these directories in your configuration, where " +
+          "'alcove exchange' reads and writes the exchange files. To use your " +
+          "own directories, edit the configuration's connection block before " +
+          "running 'alcove exchange'.",
+      ]);
+      expect(heading).toBeLessThan(atPrompt!.indexOf(SURFACE_HEADING));
+      expect(atPrompt!.slice(-2)).toEqual([inboundLine, outboundLine]);
+      expect(promptConfirmMock).toHaveBeenCalledWith(
+        "Accept this invitation and write configuration?",
       );
     } finally {
       fs.rmSync(fixture.dir, { recursive: true, force: true });

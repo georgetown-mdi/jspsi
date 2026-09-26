@@ -97,11 +97,13 @@ import {
   applyEndpointSplitDirectories,
   buildDataSpec,
   connectionFromEndpoint,
+  endpointDirectoriesOf,
   loadInputRows,
   logOnlineBootstrapOutcome,
   looksLikeUrl,
   prepareForOnlineExchange,
   runOnlineBootstrap,
+  type EndpointDirectories,
   type ResolvedDataSpec,
 } from "../onlineBootstrap";
 
@@ -268,9 +270,9 @@ type AcceptReady = {
       /**
        * The inbound and outbound directories the invitation's endpoint put on
        * `connection` in place of the URL's path, named on the consent surface
-       * because the run uses them and the configuration records them.
+       * because the run uses them and the configuration keeps them.
        */
-      endpointDirectories?: { inboundPath: string; outboundPath: string };
+      endpointDirectories?: EndpointDirectories;
       dataSpec: ResolvedDataSpec;
       prepared: PreparedExchange;
     }
@@ -301,6 +303,12 @@ type AcceptReady = {
       token: InvitationToken;
       connection: ConnectionConfig;
       seeded: boolean;
+      /**
+       * The split directory pair the invitation's endpoint seeded into the
+       * configuration this acceptance writes, named on the consent surface;
+       * absent when it writes none or keeps an existing configuration.
+       */
+      endpointDirectories?: EndpointDirectories;
       dataSpec: ResolvedDataSpec;
     }
 );
@@ -728,12 +736,16 @@ export async function validateAccept(params: {
     };
   }
 
+  const endpointDirectories = reuseExistingConfig
+    ? undefined
+    : endpointDirectoriesOf(connection);
   return {
     mode: "offline",
     token,
     accepted,
     connection,
     seeded,
+    ...(endpointDirectories !== undefined ? { endpointDirectories } : {}),
     dataSpec,
     reuseExistingConfig,
     existingOutputShares,
@@ -1148,7 +1160,12 @@ export async function handler(argv: Arguments): Promise<void> {
       const runsExchangeThrough =
         ready.mode === "endpointRun" ? ready.brokerAuthority : undefined;
       const endpointDirectories =
-        ready.mode === "online" ? ready.endpointDirectories : undefined;
+        ready.mode !== "endpointRun" && ready.endpointDirectories !== undefined
+          ? {
+              directories: ready.endpointDirectories,
+              runsExchange: ready.mode === "online",
+            }
+          : undefined;
       // Rendered through a sink that knows whether the prompt below will run: when
       // it will, the terms reach the terminal it asks on even when the operator
       // routed diagnostics to a --log-file or above info, so consent is never asked

@@ -1413,6 +1413,18 @@ test("connectionFromEndpoint: throws on a filedrop endpoint naming no directory"
 
 // --- applyEndpointSplitDirectories (online accept merge) ---------------------
 
+test("applyEndpointSplitDirectories: throws on an endpoint naming only one directory", () => {
+  // The endpoint schema rejects a half pair, but both halves are optional in
+  // the type, so a caller that bypasses decode can construct one.
+  const urlConnection = connectionFromURL(new URL("sftp://host/drop"), {});
+  expect(() =>
+    applyEndpointSplitDirectories(urlConnection, {
+      channel: "filedrop",
+      inboundPath: "/mnt/inviter-in",
+    }),
+  ).toThrow(/names only one of inbound_path and outbound_path/);
+});
+
 test("applyEndpointSplitDirectories: grafts a split sftp endpoint onto the URL connection, keeping host/credentials", () => {
   // The acceptor's URL holds the reachable host + credentials; the endpoint
   // holds the inviter's split pair. The merged connection reaches the host the
