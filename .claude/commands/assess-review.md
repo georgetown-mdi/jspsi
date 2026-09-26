@@ -66,6 +66,17 @@ Start with the whole, not the parts:
   and so is an out-of-claim `finding` of severity critical or major -- the role
   round's gate ignores those by design, the trajectory does not.
 
+- **Yield.** A round that fixed nothing -- every disposition you write for it
+  in Step 3 is `limit`, `deferred`, or `narrowed`, or it raised nothing -- ends
+  the branch's review sequence when the next round would be round 3 or later.
+  Order no further round then: the next `/light-review` call is refused by
+  `require-clean-tree-for-review.mjs` unless the owner raises the cap
+  (`--owner-cap-raise`), and a branch's first role round alone is exempt. When
+  you ask the owner for that raise, or for a raise of a spent budget, state with
+  the ask the size-keyed default recommendation light-review.md's Step 1 gives
+  for the branch's changed lines -- advisory, with thresholds measured on the
+  2026-08-31 to 2026-09-25 rounds and re-fit at each retro.
+
 On a branch whose ledger holds no prior row, skip the trajectory read:
 triggers 1-3 and 7 each compare against a previous round, so with nothing
 before this round check only triggers 4-6.
@@ -332,6 +343,19 @@ passes, which is why a single executable line inside the branch's own diff sends
 the head to a full round. The whole argument, the markdown exclusion it inherits
 and the `docs/spec/` conflict that exclusion leaves unread:
 [`docs/notes/rebase-reattestation.md`](../../docs/notes/rebase-reattestation.md).
+
+When origin/staging has moved under a branch, bring the branch forward by
+REBASING and re-attest it by the rebase path above, not by a base sync: the
+rebase-invariance verification costs no round, and a base sync costs a full
+standing-contract role round. A round runs after such a rebase only when that
+verifier refuses the move, and it is then the standing-contract round described
+below, run at the rebased head. Record the verification in the branch's ledger:
+add to its last row, in place like the dispositions, a `reattested` array entry
+`{"route": "rebase-invariance", "from": "<pre-rebase head sha>", "to": "<post-rebase head sha>", "date": "<date -I>"}`.
+It is not a round and counts against no budget. The round gate cannot tell a
+refused rebase's round from any other -- the Workflow call names a ref, not the
+reason for the round -- so this route is held here, by the session, and the
+ledger entry is its record.
 
 A head moved by a BASE SYNC -- a merge commit whose first parent is the attested
 sha and whose second parent is on origin/staging -- is outside every path above.

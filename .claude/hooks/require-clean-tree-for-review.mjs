@@ -29,6 +29,14 @@
 // ref by the same transform light-review's Step 1 applies to name the round's
 // artifacts, so the key locked here is the key that round's bookkeeping deletes.
 //
+// THE ROUND-YIELD RULE. A light-review target is also held to its rounds ledger
+// (`<key>.jsonl` beside the lock): round 3 or later does not start after a
+// round that fixed nothing unless the Workflow args carry the owner's
+// `ownerCapRaise: true`, and a branch's first role round is exempt. The rule and
+// its size advice live in lib/reviewRoundPolicy.mjs. It is checked here, before
+// any lock is written, because a refusal from a sibling hook would leave this
+// hook's lock behind to refuse the owner's re-run.
+//
 // FAIL CLOSED, the OPPOSITE default from block-protected-push.mjs, which fails
 // open because GitHub branch protection catches a push it misses. Nothing catches
 // a false clean, so every state where a target cannot be CONFIRMED clean exits 2:
@@ -72,12 +80,14 @@ import {
   readEvent,
   workflowArgs,
 } from "./lib/event.mjs";
+import { parseLedger, roundRefusal } from "./lib/reviewRoundPolicy.mjs";
 import { git } from "./lib/shell.mjs";
 import { worktreeRecords } from "./lib/worktrees.mjs";
 
 const DIRTY_ENTRIES_SHOWN = 10;
 const ROUNDS_DIR = join("scratch", "review-rounds");
 const LOCK_SUFFIX = ".lock";
+const LEDGER_SUFFIX = ".jsonl";
 const ROUND_LOCK_TTL_MS = 90 * 60 * 1000;
 const LIGHT_REVIEW_MARKER = "light-review";
 const UNCONFIRMED = "could not confirm a clean tree; commit and retry";
@@ -180,6 +190,52 @@ function removeLock(path) {
     // A lock that cannot be removed expires on its TTL, which is the same
     // outcome the roll-back is avoiding, only slower.
   }
+}
+
+// The branch's changed lines against origin/staging, for the refusal's size
+// advice; null when git cannot measure them.
+function changedLines(root, sha) {
+  const stat = git([
+    "-C",
+    root,
+    "diff",
+    "--shortstat",
+    `origin/staging...${sha}`,
+  ]);
+  if (stat === null) return null;
+  const count = (noun) =>
+    Number(stat.match(new RegExp(`(\\d+) ${noun}`))?.[1] ?? 0);
+  return count("insertion") + count("deletion");
+}
+
+// Why the branch's rounds ledger refuses this round, or null when it admits it.
+// A ledger that exists but cannot be read refuses rather than reading as empty,
+// which would admit every round; the owner's raise passes either way.
+function ledgerRefusal(root, mainRoot, ref, sha, args) {
+  const ownerCapRaise = args.ownerCapRaise === true;
+  const path = join(mainRoot, ROUNDS_DIR, `${refKey(ref)}${LEDGER_SUFFIX}`);
+  let rows;
+  try {
+    rows = parseLedger(readFileSync(path, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT" || ownerCapRaise) return null;
+    return (
+      `could not read the rounds ledger '${path}' (${error.message}), so whether ` +
+      `it admits another round against '${ref}' is unconfirmed; fix the ledger, or ` +
+      "re-run with ownerCapRaise: true in the Workflow args on the owner's word"
+    );
+  }
+  const role =
+    typeof args.role === "string" && args.role.trim().length > 0
+      ? args.role
+      : null;
+  return roundRefusal({
+    ref,
+    rows,
+    role,
+    ownerCapRaise,
+    changedLines: changedLines(root, sha),
+  });
 }
 
 function describeMinutes(ms) {
@@ -298,6 +354,8 @@ function main() {
           `after ${describeMinutes(ROUND_LOCK_TTL_MS)})`,
       );
     }
+    const refusal = ledgerRefusal(root, mainRoot, ref, sha, args);
+    if (refusal !== null) block(refusal);
     locks.push({ path, ref });
   }
 
