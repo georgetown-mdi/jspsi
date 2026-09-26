@@ -241,14 +241,16 @@ revoke-exchange.sh <exchange-id>
   exchange mapping it, or mapped without being listed, and a key the table
   maps is mapped to the row's own exchange. If the import fails, the file is
   kept unchanged and `install.sh` stops. If the import lands but the table
-  does not account for a row, the file is kept and `install.sh` warns, naming
-  the exchange ids; remove a key listed with no exchange mapping it with
-  `forget-key`, delete from the file a row whose key another exchange holds
-  (a key maps to one exchange only; register that exchange again with a key
-  of its own if it is still in use), and run `install.sh` again. An
-  `exchange-keys.imported` an earlier install set aside is checked the same
-  way and deleted, never imported again, so an exchange revoked since stays
-  revoked.
+  does not account for a row, the file is moved to `exchange-keys.imported`
+  and `install.sh` warns, naming the exchange ids; remove a key listed with
+  no exchange mapping it with `forget-key`, delete from
+  `exchange-keys.imported` a row whose key another exchange holds (a key maps
+  to one exchange only; register that exchange again with a key of its own
+  if it is still in use), and run `install.sh` again. A file is imported
+  once only: every later run checks `exchange-keys.imported` the same way,
+  never imports it again, and deletes it once the table accounts for it, so
+  an exchange revoked or swept since stays revoked, and a row removed from
+  the file is not carried in.
 - **How they reach the table.** `relay_table.py`, on the host's own `python3`
   and its `sqlite3` module, opens `/var/lib/alcove-relay/turndb` as the relay
   image's account -- a script run as root drops to the account that owns the
@@ -383,8 +385,11 @@ journal entry that journald stamps with podman's command line, and where
 the container's output there too. Measured on Fedora 42: a key on a `podman
 run` command line reached the journal on every run, and a credential on
 `turnutils_uclient`'s did the same. Nothing here puts a key on a container's
-command line -- `relay_table.py` runs no container, which
-`scripts/relay-exchange-keys.test.mjs` checks -- and `verify.sh` passes
+command line -- `relay_table.py` runs no container:
+`scripts/relay-exchange-keys.test.mjs` checks that its import statements name
+exactly the modules it uses today, that it reads only the names it uses today
+off `os`, and that it holds no dynamic import, though not code a string builds
+and `eval` runs -- and `verify.sh` passes
 podman's global `--events-backend=none` to every `turnutils_uclient` run. A run
 by hand whose command line or output carries a key or a credential takes the
 same flags, `podman --events-backend=none run --log-driver=none ...`, which

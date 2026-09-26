@@ -165,12 +165,18 @@ conn.commit()`,
       runWith({}, "register-exchange.sh", args, input),
     revoke: (id) => runWith({}, "revoke-exchange.sh", [id]),
     sweep: () => runWith({}, "sweep-exchanges.sh", []),
-    importLegacy: (mapFile) =>
-      runWith(
+    // Every run of the import is held to printing no key, on any path.
+    importLegacy: (mapFile) => {
+      const result = runWith(
         { ALCOVE_RELAY_LEGACY_MAPPING: mapFile },
         "import-legacy-mapping.sh",
         [],
-      ),
+      );
+      for (const stream of [result.stdout, result.stderr]) {
+        expect(stream).not.toMatch(HEX64);
+      }
+      return result;
+    },
     render: () => runWith({}, "render-config.sh", []),
     // No listener answers on the connect target, so the network probes fail
     // at once and the run reaches the secrets-table steps and its cleanup.
@@ -842,9 +848,6 @@ describe.skipIf(runningAsRoot)("import-legacy-mapping.sh", () => {
       expect(result.stdout).not.toContain("deleted");
       expect(readFileSync(mapFile, "utf8")).toBe(text);
       expect(existsSync(lock)).toBe(true);
-      for (const stream of [result.stdout, result.stderr]) {
-        expect(stream).not.toMatch(HEX64);
-      }
     },
   );
 
@@ -872,12 +875,10 @@ describe.skipIf(runningAsRoot)("import-legacy-mapping.sh", () => {
         `${mapFile} (exchange id(s): alcove-verify-a)`,
     );
     expect(result.stderr).toContain("forget-key");
-    expect(result.stderr).toContain(`kept ${mapFile}, unchanged`);
-    expect(readFileSync(mapFile, "utf8")).toBe(text);
+    expect(result.stderr).toContain(`moved ${mapFile} to ${mapFile}.imported`);
+    expect(existsSync(mapFile)).toBe(false);
+    expect(readFileSync(`${mapFile}.imported`, "utf8")).toBe(text);
     expect(host.mapping().map(({ id }) => id)).toEqual(["old-1"]);
-    for (const stream of [result.stdout, result.stderr]) {
-      expect(stream).not.toMatch(HEX64);
-    }
   });
 
   it("deletes a mapping an earlier install set aside, without importing it again", () => {
@@ -912,19 +913,18 @@ describe.skipIf(runningAsRoot)("import-legacy-mapping.sh", () => {
     const host = fixtureHost();
     const text = `dup-1 ${KEY_A}\ndup-2 ${KEY_A}\n`;
     const mapFile = legacyFile(host, "exchange-keys", text);
+    const setAside = `${mapFile}.imported`;
     const imported = host.importLegacy(mapFile);
     expect(imported.status).toBe(4);
     expect(imported.stderr).toContain(
       "does not account for 1 row(s) of " +
         `${mapFile} (exchange id(s): dup-2)`,
     );
-    expect(imported.stderr).toContain(`kept ${mapFile}, unchanged`);
-    expect(readFileSync(mapFile, "utf8")).toBe(text);
+    expect(imported.stderr).toContain(`moved ${mapFile} to ${setAside}`);
+    expect(existsSync(mapFile)).toBe(false);
+    expect(readFileSync(setAside, "utf8")).toBe(text);
     expect(host.mapping().map(({ id }) => id)).toEqual(["dup-1"]);
-    // The same file set aside is checked, not imported, and still kept.
-    const setAside = `${mapFile}.imported`;
-    writeFileSync(setAside, text);
-    rmSync(mapFile);
+    // The next run checks the set-aside file rather than importing it.
     const checked = host.importLegacy(mapFile);
     expect(checked.status).toBe(4);
     expect(checked.stderr).toContain(
@@ -932,29 +932,106 @@ describe.skipIf(runningAsRoot)("import-legacy-mapping.sh", () => {
         `${setAside} (exchange id(s): dup-2)`,
     );
     expect(readFileSync(setAside, "utf8")).toBe(text);
-    for (const result of [imported, checked]) {
-      for (const stream of [result.stdout, result.stderr]) {
-        expect(stream).not.toMatch(HEX64);
-      }
-    }
+    // With the disagreeing row deleted from the file, the check passes.
+    writeFileSync(setAside, `dup-1 ${KEY_A}\n`);
+    const fixed = host.importLegacy(mapFile);
+    expect(fixed.status, fixed.stderr).toBe(0);
+    expect(existsSync(setAside)).toBe(false);
+    expect(host.mapping().map(({ id }) => id)).toEqual(["dup-1"]);
+  });
+
+  it("never imports a file again once its import has landed", () => {
+    const host = fixtureHost();
+    const mapFile = legacyFile(
+      host,
+      "exchange-keys",
+      `old-1 ${KEY_A}\nold-2 ${KEY_B}\ndup-2 ${KEY_B}\n`,
+    );
+    const imported = host.importLegacy(mapFile);
+    expect(imported.status).toBe(4);
+    expect(host.mapping().map(({ id }) => id)).toEqual(["old-1", "old-2"]);
+    expect(host.revoke("old-2").status).toBe(0);
+    const again = host.importLegacy(mapFile);
+    expect(again.status, again.stderr).toBe(0);
+    expect(again.stdout).not.toMatch(/^imported /m);
+    expect(again.stdout).toContain(`deleted ${mapFile}.imported`);
+    // old-2 was revoked after the import; it stays revoked and unlisted.
+    expect(host.mapping().map(({ id }) => id)).toEqual(["old-1"]);
+    expect(host.rows()).toEqual([listed(KEY_LISTED), listed(KEY_A)].sort());
+  });
+
+  it("appends a landed file to a set-aside copy already there", () => {
+    const host = fixtureHost();
+    host.register("old-1", KEY_A);
+    const setAside = legacyFile(
+      host,
+      "exchange-keys.imported",
+      `old-1 ${KEY_A}`,
+    );
+    const mapFile = legacyFile(
+      host,
+      "exchange-keys",
+      `dup-1 ${KEY_B}\ndup-2 ${KEY_B}\n`,
+    );
+    const result = host.importLegacy(mapFile);
+    expect(result.status).toBe(4);
+    expect(existsSync(mapFile)).toBe(false);
+    expect(readFileSync(setAside, "utf8")).toBe(
+      `old-1 ${KEY_A}\ndup-1 ${KEY_B}\ndup-2 ${KEY_B}\n`,
+    );
   });
 });
 
 describe("relay_table.py", () => {
   // The relay README states the module runs no container and so never puts a
-  // key on a command line; this holds that to the module's own text.
-  it("imports and calls nothing that starts a process", () => {
-    const source = readFileSync(join(relay, "relay_table.py"), "utf8");
-    for (const pattern of [
-      /^\s*(import|from)\s+(subprocess|pty|shlex)\b/m,
-      /^\s*import\s+[\w.]+\s*,.*\b(subprocess|pty|shlex)\b/m,
-      /^\s*from\s+os\s+import\b/m,
-      /\b(subprocess|pty|shlex)\s*\./,
-      /\bos\s*\.\s*(system|popen|exec\w*|spawn\w*|fork\w*|posix_spawn\w*)\b/,
-      /\b(__import__|importlib)\b/,
-    ]) {
-      expect(source).not.toMatch(pattern);
-    }
+  // key on a command line. Python's own parser lists every import statement
+  // in the module, at any depth, and the set must be exactly the modules it
+  // uses today; of those only os can start a process, so the names read off
+  // os must be exactly the ones it uses today, and os must never be used
+  // other than by reading a name off it. The dynamic-import idioms (getattr
+  // on os, __import__, importlib) must not appear at all. Code built from a
+  // string and run through eval or exec is outside this check.
+  it("imports only modules that start no process", () => {
+    const path = join(relay, "relay_table.py");
+    const imported = python(
+      `import ast, json, sys
+tree = ast.parse(open(sys.argv[1], encoding="utf-8").read())
+modules, os_names, os_bare = set(), set(), 0
+for node in ast.walk(tree):
+    if isinstance(node, ast.Import):
+        modules.update(alias.name for alias in node.names)
+    elif isinstance(node, ast.ImportFrom):
+        modules.add("." * node.level + (node.module or ""))
+    elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "os":
+        os_names.add(node.attr)
+        os_bare -= 1
+    if isinstance(node, ast.Name) and node.id == "os":
+        os_bare += 1
+print(json.dumps({"modules": sorted(modules), "os": sorted(os_names), "osBare": os_bare}))`,
+      [path],
+    );
+    expect(imported.osBare).toBe(0);
+    expect(imported.os).toEqual([
+      "environ",
+      "geteuid",
+      "path",
+      "setgid",
+      "setgroups",
+      "setuid",
+      "stat",
+    ]);
+    expect(imported.modules).toEqual([
+      "datetime",
+      "os",
+      "re",
+      "sqlite3",
+      "sys",
+      "time",
+      "urllib.parse",
+    ]);
+    const source = readFileSync(path, "utf8");
+    expect(source).not.toMatch(/\bgetattr\s*\(\s*os\b/);
+    expect(source).not.toMatch(/__import__|\bimportlib\b/);
   });
 });
 
