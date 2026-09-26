@@ -12,15 +12,22 @@ import {
 import {
   binaryPackByteStringLength,
   minimumPsiSetFrameBytes,
+  ROUND_ONE_SET_UNCOUNTED_MESSAGE,
   webrtcFrameReceiveCharge,
 } from "../../src/connection/webrtcOutboundBound";
-import { PeerAbortError, WebRtcFrameLimitError } from "../../src/errors";
+import {
+  PeerAbortError,
+  UsageError,
+  WebRtcFrameLimitError,
+} from "../../src/errors";
 import {
   assertFirstRoundFitsWebRtcFrame,
   prepareForExchange,
 } from "../../src/exchange";
 import {
   fanOutReachedMatchingRefusal,
+  StandardizedDataset,
+  StandardizedField,
   StandardizedKeyIterable,
 } from "../../src/standardization";
 import { getLogger } from "../../src/utils/logger";
@@ -28,6 +35,7 @@ import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
 import type { MessageConnection } from "../../src/connection/messageConnection";
 import type { LinkageStrategy } from "../../src/config/linkageTermsSchema";
+import type { CSVRow } from "../../src/file";
 
 // The sender-side half of the WebRTC frame bound: a party refuses a set frame
 // the partner's receive path would refuse, before it goes on the wire. The
@@ -339,6 +347,68 @@ test("the first-round check raises the fan-out refusal for a candidate set a cou
   );
 });
 
+/**
+ * `prepared` reading its one field from `rowCount` rows, each of which throws
+ * `failure` when read.
+ */
+function withThrowingRows(
+  prepared: ReturnType<typeof preparedWith>,
+  rowCount: number,
+  failure: Error,
+) {
+  const rows = new Proxy<Array<CSVRow>>([], {
+    get: (target, prop, receiver) => {
+      if (prop === "length") return rowCount;
+      if (typeof prop === "string" && /^[0-9]+$/.test(prop)) throw failure;
+      return Reflect.get(target, prop, receiver) as unknown;
+    },
+  });
+  const field = new StandardizedField("firstName", "first_name", [], rows);
+  return {
+    ...prepared,
+    dataset: new StandardizedDataset(
+      [field],
+      prepared.linkageTerms.linkageKeys,
+    ),
+    rowCount,
+  };
+}
+
+test("the first-round check refuses, with the failure as its cause, when the count throws", () => {
+  const rowCount = 50;
+  const prepared = preparedWith(
+    Array.from({ length: rowCount }, (_unused, i) => letters(i)),
+  );
+  const failure = new RangeError("Map maximum size exceeded");
+  let refusal: unknown;
+  try {
+    assertFirstRoundFitsWebRtcFrame(
+      withThrowingRows(prepared, rowCount, failure),
+      100,
+    );
+  } catch (err) {
+    refusal = err;
+  }
+  expect(refusal).toBeInstanceOf(WebRtcFrameLimitError);
+  expect((refusal as WebRtcFrameLimitError).setOwner).toBe("local");
+  expect((refusal as Error).message).toBe(ROUND_ONE_SET_UNCOUNTED_MESSAGE);
+  expect((refusal as Error).cause).toBe(failure);
+});
+
+test("the first-round check raises a refusal the count throws in both roles as it is", () => {
+  const rowCount = 50;
+  const prepared = preparedWith(
+    Array.from({ length: rowCount }, (_unused, i) => letters(i)),
+  );
+  const refusal = new UsageError("a refusal the round would raise");
+  expect(() =>
+    assertFirstRoundFitsWebRtcFrame(
+      withThrowingRows(prepared, rowCount, refusal),
+      100,
+    ),
+  ).toThrow(refusal);
+});
+
 afterEach(() => vi.restoreAllMocks());
 
 test("the first-round check reports no row, so each row's warning comes once, from the round", () => {
@@ -414,4 +484,38 @@ test("the first-round check reports no row, so each row's warning comes once, fr
   expect(lines).toHaveLength(2);
   expect(lines[0]).toMatch(/^row 0, key "names": .*contributes no value/);
   expect(lines[1]).toMatch(/^row 1, key "names": cross-product produced 21 /);
+});
+
+test("the first-round check refuses, with the failure as its cause, when the receiver-role count throws", () => {
+  const rowCount = 50;
+  const prepared = preparedWith(
+    Array.from({ length: rowCount }, (_unused, i) => letters(i)),
+  );
+  // The field cache holds each row once read, so the receiver-role pass fails
+  // at its collection of the key's values instead of at a row.
+  const failure = new RangeError("Invalid array length");
+  const arrayFrom = Array.from.bind(Array);
+  let keyPasses = 0;
+  vi.spyOn(Array, "from").mockImplementation(((
+    source: Iterable<unknown> | ArrayLike<unknown>,
+    ...rest: Array<unknown>
+  ) => {
+    if (source instanceof StandardizedKeyIterable && ++keyPasses === 2)
+      throw failure;
+    return (arrayFrom as (...args: Array<unknown>) => Array<unknown>)(
+      source,
+      ...rest,
+    );
+  }) as typeof Array.from);
+  let refusal: unknown;
+  try {
+    assertFirstRoundFitsWebRtcFrame(prepared, 100);
+  } catch (err) {
+    refusal = err;
+  }
+  expect(keyPasses).toBe(2);
+  expect(refusal).toBeInstanceOf(WebRtcFrameLimitError);
+  expect((refusal as WebRtcFrameLimitError).setOwner).toBe("local");
+  expect((refusal as Error).message).toBe(ROUND_ONE_SET_UNCOUNTED_MESSAGE);
+  expect((refusal as Error).cause).toBe(failure);
 });

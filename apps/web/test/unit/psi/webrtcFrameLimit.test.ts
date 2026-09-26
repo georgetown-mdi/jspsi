@@ -13,6 +13,7 @@ import {
   WebRtcFrameLimitError,
 } from "@alcove/core";
 import {
+  ROUND_ONE_SET_UNCOUNTED_MESSAGE,
   binaryPackByteStringLength,
   webrtcFrameReceiveCharge,
 } from "@alcove/core/testing";
@@ -144,4 +145,19 @@ test("the refusal is shown as its own alert, with no retry", () => {
   expect(partner.title).toBe(
     "Your partner's file is too large for a browser exchange",
   );
+});
+
+test("a first round the check cannot count is shown as its own alert, with no retry", () => {
+  const failure = failureFor(
+    "exchange",
+    new WebRtcFrameLimitError(ROUND_ONE_SET_UNCOUNTED_MESSAGE, "local", {
+      cause: new RangeError("Map maximum size exceeded"),
+    }),
+  );
+  expect(failure.category).toBe("config");
+  expect(failure.title).toBe("Your file is too large for a browser exchange");
+  expect(failure.message).toContain(ROUND_ONE_SET_UNCOUNTED_MESSAGE);
+  expect(failure.message).toContain("Map maximum size exceeded");
+  expect(failure.message).not.toMatch(/try again|temporary/i);
+  expect(failure.reportedCause).toBeUndefined();
 });
