@@ -668,7 +668,8 @@ interface SharedOptions {
    * 3600000. Must be a positive integer: it is the per-await peer-inactivity
    * liveness budget, so a zero value would fire every transport await
    * immediately and disable the liveness control. The effective limit is the
-   * minimum of this and the remaining shared-secret lifetime.
+   * minimum of this and the remaining shared-secret lifetime. At most
+   * {@link MAX_TIMEOUT_SECONDS} seconds.
    */
   peerTimeoutMs?: number;
   /**
@@ -740,8 +741,14 @@ const sharedOptionsFields = {
   // positive, not nonnegative: peerTimeoutMs is the per-await liveness budget,
   // so a zero would fire every transport await immediately and disable the
   // liveness control (the CLI's --peer-timeout already rejects zero; this closes
-  // the same hole on the config/programmatic path).
-  peerTimeoutMs: z.int().positive().optional(),
+  // the same hole on the config/programmatic path). Capped at the
+  // --peer-timeout flag's ceiling, which also keeps it inside the 2^31-1 ms a
+  // Node timer accepts before it clamps the delay to 1 ms.
+  peerTimeoutMs: z
+    .int()
+    .positive()
+    .max(MAX_TIMEOUT_SECONDS * 1000)
+    .optional(),
   // positive for the same reason: zero disables the filedrop connect probe and
   // ssh2's readyTimeout (armed only when > 0); --connection-timeout already
   // rejects zero. Defaulted (not just optional) so an unset value resolves to

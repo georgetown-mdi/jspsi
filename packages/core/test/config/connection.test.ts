@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
 import {
   MAX_RECONNECT_ATTEMPTS,
   MAX_RELAY_LOCATOR_URL_LENGTH,
+  MAX_TIMEOUT_SECONDS,
   SHARED_SECRET_REGEX,
   StunUrlSchema,
   TurnUrlSchema,
@@ -492,6 +493,22 @@ test("max_reconnect_attempts above the ceiling is rejected", () => {
     options: { max_reconnect_attempts: MAX_RECONNECT_ATTEMPTS + 1 },
   });
   expect(result.success).toBe(false);
+});
+
+test("peer_timeout_ms is capped at the --peer-timeout ceiling", () => {
+  const ceiling = MAX_TIMEOUT_SECONDS * 1000;
+  const at = safeParseConnectionConfig({
+    ...sftpBase,
+    options: { peer_timeout_ms: ceiling },
+  });
+  expect(at.success).toBe(true);
+  for (const over of [ceiling + 1, 2 ** 31]) {
+    const result = safeParseConnectionConfig({
+      ...sftpBase,
+      options: { peer_timeout_ms: over },
+    });
+    expect(result.success).toBe(false);
+  }
 });
 
 test("a positive peer_timeout_ms is still accepted", () => {
