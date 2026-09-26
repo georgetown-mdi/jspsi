@@ -397,6 +397,32 @@ describe("parseManagedExchangeRecord reader-rejects-unknown", () => {
     expect(parseManagedExchangeRecord(legacy).lastRun).toEqual(legacy.lastRun);
   });
 
+  test("reads back whose set a too-large refusal found over the bound", () => {
+    for (const tooLargeSetOwner of ["local", "partner"] as const) {
+      const lastRun: ManagedExchangeLastRun = {
+        at: "2026-07-14T09:00:00.000Z",
+        outcome: "failed",
+        failureKind: "too-large",
+        tooLargeSetOwner,
+      };
+      const record = buildManagedExchangeRecord(newExchange({ lastRun }));
+      expect(parseManagedExchangeRecord(record).lastRun).toEqual(lastRun);
+    }
+  });
+
+  test("rejects a set owner it does not recognize", () => {
+    const future = {
+      ...buildManagedExchangeRecord(newExchange()),
+      lastRun: {
+        at: "2026-07-14T09:00:00.000Z",
+        outcome: "failed",
+        failureKind: "too-large",
+        tooLargeSetOwner: "both",
+      },
+    };
+    expect(safeParseManagedExchangeRecord(future).success).toBe(false);
+  });
+
   test("rejects a failure kind it does not recognize rather than dropping it", () => {
     // The reader-rejects-unknown rule's converse: a kind a later build added is
     // refused whole and loudly, never read with the kind silently absent.

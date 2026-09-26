@@ -356,6 +356,73 @@ describe("betweenVisitNotice: the failures that need the operator", () => {
     ).not.toBe(tagFor(failed("terms-shortfall")));
   });
 
+  test("a too-large refusal of your own set names splitting your input", () => {
+    const lastRun: ManagedExchangeLastRun = {
+      ...failed("too-large"),
+      tooLargeSetOwner: "local",
+    };
+    const notice = betweenVisitNotice({
+      record: record({ lastRun }),
+      local: undefined,
+      caughtUpMisses: 0,
+      disposition: "failed",
+      now: NOW,
+    });
+    const alert = managedRunTierFailure("too-large", record({ lastRun }));
+    if (!("title" in alert)) throw new Error("expected the too-large alert");
+
+    expect(notice?.kind).toBe("too-large");
+    expect(notice?.title).toBe(alert.title);
+    expect(notice?.body).toContain("built from your input file");
+    expect(notice?.body).toContain(
+      "Split your input into smaller files and set up one exchange for each.",
+    );
+    expect(notice?.body).not.toMatch(/partner/i);
+  });
+
+  test("a too-large refusal of the partner's set names asking the partner", () => {
+    const lastRun: ManagedExchangeLastRun = {
+      ...failed("too-large"),
+      tooLargeSetOwner: "partner",
+    };
+    const notice = betweenVisitNotice({
+      record: record({ lastRun }),
+      local: undefined,
+      caughtUpMisses: 0,
+      disposition: "failed",
+      now: NOW,
+    });
+    const alert = managedRunTierFailure("too-large", record({ lastRun }));
+    if (!("title" in alert)) throw new Error("expected the too-large alert");
+
+    expect(notice?.kind).toBe("too-large");
+    expect(notice?.title).toBe(alert.title);
+    expect(notice?.body).toContain("built from your partner's input file");
+    expect(notice?.body).toContain(
+      "Ask your partner to split their input into smaller files",
+    );
+    expect(notice?.body).not.toMatch(/split your input/i);
+  });
+
+  test("a too-large refusal fires its own notice for each side", () => {
+    const tagFor = (lastRun: ManagedExchangeLastRun) =>
+      betweenVisitNotice({
+        record: record({ lastRun }),
+        local: undefined,
+        caughtUpMisses: 0,
+        disposition: "failed",
+        now: NOW,
+      })?.tag;
+
+    const local = tagFor({ ...failed("too-large"), tooLargeSetOwner: "local" });
+    const partner = tagFor({
+      ...failed("too-large"),
+      tooLargeSetOwner: "partner",
+    });
+    expect(local).not.toBe(partner);
+    expect(local).not.toBe(tagFor(failed("too-large")));
+  });
+
   test("a failure a restore explains stays as quiet as it is in the app", () => {
     expect(
       betweenVisitNotice({

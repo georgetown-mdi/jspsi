@@ -147,6 +147,46 @@ describe("savedExchangeRow", () => {
     expect(row.status).not.toMatch(/did not complete|attack|tamper|desync/i);
   });
 
+  test("a too-large run over this party's set names its own file and remedy", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: {
+          at: "2026-07-10T09:00:00.000Z",
+          outcome: "failed",
+          failureKind: "too-large",
+          tooLargeSetOwner: "local",
+        },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(
+      /your file is too large for a browser exchange/i,
+    );
+    expect(row.status).toMatch(/; split your input$/);
+    expect(row.status).not.toMatch(/partner/i);
+  });
+
+  test("a too-large run over the partner's set asks the partner to split theirs", () => {
+    const row = savedExchangeRow(
+      record({
+        lastRun: {
+          at: "2026-07-10T09:00:00.000Z",
+          outcome: "failed",
+          failureKind: "too-large",
+          tooLargeSetOwner: "partner",
+        },
+      }),
+      undefined,
+      NOW,
+    );
+    expect(row.status).toMatch(
+      /your partner's file is too large for a browser exchange/i,
+    );
+    expect(row.status).toMatch(/; ask your partner to split theirs$/);
+    expect(row.status).not.toMatch(/split your input|split the input/i);
+  });
+
   test("a linkage shortfall displays as its own quiet line, not the input file's", () => {
     const row = savedExchangeRow(
       record({
